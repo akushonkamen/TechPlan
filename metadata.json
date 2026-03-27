@@ -1,0 +1,5 @@
+{
+  "name": "TechPlan - 技术情报与推理平台",
+  "description": "面向技术规划与技术研判工作，支持定期采集、按需分析、知识图谱沉淀、决策建议生成的一体化系统。",
+  "requestFramePermissions": []
+}
