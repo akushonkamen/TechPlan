@@ -1109,6 +1109,308 @@ async function startServer() {
     }
   });
 
+  // ===== 图数据库 API =====
+
+  // Import graph service
+  const { getGraphService } = await import('./src/services/graphService.js');
+  const graphService = getGraphService();
+  await graphService.init();
+
+  console.log(`Graph database initialized with backend: ${graphService.getBackendType()}`);
+
+  /**
+   * GET /api/graph/status
+   * 获取图数据库状态
+   */
+  app.get("/api/graph/status", async (req, res) => {
+    try {
+      const syncStatus = await graphService.getSyncStatus();
+      res.json({
+        backend: graphService.getBackendType(),
+        ...syncStatus,
+      });
+    } catch (error) {
+      console.error("Failed to get graph status:", error);
+      res.status(500).json({ error: "Failed to get graph status" });
+    }
+  });
+
+  /**
+   * GET /api/graph/topic/:id
+   * 获取主题图谱（节点和边）
+   */
+  app.get("/api/graph/topic/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const depth = req.query.depth ? parseInt(req.query.depth as string) : 2;
+
+      const subgraph = await graphService.getTopicGraph(id, depth);
+
+      // 转换为前端可用的格式
+      const nodes = subgraph.nodes.map(n => ({
+        id: n.id,
+        label: n.properties.name || n.properties.title || n.id,
+        type: n.label.toLowerCase(),
+        properties: n.properties,
+      }));
+
+      const links = subgraph.relationships.map(r => ({
+        id: r.id,
+        source: r.from,
+        target: r.to,
+        label: r.type,
+        properties: r.properties || {},
+      }));
+
+      res.json({ nodes, links });
+    } catch (error) {
+      console.error("Failed to get topic graph:", error);
+      res.status(500).json({ error: "Failed to get topic graph" });
+    }
+  });
+
+  /**
+   * GET /api/graph/entity/:id
+   * 获取实体详情和邻域
+   */
+  app.get("/api/graph/entity/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const neighborhood = await graphService.getEntityNeighborhood(id);
+
+      if (!neighborhood) {
+        return res.status(404).json({ error: "Entity not found" });
+      }
+
+      // 转换为前端可用的格式
+      const nodes = [
+        {
+          id: neighborhood.entity.id,
+          label: neighborhood.entity.properties.name || neighborhood.entity.id,
+          type: neighborhood.entity.label.toLowerCase(),
+          properties: neighborhood.entity.properties,
+        },
+        ...neighborhood.neighbors.map(n => ({
+          id: n.node.id,
+          label: n.node.properties.name || n.node.properties.title || n.node.id,
+          type: n.node.label.toLowerCase(),
+          properties: n.node.properties,
+        })),
+      ];
+
+      const links = neighborhood.neighbors.map(n => ({
+        id: n.relationship.id,
+        source: n.relationship.from,
+        target: n.relationship.to,
+        label: n.relationship.type,
+        properties: n.relationship.properties || {},
+      }));
+
+      res.json({
+        entity: neighborhood.entity,
+        neighbors: neighborhood.neighbors,
+        graph: { nodes, links },
+      });
+    } catch (error) {
+      console.error("Failed to get entity neighborhood:", error);
+      res.status(500).json({ error: "Failed to get entity neighborhood" });
+    }
+  });
+
+  /**
+   * GET /api/graph/claims/:topicId
+   * 查找主题相关的 Claims
+   */
+  app.get("/api/graph/claims/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const claims = await graphService.findClaimsByTopic(topicId);
+
+      res.json({
+        claims,
+        count: claims.length,
+      });
+    } catch (error) {
+      console.error("Failed to find claims:", error);
+      res.status(500).json({ error: "Failed to find claims" });
+    }
+  });
+
+  /**
+   * GET /api/graph/related/:entityId
+   * 查找相关实体
+   */
+  app.get("/api/graph/related/:entityId", async (req, res) => {
+    try {
+      const { entityId } = req.params;
+      const depth = req.query.depth ? parseInt(req.query.depth as string) : 2;
+
+      const entities = await graphService.findRelatedEntities(entityId, depth);
+
+      res.json({
+        entities,
+        count: entities.length,
+      });
+    } catch (error) {
+      console.error("Failed to find related entities:", error);
+      res.status(500).json({ error: "Failed to find related entities" });
+    }
+  });
+
+  /**
+   * POST /api/graph/sync
+   * 同步 SQLite 数据到图数据库
+   */
+  app.post("/api/graph/sync", async (req, res) => {
+    try {
+      const result = await graphService.syncFromSQLite(db);
+
+      res.json({
+        message: "Sync completed",
+        ...result,
+      });
+    } catch (error) {
+      console.error("Failed to sync data:", error);
+      res.status(500).json({ error: "Failed to sync data" });
+    }
+  });
+
+  /**
+   * POST /api/graph/nodes
+   * 创建新节点
+   */
+  app.post("/api/graph/nodes", async (req, res) => {
+    try {
+      const { label, properties } = req.body;
+
+      if (!label || !properties) {
+        return res.status(400).json({ error: "label and properties are required" });
+      }
+
+      const node = await graphService.createNode(label, properties);
+      res.status(201).json(node);
+    } catch (error) {
+      console.error("Failed to create node:", error);
+      res.status(500).json({ error: "Failed to create node" });
+    }
+  });
+
+  /**
+   * PUT /api/graph/nodes/:id
+   * 更新节点
+   */
+  app.put("/api/graph/nodes/:id", async (req, res) => {
+    try {
+      const { properties } = req.body;
+
+      if (!properties) {
+        return res.status(400).json({ error: "properties are required" });
+      }
+
+      const node = await graphService.updateNode(req.params.id, properties);
+
+      if (!node) {
+        return res.status(404).json({ error: "Node not found" });
+      }
+
+      res.json(node);
+    } catch (error) {
+      console.error("Failed to update node:", error);
+      res.status(500).json({ error: "Failed to update node" });
+    }
+  });
+
+  /**
+   * DELETE /api/graph/nodes/:id
+   * 删除节点
+   */
+  app.delete("/api/graph/nodes/:id", async (req, res) => {
+    try {
+      const deleted = await graphService.deleteNode(req.params.id);
+
+      if (!deleted) {
+        return res.status(404).json({ error: "Node not found" });
+      }
+
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete node:", error);
+      res.status(500).json({ error: "Failed to delete node" });
+    }
+  });
+
+  /**
+   * POST /api/graph/relationships
+   * 创建新关系
+   */
+  app.post("/api/graph/relationships", async (req, res) => {
+    try {
+      const { from, to, type, properties } = req.body;
+
+      if (!from || !to || !type) {
+        return res.status(400).json({ error: "from, to, and type are required" });
+      }
+
+      const relationship = await graphService.createRelationship(
+        from,
+        to,
+        type,
+        properties || {}
+      );
+
+      if (!relationship) {
+        return res.status(404).json({ error: "Source or target node not found" });
+      }
+
+      res.status(201).json(relationship);
+    } catch (error) {
+      console.error("Failed to create relationship:", error);
+      res.status(500).json({ error: "Failed to create relationship" });
+    }
+  });
+
+  /**
+   * GET /api/graph/path
+   * 查找两个节点之间的路径
+   */
+  app.get("/api/graph/path", async (req, res) => {
+    try {
+      const { from, to, maxDepth } = req.query;
+
+      if (!from || !to) {
+        return res.status(400).json({ error: "from and to are required" });
+      }
+
+      const path = await graphService.findPath(
+        from as string,
+        to as string,
+        maxDepth ? parseInt(maxDepth as string) : 4
+      );
+
+      res.json({
+        path,
+        length: path.length,
+      });
+    } catch (error) {
+      console.error("Failed to find path:", error);
+      res.status(500).json({ error: "Failed to find path" });
+    }
+  });
+
+  /**
+   * POST /api/graph/save
+   * 保存当前图状态到磁盘
+   */
+  app.post("/api/graph/save", async (req, res) => {
+    try {
+      await graphService.save();
+      res.json({ message: "Graph data saved successfully" });
+    } catch (error) {
+      console.error("Failed to save graph:", error);
+      res.status(500).json({ error: "Failed to save graph" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
