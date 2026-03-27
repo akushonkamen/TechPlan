@@ -1,6 +1,23 @@
 import { useState, useEffect } from 'react';
-import { Database, Upload, RefreshCw, ExternalLink, FileText, Globe, BookOpen, Loader2 } from 'lucide-react';
+import { Database, Upload, RefreshCw, ExternalLink, FileText, Globe, BookOpen, Loader2, Trash2, FilterX } from 'lucide-react';
 import { fetchRealTimeTechNews, type FetchedDocument } from '../services/agentService';
+import { fetchAllDocuments, saveFetchedDocuments, deleteDocument, type DbDocument } from '../services/documentService';
+
+interface DedupResult {
+  unique: FetchedDocument[];
+  duplicates: Array<{
+    document: FetchedDocument;
+    reason: string;
+    duplicateOf?: FetchedDocument;
+  }>;
+  stats: {
+    original: number;
+    unique: number;
+    removed: number;
+    byUrl: number;
+    byTitleSimilarity: number;
+  };
+}
 
 interface Source {
   id: number;
@@ -39,14 +56,77 @@ function getRelativeTime(date: Date, now: number) {
 export default function DataSources() {
   const [sources, setSources] = useState<Source[]>(initialSources);
   const [recentDocs, setRecentDocs] = useState<FetchedDocument[]>(initialDocs);
+  const [dbDocuments, setDbDocuments] = useState<DbDocument[]>([]);
   const [now, setNow] = useState(Date.now());
   const [isManualSyncing, setIsManualSyncing] = useState(false);
+  const [isLoadingDbDocs, setIsLoadingDbDocs] = useState(false);
+  const [dedupResult, setDedupResult] = useState<DedupResult | null>(null);
+  const [showDedupToast, setShowDedupToast] = useState(false);
 
   // Update 'now' every second to refresh relative times more responsively
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Load documents from database on mount
+  useEffect(() => {
+    loadDbDocuments();
+  }, []);
+
+  const loadDbDocuments = async () => {
+    setIsLoadingDbDocs(true);
+    try {
+      const docs = await fetchAllDocuments();
+      setDbDocuments(docs);
+    } catch (error) {
+      console.error("Failed to load documents from database:", error);
+    } finally {
+      setIsLoadingDbDocs(false);
+    }
+  };
+
+  const handleDeleteDocument = async (id: string) => {
+    if (!confirm('确定要删除此文档吗？')) return;
+    try {
+      await deleteDocument(id);
+      await loadDbDocuments();
+    } catch (error) {
+      console.error("Failed to delete document:", error);
+    }
+  };
+
+  /**
+   * 调用去重 API
+   */
+  const deduplicateDocuments = async (documents: FetchedDocument[]): Promise<FetchedDocument[]> => {
+    try {
+      const response = await fetch('http://localhost:3000/api/documents/dedup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documents, similarityThreshold: 0.85 })
+      });
+
+      if (!response.ok) {
+        console.error('去重请求失败:', response.statusText);
+        return documents;
+      }
+
+      const result: DedupResult = await response.json();
+      setDedupResult(result);
+
+      // 显示去重结果提示
+      if (result.stats.removed > 0) {
+        setShowDedupToast(true);
+        setTimeout(() => setShowDedupToast(false), 5000);
+      }
+
+      return result.unique;
+    } catch (error) {
+      console.error('去重失败:', error);
+      return documents;
+    }
+  };
 
   const handleManualSync = async () => {
     if (isManualSyncing) return;
@@ -68,7 +148,19 @@ export default function DataSources() {
       combinedResults.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
       if (combinedResults.length > 0) {
-        setRecentDocs(combinedResults);
+        // 执行去重
+        const uniqueDocs = await deduplicateDocuments(combinedResults);
+
+        setRecentDocs(uniqueDocs);
+
+        // Save to database (只保存去重后的文档)
+        try {
+          await saveFetchedDocuments(uniqueDocs);
+          // Reload documents from database
+          await loadDbDocuments();
+        } catch (error) {
+          console.error("Failed to save documents to database:", error);
+        }
       }
 
       // Update source counts and timestamps based on real fetched data
@@ -118,6 +210,27 @@ export default function DataSources() {
           </button>
         </div>
       </div>
+
+      {/* 去重结果提示 */}
+      {showDedupToast && dedupResult && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+          <FilterX className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h4 className="font-medium text-blue-900">内容去重完成</h4>
+            <p className="text-sm text-blue-700 mt-1">
+              已从 <span className="font-semibold">{dedupResult.stats.original}</span> 篇文档中去除
+              <span className="font-semibold"> {dedupResult.stats.removed}</span> 篇重复内容
+              （URL重复 {dedupResult.stats.byUrl} 篇，标题相似 {dedupResult.stats.byTitleSimilarity} 篇）
+            </p>
+          </div>
+          <button
+            onClick={() => setShowDedupToast(false)}
+            className="text-blue-400 hover:text-blue-600"
+          >
+            &times;
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {sources.map((source) => (

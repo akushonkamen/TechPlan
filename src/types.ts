@@ -24,6 +24,33 @@ export interface Document {
   trustScore: number;
 }
 
+// Database Document type for persistence
+export interface DbDocument {
+  id: string;
+  title: string;
+  source: string | null;
+  source_url: string | null;
+  published_date: string | null;
+  collected_date: string;
+  content: string | null;
+  topic_id: string | null;
+  metadata: Record<string, any> | null;
+  created_at: string;
+}
+
+// Input type for creating a document
+export interface CreateDocumentInput {
+  id?: string;
+  title: string;
+  source?: string;
+  source_url?: string;
+  published_date?: string;
+  collected_date?: string;
+  content?: string;
+  topic_id?: string;
+  metadata?: Record<string, any>;
+}
+
 export interface Event {
   id: string;
   eventType: string;
