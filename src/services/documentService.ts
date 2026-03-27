@@ -1,5 +1,8 @@
 import type { DbDocument, CreateDocumentInput } from '../types';
 
+// Re-export DbDocument for use in other modules
+export type { DbDocument };
+
 const API_BASE = '/api';
 
 export async function fetchAllDocuments(topicId?: string): Promise<DbDocument[]> {

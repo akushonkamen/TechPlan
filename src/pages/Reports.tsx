@@ -1,40 +1,212 @@
-import { FileText, Download, Calendar, ArrowRight, Play } from 'lucide-react';
-
-const reports = [
-  { id: 1, title: '端侧大模型技术研判专题报告', type: '专题研判', topic: '端侧大模型', date: '2026-03-25', status: 'ready', author: '系统自动生成' },
-  { id: 2, title: '固态电池产业化进展周报 (第12周)', type: '周报', topic: '固态电池', date: '2026-03-22', status: 'ready', author: '系统自动生成' },
-  { id: 3, title: '硅光芯片竞争格局分析', type: '专题研判', topic: '硅光芯片', date: '2026-03-20', status: 'ready', author: '系统自动生成' },
-  { id: 4, title: '脑机接口最新突破与风险提示', type: '预警报告', topic: '脑机接口', date: '2026-03-18', status: 'ready', author: '系统自动生成' },
-];
+import { useState, useEffect } from 'react';
+import { FileText, Download, Calendar, ArrowRight, Play, Loader2, Trash2 } from 'lucide-react';
+import { fetchReports, generateWeeklyReport, saveReport, type GeneratedReport } from '../services/reportService';
+import { fetchTopics } from '../services/topicService';
 
 export default function Reports() {
+  const [reports, setReports] = useState<any[]>([]);
+  const [topics, setTopics] = useState<any[]>([]);
+  const [selectedTopicId, setSelectedTopicId] = useState<string>('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [viewingReport, setViewingReport] = useState<any | null>(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [reportsData, topicsData] = await Promise.all([
+        fetchReports(),
+        fetchTopics()
+      ]);
+      setReports(reportsData);
+      setTopics(topicsData);
+      if (topicsData.length > 0 && !selectedTopicId) {
+        setSelectedTopicId(topicsData[0].id);
+      }
+    } catch (error) {
+      console.error("Failed to load data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGenerateReport = async () => {
+    if (!selectedTopicId || isGenerating) return;
+
+    setIsGenerating(true);
+    try {
+      const topic = topics.find(t => t.id === selectedTopicId);
+      if (!topic) return;
+
+      // 获取该主题的文档
+      const docsResponse = await fetch(`http://localhost:3000/api/documents?topic_id=${selectedTopicId}`);
+      const documents = await docsResponse.json();
+
+      if (documents.length === 0) {
+        alert('该主题暂无采集文档，请先在"数据采集"页面进行采集');
+        return;
+      }
+
+      // 生成报告
+      const report = await generateWeeklyReport({
+        topicId: selectedTopicId,
+        topicName: topic.name,
+        documents
+      });
+
+      // 保存报告
+      await saveReport(report);
+
+      // 刷新报告列表
+      await loadData();
+    } catch (error: any) {
+      console.error("Failed to generate report:", error);
+      alert(`生成报告失败: ${error.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDeleteReport = async (id: string) => {
+    if (!confirm('确定要删除此报告吗？')) return;
+    try {
+      await fetch(`http://localhost:3000/api/reports/${id}`, { method: 'DELETE' });
+      await loadData();
+    } catch (error) {
+      console.error("Failed to delete report:", error);
+    }
+  };
+
+  const handleViewReport = (report: any) => {
+    setViewingReport(report);
+  };
+
+  const getReportTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      'weekly': '周报',
+      'special': '专题研判',
+      'alert': '预警报告',
+      'executive_summary': '管理摘要'
+    };
+    return labels[type] || type;
+  };
+
   return (
     <div className="space-y-6">
+      {/* Report Detail Modal */}
+      {viewingReport && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+            <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-gray-900">{viewingReport.title}</h3>
+              <button
+                onClick={() => setViewingReport(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">概要</h4>
+                  <p className="text-gray-700">{viewingReport.summary || '暂无概要'}</p>
+                </div>
+                {viewingReport.content && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">关键发现</h4>
+                    <ul className="list-disc list-inside space-y-1 text-gray-700">
+                      {(viewingReport.content.keyFindings || []).map((finding: string, i: number) => (
+                        <li key={i}>{finding}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {viewingReport.metadata?.documentSummary && (
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="font-medium text-gray-900 mb-2">数据统计</h4>
+                    <div className="text-sm text-gray-600">
+                      <p>文档总数: {viewingReport.metadata.documentSummary.total}</p>
+                      <p>时间范围: {viewingReport.metadata.documentSummary.dateRange}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => setViewingReport(null)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">分析与报告</h2>
-          <p className="mt-1 text-sm text-gray-500">查看自动生成的周期性报告，或触发按需专题分析。</p>
+          <p className="mt-1 text-sm text-gray-500">基于已采集文档生成技术情报周报</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm">
-          <Play className="w-4 h-4" />
-          生成专题报告
-        </button>
+        <div className="flex items-center gap-3">
+          <select
+            value={selectedTopicId}
+            onChange={(e) => setSelectedTopicId(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="">选择主题...</option>
+            {topics.map(t => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleGenerateReport}
+            disabled={!selectedTopicId || isGenerating}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                生成中...
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4" />
+                生成周报
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Report List */}
-        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
-            <h3 className="font-medium text-gray-900">最近报告</h3>
-            <div className="flex gap-2">
-              <select className="text-sm border-gray-300 rounded-md py-1.5 pl-3 pr-8 focus:ring-indigo-500 focus:border-indigo-500">
-                <option>所有类型</option>
-                <option>周报</option>
-                <option>专题研判</option>
-                <option>预警报告</option>
-              </select>
-            </div>
+      {/* Reports List */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
+          <h3 className="font-medium text-gray-900">
+            已生成报告
+            {!isLoading && <span className="ml-2 text-sm text-gray-500">({reports.length})</span>}
+          </h3>
+        </div>
+
+        {isLoading ? (
+          <div className="p-12 text-center text-gray-500">
+            <Loader2 className="w-8 h-8 mx-auto animate-spin mb-3" />
+            加载中...
           </div>
+        ) : reports.length === 0 ? (
+          <div className="p-12 text-center text-gray-500">
+            <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+            <p>暂无报告</p>
+            <p className="text-sm mt-1">选择主题后点击"生成周报"按钮</p>
+          </div>
+        ) : (
           <div className="divide-y divide-gray-200">
             {reports.map((report) => (
               <div key={report.id} className="p-4 hover:bg-gray-50 transition-colors flex items-center justify-between group">
@@ -43,65 +215,50 @@ export default function Reports() {
                     <FileText className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-medium text-gray-900 group-hover:text-indigo-600 transition-colors">{report.title}</h4>
+                    <h4 className="text-sm font-medium text-gray-900">{report.title}</h4>
                     <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
-                      <span className="px-2 py-0.5 bg-gray-100 rounded text-gray-600">{report.type}</span>
-                      <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {report.date}</span>
-                      <span>{report.author}</span>
+                      <span className="px-2 py-0.5 bg-gray-100 rounded text-gray-600">
+                        {getReportTypeLabel(report.type)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {report.generated_at ? new Date(report.generated_at).toLocaleDateString('zh-CN') : '-'}
+                      </span>
+                      <span>{report.topic_name}</span>
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="下载 PDF">
-                    <Download className="w-4 h-4" />
-                  </button>
-                  <button className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="在线查看">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleViewReport(report)}
+                    className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    title="查看详情"
+                  >
                     <ArrowRight className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteReport(report.id)}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    title="删除"
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        )}
+      </div>
 
-        {/* Quick Actions & Templates */}
-        <div className="space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-            <h3 className="font-medium text-gray-900 mb-4">按需分析模板</h3>
-            <div className="space-y-3">
-              <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors group">
-                <div className="font-medium text-sm text-gray-900 group-hover:text-indigo-700">技术路线对比分析</div>
-                <div className="text-xs text-gray-500 mt-1">对比多个候选技术方向的成熟度、热度与风险。</div>
-              </button>
-              <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors group">
-                <div className="font-medium text-sm text-gray-900 group-hover:text-indigo-700">竞争态势深度研判</div>
-                <div className="text-xs text-gray-500 mt-1">分析核心玩家的专利、论文、产品发布时间线。</div>
-              </button>
-              <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors group">
-                <div className="font-medium text-sm text-gray-900 group-hover:text-indigo-700">进入时机与资源建议</div>
-                <div className="text-xs text-gray-500 mt-1">基于图谱证据链生成具体的规划动作建议。</div>
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 p-5">
-            <h3 className="font-medium text-indigo-900 mb-2">报告生成引擎状态</h3>
-            <div className="space-y-2 text-sm text-indigo-800">
-              <div className="flex justify-between">
-                <span>LLM 推理服务</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500"></span> 正常</span>
-              </div>
-              <div className="flex justify-between">
-                <span>图谱检索服务</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500"></span> 正常</span>
-              </div>
-              <div className="flex justify-between">
-                <span>排队任务</span>
-                <span className="font-medium">0</span>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Quick Actions */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+        <h3 className="font-medium text-gray-900 mb-4">使用说明</h3>
+        <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600">
+          <li>在 <span className="font-medium text-gray-900">数据采集</span> 页面选择主题并检索文档</li>
+          <li>在此页面选择对应主题</li>
+          <li>点击 <span className="font-medium text-indigo-600">生成周报</span> 按钮</li>
+          <li>系统将基于采集的文档使用 AI 生成分析报告</li>
+        </ol>
       </div>
     </div>
   );

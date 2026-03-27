@@ -101,6 +101,47 @@ async function startServer() {
     CREATE INDEX IF NOT EXISTS idx_claims_document ON claims(document_id);
     CREATE INDEX IF NOT EXISTS idx_relations_document ON relations(document_id);
     CREATE INDEX IF NOT EXISTS idx_events_document ON events(document_id);
+
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      topic_id TEXT,
+      topic_name TEXT,
+      type TEXT,
+      title TEXT,
+      summary TEXT,
+      content TEXT,
+      status TEXT,
+      generated_at TEXT,
+      period_start TEXT,
+      period_end TEXT,
+      metadata TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reports_topic ON reports(topic_id);
+    CREATE INDEX IF NOT EXISTS idx_reports_type ON reports(type);
+
+    CREATE TABLE IF NOT EXISTS reviews (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      topic_id TEXT,
+      topic_name TEXT,
+      source TEXT,
+      source_url TEXT,
+      content TEXT NOT NULL,
+      confidence REAL,
+      reason TEXT,
+      status TEXT DEFAULT 'pending',
+      reviewed_by TEXT,
+      reviewed_at TEXT,
+      review_notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
+    CREATE INDEX IF NOT EXISTS idx_reviews_type ON reviews(type);
   `);
 
   // Seed data if empty
@@ -268,6 +309,168 @@ async function startServer() {
       res.status(500).json({ error: "Failed to update topic" });
     }
   });
+
+  // ===== Dashboard API =====
+
+  /**
+   * GET /api/dashboard/stats
+   * 获取仪表盘统计数据
+   */
+  app.get("/api/dashboard/stats", async (req, res) => {
+    try {
+      const activeTopicsCount = await db.get("SELECT COUNT(*) as count FROM topics");
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const weekDocsCount = await db.get(
+        "SELECT COUNT(*) as count FROM documents WHERE collected_date >= ?",
+        [weekAgo]
+      );
+      const pendingReviewsCount = await db.get(
+        "SELECT COUNT(*) as count FROM reviews WHERE status = 'pending'"
+      );
+      const highPriorityTopics = await db.get(
+        "SELECT COUNT(*) as count FROM topics WHERE priority = 'high'"
+      );
+
+      const lastWeekDocs = await db.get(
+        "SELECT COUNT(*) as count FROM documents WHERE collected_date >= ? AND collected_date < ?",
+        [new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(), weekAgo]
+      );
+
+      const docsChange = lastWeekDocs && lastWeekDocs.count > 0
+        ? Math.round(((weekDocsCount.count - lastWeekDocs.count) / lastWeekDocs.count) * 100)
+        : 0;
+
+      res.json({
+        activeTopics: activeTopicsCount.count,
+        weekDocs: weekDocsCount.count,
+        pendingReviews: pendingReviewsCount.count,
+        highPriorityAlerts: highPriorityTopics.count,
+        docsChange: docsChange,
+      });
+    } catch (error) {
+      console.error("Failed to fetch dashboard stats:", error);
+      res.status(500).json({ error: "Failed to fetch dashboard stats" });
+    }
+  });
+
+  /**
+   * GET /api/dashboard/trend
+   * 获取采集趋势数据（最近7天）
+   */
+  app.get("/api/dashboard/trend", async (req, res) => {
+    try {
+      const trendData = [];
+      const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+        const dateStart = new Date(date.setHours(0, 0, 0, 0)).toISOString();
+        const dateEnd = new Date(date.setHours(23, 59, 59, 999)).toISOString();
+
+        const papersCount = await db.get(
+          "SELECT COUNT(*) as count FROM documents WHERE collected_date >= ? AND collected_date <= ? AND source LIKE ?",
+          [dateStart, dateEnd, '%arXiv%']
+        );
+
+        const newsCount = await db.get(
+          "SELECT COUNT(*) as count FROM documents WHERE collected_date >= ? AND collected_date <= ? AND (source NOT LIKE ? OR source IS NULL)",
+          [dateStart, dateEnd, '%arXiv%']
+        );
+
+        trendData.push({
+          name: dayNames[date.getDay()],
+          papers: papersCount.count,
+          news: newsCount.count,
+        });
+      }
+
+      res.json(trendData);
+    } catch (error) {
+      console.error("Failed to fetch trend data:", error);
+      res.status(500).json({ error: "Failed to fetch trend data" });
+    }
+  });
+
+  /**
+   * GET /api/dashboard/topic-distribution
+   * 获取主题证据分布
+   */
+  app.get("/api/dashboard/topic-distribution", async (req, res) => {
+    try {
+      const distribution = await db.all(`
+        SELECT t.name, COUNT(d.id) as value
+        FROM topics t
+        LEFT JOIN documents d ON t.id = d.topic_id
+        GROUP BY t.id
+        ORDER BY value DESC
+        LIMIT 5
+      `);
+
+      res.json(distribution);
+    } catch (error) {
+      console.error("Failed to fetch topic distribution:", error);
+      res.status(500).json({ error: "Failed to fetch topic distribution" });
+    }
+  });
+
+  /**
+   * GET /api/dashboard/alerts
+   * 获取最新预警列表
+   */
+  app.get("/api/dashboard/alerts", async (req, res) => {
+    try {
+      const alerts = await db.all(`
+        SELECT 
+          d.title,
+          t.name as topic,
+          d.collected_date as time,
+          d.source,
+          d.source_url as url
+        FROM documents d
+        LEFT JOIN topics t ON d.topic_id = t.id
+        WHERE t.priority = 'high'
+        ORDER BY d.collected_date DESC
+        LIMIT 5
+      `);
+
+      const formattedAlerts = alerts.map((alert, i) => ({
+        id: i,
+        title: alert.title,
+        topic: alert.topic || '未分类',
+        time: formatTimeAgo(alert.time),
+        type: getAlertType(alert.source),
+        url: alert.url,
+      }));
+
+      res.json(formattedAlerts);
+    } catch (error) {
+      console.error("Failed to fetch alerts:", error);
+      res.status(500).json({ error: "Failed to fetch alerts" });
+    }
+  });
+
+  function formatTimeAgo(dateStr: string): string {
+    if (!dateStr) return '未知时间';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 60) return `${diffMins}分钟前`;
+    if (diffHours < 24) return `${diffHours}小时前`;
+    if (diffDays < 7) return `${diffDays}天前`;
+    return date.toLocaleDateString('zh-CN');
+  }
+
+  function getAlertType(source: string): string {
+    if (!source) return '资讯更新';
+    if (source.toLowerCase().includes('arxiv')) return '学术突破';
+    if (source.toLowerCase().includes('nature') || source.toLowerCase().includes('science')) return '学术突破';
+    if (source.toLowerCase().includes('policy') || source.toLowerCase().includes('regulation')) return '政策调整';
+    return '重大发布';
+  }
 
   // Documents API Routes
   app.get("/api/documents", async (req, res) => {
@@ -953,6 +1156,188 @@ async function startServer() {
     }
   });
 
+  // ===== 报告 API =====
+
+  // 创建 reports 表
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      topic_id TEXT NOT NULL,
+      topic_name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT,
+      content TEXT,
+      status TEXT DEFAULT 'completed',
+      generated_at TEXT NOT NULL,
+      metadata TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reports_topic_id ON reports(topic_id);
+    CREATE INDEX IF NOT EXISTS idx_reports_generated_at ON reports(generated_at DESC);
+  `);
+
+  /**
+   * POST /api/reports
+   * 保存生成的报告
+   */
+  app.post("/api/reports", async (req, res) => {
+    try {
+      const { topicId, topicName, type, title, summary, keyFindings, documentSummary, generatedAt } = req.body;
+
+      const id = `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      await db.run(
+        `INSERT INTO reports (id, topic_id, topic_name, type, title, summary, content, generated_at, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          topicId,
+          topicName,
+          type || 'weekly',
+          title,
+          summary || '',
+          JSON.stringify({ keyFindings: keyFindings || [], documentSummary }),
+          generatedAt || new Date().toISOString(),
+          JSON.stringify({ documentSummary })
+        ]
+      );
+
+      const report = await db.get("SELECT * FROM reports WHERE id = ?", [id]);
+      res.status(201).json(report);
+    } catch (error) {
+      console.error("Failed to create report:", error);
+      res.status(500).json({ error: "Failed to create report" });
+    }
+  });
+
+  /**
+   * GET /api/reports
+   * 获取报告列表
+   */
+  app.get("/api/reports", async (req, res) => {
+    try {
+      const { topicId, limit = '20' } = req.query;
+
+      let query = "SELECT * FROM reports";
+      const params: any[] = [];
+
+      if (topicId) {
+        query += " WHERE topic_id = ?";
+        params.push(topicId);
+      }
+
+      query += " ORDER BY generated_at DESC LIMIT ?";
+      params.push(parseInt(limit as string));
+
+      const rows = await db.all(query, params);
+
+      const reports = rows.map((row: any) => ({
+        ...row,
+        content: row.content ? JSON.parse(row.content) : null,
+        metadata: row.metadata ? JSON.parse(row.metadata) : null
+      }));
+
+      res.json(reports);
+    } catch (error) {
+      console.error("Failed to fetch reports:", error);
+      res.status(500).json({ error: "Failed to fetch reports" });
+    }
+  });
+
+  /**
+   * GET /api/reports/:id
+   * 获取单个报告
+   */
+  app.get("/api/reports/:id", async (req, res) => {
+    try {
+      const row = await db.get("SELECT * FROM reports WHERE id = ?", [req.params.id]);
+
+      if (!row) {
+        return res.status(404).json({ error: "Report not found" });
+      }
+
+      const report = {
+        ...row,
+        content: row.content ? JSON.parse(row.content) : null,
+        metadata: row.metadata ? JSON.parse(row.metadata) : null
+      };
+
+      res.json(report);
+    } catch (error) {
+      console.error("Failed to fetch report:", error);
+      res.status(500).json({ error: "Failed to fetch report" });
+    }
+  });
+
+  /**
+   * DELETE /api/reports/:id
+   * 删除报告
+   */
+  app.delete("/api/reports/:id", async (req, res) => {
+    try {
+      await db.run("DELETE FROM reports WHERE id = ?", [req.params.id]);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete report:", error);
+      res.status(500).json({ error: "Failed to delete report" });
+    }
+  });
+
+  /**
+   * POST /api/reports/generate
+   * 生成主题报告
+   */
+  app.post("/api/reports/generate", async (req, res) => {
+    try {
+      const { topicId, timeRange } = req.body;
+
+      if (!topicId) {
+        return res.status(400).json({ error: "topicId is required" });
+      }
+
+      // 获取主题信息
+      const topic = await db.get("SELECT * FROM topics WHERE id = ?", [topicId]);
+      if (!topic) {
+        return res.status(404).json({ error: "Topic not found" });
+      }
+
+      // 获取主题下的文档
+      let docsQuery = "SELECT * FROM documents WHERE topic_id = ?";
+      const params: any[] = [topicId];
+
+      if (timeRange?.start && timeRange?.end) {
+        docsQuery += " AND published_date BETWEEN ? AND ?";
+        params.push(timeRange.start, timeRange.end);
+      }
+
+      docsQuery += " ORDER BY published_date DESC LIMIT 50";
+
+      const documents = await db.all(docsQuery, params);
+
+      // 导入报告服务
+      const { generateWeeklyReport, saveReport } = await import('./src/services/reportService.ts');
+
+      // 生成报告
+      const report = await generateWeeklyReport({
+        topicId,
+        topicName: topic.name,
+        timeRange,
+        documents
+      });
+
+      // 保存到数据库
+      await saveReport(report);
+
+      res.json(report);
+    } catch (error) {
+      console.error("Failed to generate report:", error);
+      res.status(500).json({ error: "Failed to generate report", message: String(error) });
+    }
+  });
+
   // ===== 调度器 API =====
 
   // 获取调度器实例
@@ -1408,6 +1793,998 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to save graph:", error);
       res.status(500).json({ error: "Failed to save graph" });
+    }
+  });
+
+  // ===== 配置管理 API =====
+
+  const configPath = path.join(process.cwd(), "config.json");
+
+  /**
+   * GET /api/config
+   * 获取当前配置
+   */
+  app.get("/api/config", async (req, res) => {
+    try {
+      let config = {
+        aiProvider: "openai",
+        openaiApiKey: "",
+        openaiBaseUrl: "https://api.openai.com/v1",
+        openaiModel: "gpt-4o",
+        geminiApiKey: "",
+        geminiBaseUrl: "",
+        geminiModel: "gemini-2.5-flash-preview",
+        customApiKey: "",
+        customBaseUrl: "",
+        customModel: "",
+        neo4jUri: "",
+        neo4jUser: "",
+        neo4jPassword: "",
+      };
+
+      // 从文件读取配置
+      if (fs.existsSync(configPath)) {
+        const fileContent = await fs.promises.readFile(configPath, "utf-8");
+        config = { ...config, ...JSON.parse(fileContent) };
+      }
+
+      // 从环境变量读取（优先级更高）
+      if (process.env.OPENAI_API_KEY) config.openaiApiKey = process.env.OPENAI_API_KEY;
+      if (process.env.OPENAI_BASE_URL) config.openaiBaseUrl = process.env.OPENAI_BASE_URL;
+      if (process.env.GEMINI_API_KEY) config.geminiApiKey = process.env.GEMINI_API_KEY;
+      if (process.env.GEMINI_BASE_URL) config.geminiBaseUrl = process.env.GEMINI_BASE_URL;
+      if (process.env.NEO4J_URI) config.neo4jUri = process.env.NEO4J_URI;
+      if (process.env.NEO4J_USER) config.neo4jUser = process.env.NEO4J_USER;
+      if (process.env.NEO4J_PASSWORD) config.neo4jPassword = process.env.NEO4J_PASSWORD;
+
+      // 返回完整配置（本地开发环境，直接返回完整 key）
+      // 生产环境应该使用 session/cookie 来保护敏感信息
+      res.json({
+        aiProvider: config.aiProvider,
+        openaiBaseUrl: config.openaiBaseUrl,
+        openaiModel: config.openaiModel,
+        openaiApiKey: config.openaiApiKey || "",
+        geminiBaseUrl: config.geminiBaseUrl,
+        geminiModel: config.geminiModel,
+        geminiApiKey: config.geminiApiKey || "",
+        customBaseUrl: config.customBaseUrl,
+        customModel: config.customModel,
+        customApiKey: config.customApiKey || "",
+        neo4jUri: config.neo4jUri,
+        neo4jUser: config.neo4jUser,
+        neo4jPassword: config.neo4jPassword || "",
+      });
+    } catch (error) {
+      console.error("Failed to load config:", error);
+      res.status(500).json({ error: "Failed to load config" });
+    }
+  });
+
+  /**
+   * POST /api/config
+   * 保存配置
+   */
+  app.post("/api/config", async (req, res) => {
+    try {
+      const {
+        aiProvider,
+        openaiApiKey,
+        openaiBaseUrl,
+        openaiModel,
+        geminiApiKey,
+        geminiBaseUrl,
+        geminiModel,
+        customApiKey,
+        customBaseUrl,
+        customModel,
+        neo4jUri,
+        neo4jUser,
+        neo4jPassword,
+      } = req.body;
+
+      const config: any = {};
+
+      if (aiProvider) config.aiProvider = aiProvider;
+      if (openaiApiKey) config.openaiApiKey = openaiApiKey;
+      if (openaiBaseUrl) config.openaiBaseUrl = openaiBaseUrl;
+      if (openaiModel) config.openaiModel = openaiModel;
+      if (geminiApiKey) config.geminiApiKey = geminiApiKey;
+      if (geminiBaseUrl) config.geminiBaseUrl = geminiBaseUrl;
+      if (geminiModel) config.geminiModel = geminiModel;
+      if (customApiKey) config.customApiKey = customApiKey;
+      if (customBaseUrl) config.customBaseUrl = customBaseUrl;
+      if (customModel) config.customModel = customModel;
+      if (neo4jUri) config.neo4jUri = neo4jUri;
+      if (neo4jUser) config.neo4jUser = neo4jUser;
+      if (neo4jPassword) config.neo4jPassword = neo4jPassword;
+
+      // 保存到文件
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+
+      // 设置环境变量（用于当前进程）
+      if (openaiApiKey) process.env.OPENAI_API_KEY = openaiApiKey;
+      if (openaiBaseUrl) process.env.OPENAI_BASE_URL = openaiBaseUrl;
+      if (geminiApiKey) process.env.GEMINI_API_KEY = geminiApiKey;
+      if (geminiBaseUrl) process.env.GEMINI_BASE_URL = geminiBaseUrl;
+      if (neo4jUri) process.env.NEO4J_URI = neo4jUri;
+      if (neo4jUser) process.env.NEO4J_USER = neo4jUser;
+      if (neo4jPassword) process.env.NEO4J_PASSWORD = neo4jPassword;
+
+      res.json({ success: true, message: "配置已保存" });
+    } catch (error) {
+      console.error("Failed to save config:", error);
+      res.status(500).json({ error: "Failed to save config" });
+    }
+  });
+
+  /**
+   * POST /api/config/test
+   * 测试 API 连接
+   */
+  app.post("/api/config/test", async (req, res) => {
+    try {
+      const { provider, apiKey, baseUrl, model } = req.body;
+
+      if (!apiKey) {
+        return res.status(400).json({ success: false, error: "API Key is required" });
+      }
+
+      if (provider === "openai" || provider === "custom") {
+        // 测试 OpenAI 兼容接口
+        const OpenAI = await import("openai");
+        const client = new OpenAI.OpenAI({
+          apiKey: apiKey,
+          baseURL: baseUrl || "https://api.openai.com/v1",
+        });
+
+        const response = await client.chat.completions.create({
+          model: model || "gpt-3.5-turbo",
+          messages: [{ role: "user", content: "Hello" }],
+          max_tokens: 10,
+        });
+
+        res.json({ success: true, message: "连接成功！" });
+      } else if (provider === "gemini") {
+        // 测试 Gemini
+        const { GoogleGenAI } = await import("@google/genai");
+        const ai = new GoogleGenAI({ apiKey });
+        await ai.models.generateContent({
+          model: model || "gemini-2.5-flash-preview",
+          contents: "Hello",
+        });
+
+        res.json({ success: true, message: "连接成功！" });
+      } else {
+        res.status(400).json({ success: false, error: "不支持的提供商" });
+      }
+    } catch (error: any) {
+      console.error("API test failed:", error);
+      res.status(400).json({
+        success: false,
+        error: error.message || "API 连接失败，请检查 API Key 和网络"
+      });
+    }
+  });
+
+  // ===== 推理编排 API =====
+
+  // Import reasoning service functions
+  const {
+    executeWorkflow,
+    calculateScoringCard,
+    quickAnalysis,
+    evaluateDirections,
+  } = await import('./src/services/reasoningService.ts');
+
+  /**
+   * POST /api/analysis/run
+   * 执行技术规划工作流（完整推理链）
+   */
+  app.post("/api/analysis/run", async (req, res) => {
+    try {
+      const { topicId, type = 'special_analysis', depth = 2, options } = req.body;
+
+      if (!topicId) {
+        return res.status(400).json({ error: "topicId is required" });
+      }
+
+      const request = {
+        topicId,
+        type,
+        depth,
+        options,
+      };
+
+      const execution = await executeWorkflow(request, db);
+
+      if (execution.status === 'completed') {
+        res.json(execution.result);
+      } else {
+        res.status(500).json({
+          error: "Analysis failed",
+          execution: {
+            id: execution.id,
+            status: execution.status,
+            stages: execution.stages,
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Failed to run analysis:", error);
+      res.status(500).json({ error: "Failed to run analysis" });
+    }
+  });
+
+  /**
+   * GET /api/topics/:id/scoring
+   * 获取主题的评分卡
+   */
+  app.get("/api/topics/:id/scoring", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const topic = await db.get('SELECT * FROM topics WHERE id = ?', [id]);
+
+      if (!topic) {
+        return res.status(404).json({ error: "Topic not found" });
+      }
+
+      // 解析 topic 数据
+      const parsedTopic = {
+        ...topic,
+        aliases: JSON.parse(topic.aliases || '[]'),
+        keywords: JSON.parse(topic.keywords || '[]'),
+        organizations: JSON.parse(topic.organizations || '[]'),
+      };
+
+      // 执行快速分析
+      const scoringCard = await quickAnalysis(id, db);
+
+      res.json(scoringCard);
+    } catch (error) {
+      console.error("Failed to calculate scoring:", error);
+      res.status(500).json({ error: "Failed to calculate scoring" });
+    }
+  });
+
+  /**
+   * POST /api/analysis/evaluate
+   * 批量评估多个技术方向
+   */
+  app.post("/api/analysis/evaluate", async (req, res) => {
+    try {
+      const { directions } = req.body;
+
+      if (!Array.isArray(directions) || directions.length === 0) {
+        return res.status(400).json({ error: "directions must be a non-empty array" });
+      }
+
+      const results = await evaluateDirections(directions, db);
+
+      // 按综合评分排序
+      const sorted = results.sort((a, b) => b.overallScore - a.overallScore);
+
+      res.json({
+        results: sorted,
+        count: sorted.length,
+      });
+    } catch (error) {
+      console.error("Failed to evaluate directions:", error);
+      res.status(500).json({ error: "Failed to evaluate directions" });
+    }
+  });
+
+  /**
+   * POST /api/topics/:id/collect
+   * 触发按需采集（设计稿要求）
+   */
+  app.post("/api/topics/:id/collect", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // 检查主题是否存在
+      const topic = await db.get('SELECT * FROM topics WHERE id = ?', [id]);
+      if (!topic) {
+        return res.status(404).json({ error: "Topic not found" });
+      }
+
+      // 获取调度器实例
+      const scheduler = getScheduler(db);
+
+      // 检查是否有该主题的任务
+      const tasks = scheduler.getTasks().filter(t => t.topicId === id);
+
+      if (tasks.length === 0) {
+        return res.status(400).json({ error: "No scheduled task for this topic" });
+      }
+
+      // 触发任务执行
+      const result = await scheduler.triggerTask(tasks[0].id);
+
+      res.json({
+        success: true,
+        execution: result,
+      });
+    } catch (error) {
+      console.error("Failed to trigger collection:", error);
+      res.status(500).json({ error: "Failed to trigger collection" });
+    }
+  });
+
+  /**
+   * GET /api/reports/:id
+   * 获取报告详情（设计稿要求）
+   */
+  app.get("/api/reports/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const row = await db.get("SELECT * FROM reports WHERE id = ?", [id]);
+      if (!row) {
+        return res.status(404).json({ error: "Report not found" });
+      }
+
+      const report = {
+        ...row,
+        metadata: row.metadata ? JSON.parse(row.metadata) : null,
+        period: row.period_start && row.period_end ? {
+          start: row.period_start,
+          end: row.period_end,
+        } : null,
+      };
+
+      res.json(report);
+    } catch (error) {
+      console.error("Failed to fetch report:", error);
+      res.status(500).json({ error: "Failed to fetch report" });
+    }
+  });
+
+  /**
+   * GET /api/reports
+   * 获取报告列表
+   */
+  app.get("/api/reports", async (req, res) => {
+    try {
+      const { topicId, type } = req.query;
+      let query = "SELECT * FROM reports WHERE 1=1";
+      const params: any[] = [];
+
+      if (topicId) {
+        query += " AND topic_id = ?";
+        params.push(topicId);
+      }
+
+      if (type) {
+        query += " AND type = ?";
+        params.push(type);
+      }
+
+      query += " ORDER BY generated_at DESC";
+
+      const rows = await db.all(query, params);
+      const reports = rows.map((row: any) => ({
+        ...row,
+        metadata: row.metadata ? JSON.parse(row.metadata) : null,
+      }));
+
+      res.json(reports);
+    } catch (error) {
+      console.error("Failed to fetch reports:", error);
+      res.status(500).json({ error: "Failed to fetch reports" });
+    }
+  });
+
+  /**
+   * POST /api/reports
+   * 保存报告
+   */
+  app.post("/api/reports", async (req, res) => {
+    try {
+      const report = req.body;
+      const id = report.id || `report_${Date.now()}`;
+
+      await db.run(
+        `INSERT INTO reports (id, topic_id, topic_name, type, title, summary, status, generated_at, period_start, period_end, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          report.topicId,
+          report.topicName,
+          report.type,
+          report.title,
+          report.summary || '',
+          report.status || 'completed',
+          report.generatedAt || new Date().toISOString(),
+          report.period?.start || null,
+          report.period?.end || null,
+          report.metadata ? JSON.stringify(report.metadata) : null,
+        ]
+      );
+
+      const created = await db.get("SELECT * FROM reports WHERE id = ?", [id]);
+      res.status(201).json(created);
+    } catch (error) {
+      console.error("Failed to save report:", error);
+      res.status(500).json({ error: "Failed to save report" });
+    }
+  });
+
+  // ===== 数据源采集 API =====
+
+  const {
+    collectByTopic,
+    fetchArxivPapers,
+    fetchRSSFeeds,
+    fetchGDELTNews,
+    createCollectionTask,
+    startTaskProcessing,
+    getQueueStatus,
+    getAllTasks,
+  } = await import('./src/services/dataSourceService.js');
+
+  /**
+   * POST /api/sources/arxiv
+   * 采集 arXiv 论文
+   */
+  app.post("/api/sources/arxiv", async (req, res) => {
+    try {
+      const { query, maxResults = 10 } = req.body;
+
+      if (!query) {
+        return res.status(400).json({ error: "query is required" });
+      }
+
+      const papers = await fetchArxivPapers(query, maxResults);
+      res.json({ papers, count: papers.length });
+    } catch (error) {
+      console.error("Failed to fetch arXiv papers:", error);
+      res.status(500).json({ error: "Failed to fetch arXiv papers" });
+    }
+  });
+
+  /**
+   * POST /api/sources/rss
+   * 采集 RSS 订阅源
+   */
+  app.post("/api/sources/rss", async (req, res) => {
+    try {
+      const { urls } = req.body;
+
+      if (!Array.isArray(urls) || urls.length === 0) {
+        return res.status(400).json({ error: "urls must be a non-empty array" });
+      }
+
+      const items = await fetchRSSFeeds(urls);
+      res.json({ items, count: items.length });
+    } catch (error) {
+      console.error("Failed to fetch RSS feeds:", error);
+      res.status(500).json({ error: "Failed to fetch RSS feeds" });
+    }
+  });
+
+  /**
+   * POST /api/sources/gdelt
+   * 采集 GDELT 新闻
+   */
+  app.post("/api/sources/gdelt", async (req, res) => {
+    try {
+      const { query, dateRange, maxResults = 50 } = req.body;
+
+      if (!query) {
+        return res.status(400).json({ error: "query is required" });
+      }
+
+      const news = await fetchGDELTNews(query, dateRange, maxResults);
+      res.json({ news, count: news.length });
+    } catch (error) {
+      console.error("Failed to fetch GDELT news:", error);
+      res.status(500).json({ error: "Failed to fetch GDELT news" });
+    }
+  });
+
+  /**
+   * POST /api/topics/:id/collect-sources
+   * 按主题采集所有数据源
+   */
+  app.post("/api/topics/:id/collect-sources", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { config } = req.body;
+
+      // 获取主题信息
+      const topic = await db.get('SELECT * FROM topics WHERE id = ?', [id]);
+      if (!topic) {
+        return res.status(404).json({ error: "Topic not found" });
+      }
+
+      // 解析主题数据
+      const parsedTopic = {
+        ...topic,
+        aliases: JSON.parse(topic.aliases || '[]'),
+        keywords: JSON.parse(topic.keywords || '[]'),
+        organizations: JSON.parse(topic.organizations || '[]'),
+      };
+
+      // 执行采集
+      const result = await collectByTopic(parsedTopic, config || {});
+
+      // 保存文档到数据库
+      let savedCount = 0;
+      for (const doc of result.arxivPapers) {
+        try {
+          await db.run(
+            `INSERT OR IGNORE INTO documents (id, title, source, source_url, published_date, collected_date, topic_id, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [doc.id, doc.title, doc.source, doc.url, doc.date, new Date().toISOString(), id, JSON.stringify(doc.metadata)]
+          );
+          savedCount++;
+        } catch (e) {
+          // 忽略重复
+        }
+      }
+
+      for (const item of result.rssItems) {
+        try {
+          const itemId = `rss_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          await db.run(
+            `INSERT OR IGNORE INTO documents (id, title, source, source_url, published_date, collected_date, topic_id, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [itemId, item.title, item.source, item.link, item.pubDate, new Date().toISOString(), id, JSON.stringify({ type: 'news' })]
+          );
+          savedCount++;
+        } catch (e) {
+          // 忽略重复
+        }
+      }
+
+      for (const news of result.gdeltNews) {
+        try {
+          const newsId = `gdelt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          await db.run(
+            `INSERT OR IGNORE INTO documents (id, title, source, source_url, published_date, collected_date, topic_id, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [newsId, news.title, 'GDELT', news.url, news.publishedDate, new Date().toISOString(), id, JSON.stringify({ source: news.source, language: news.language, tone: news.tone, themes: news.themes, type: 'news' })]
+          );
+          savedCount++;
+        } catch (e) {
+          // 忽略重复
+        }
+      }
+
+      res.json({
+        ...result,
+        savedCount,
+        totalCount: result.arxivPapers.length + result.rssItems.length + result.gdeltNews.length
+      });
+    } catch (error) {
+      console.error("Failed to collect sources:", error);
+      res.status(500).json({ error: "Failed to collect sources" });
+    }
+  });
+
+  /**
+   * GET /api/sources/queue/status
+   * 获取采集队列状态
+   */
+  app.get("/api/sources/queue/status", async (req, res) => {
+    try {
+      const status = getQueueStatus();
+      res.json(status);
+    } catch (error) {
+      console.error("Failed to get queue status:", error);
+      res.status(500).json({ error: "Failed to get queue status" });
+    }
+  });
+
+  /**
+   * GET /api/sources/queue/tasks
+   * 获取采集任务列表
+   */
+  app.get("/api/sources/queue/tasks", async (req, res) => {
+    try {
+      const tasks = getAllTasks();
+      res.json(tasks);
+    } catch (error) {
+      console.error("Failed to get tasks:", error);
+      res.status(500).json({ error: "Failed to get tasks" });
+    }
+  });
+
+  /**
+   * POST /api/sources/queue/tasks
+   * 创建采集任务
+   */
+  app.post("/api/sources/queue/tasks", async (req, res) => {
+    try {
+      const { topicId, config } = req.body;
+
+      if (!topicId) {
+        return res.status(400).json({ error: "topicId is required" });
+      }
+
+      // 获取主题信息
+      const topic = await db.get('SELECT * FROM topics WHERE id = ?', [topicId]);
+      if (!topic) {
+        return res.status(404).json({ error: "Topic not found" });
+      }
+
+      const parsedTopic = {
+        ...topic,
+        aliases: JSON.parse(topic.aliases || '[]'),
+        keywords: JSON.parse(topic.keywords || '[]'),
+        organizations: JSON.parse(topic.organizations || '[]'),
+      };
+
+      const task = await createCollectionTask(parsedTopic, config || {});
+      res.status(201).json(task);
+    } catch (error) {
+      console.error("Failed to create task:", error);
+      res.status(500).json({ error: "Failed to create task" });
+    }
+  });
+
+  // ===== 检索 API =====
+
+  const {
+    fulltextSearch,
+    vectorSearch,
+    graphNeighborhood,
+    hybridSearch,
+    assembleEvidencePackage,
+  } = await import('./src/services/retrievalService.ts');
+
+  /**
+   * POST /api/retrieval/fulltext
+   * 全文检索
+   */
+  app.post("/api/retrieval/fulltext", async (req, res) => {
+    try {
+      const { query, filters } = req.body;
+
+      if (!query) {
+        return res.status(400).json({ error: "query is required" });
+      }
+
+      const results = await fulltextSearch(db, query, filters);
+      res.json({ results, count: results.length });
+    } catch (error) {
+      console.error("Failed to search:", error);
+      res.status(500).json({ error: "Failed to search" });
+    }
+  });
+
+  /**
+   * POST /api/retrieval/vector
+   * 向量检索
+   */
+  app.post("/api/retrieval/vector", async (req, res) => {
+    try {
+      const { query, limit = 10 } = req.body;
+
+      if (!query) {
+        return res.status(400).json({ error: "query is required" });
+      }
+
+      const results = await vectorSearch(db, query, limit);
+      res.json({ results, count: results.length });
+    } catch (error) {
+      console.error("Failed to search vectors:", error);
+      res.status(500).json({ error: "Failed to search vectors" });
+    }
+  });
+
+  /**
+   * GET /api/retrieval/graph/:entityId
+   * 图谱邻域检索
+   */
+  app.get("/api/retrieval/graph/:entityId", async (req, res) => {
+    try {
+      const { entityId } = req.params;
+      const depth = req.query.depth ? parseInt(req.query.depth as string) : 2;
+
+      const results = await graphNeighborhood(db, entityId, depth);
+      res.json({ results, count: results.length });
+    } catch (error) {
+      console.error("Failed to search graph:", error);
+      res.status(500).json({ error: "Failed to search graph" });
+    }
+  });
+
+  /**
+   * POST /api/retrieval/hybrid
+   * 混合检索
+   */
+  app.post("/api/retrieval/hybrid", async (req, res) => {
+    try {
+      const { text, topicId, filters, options } = req.body;
+
+      if (!text) {
+        return res.status(400).json({ error: "text is required" });
+      }
+
+      const result = await hybridSearch(db, { text, topicId, filters, options });
+      res.json(result);
+    } catch (error) {
+      console.error("Failed to run hybrid search:", error);
+      res.status(500).json({ error: "Failed to run hybrid search" });
+    }
+  });
+
+  /**
+   * GET /api/retrieval/evidence/:topicId
+   * 组装证据包
+   */
+  app.get("/api/retrieval/evidence/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const { query } = req.query;
+
+      const evidence = await assembleEvidencePackage(db, topicId, query as string);
+      res.json(evidence);
+    } catch (error) {
+      console.error("Failed to assemble evidence:", error);
+      res.status(500).json({ error: "Failed to assemble evidence" });
+    }
+  });
+
+  // ===== 审核台 API =====
+
+  /**
+   * GET /api/reviews
+   * 获取待审核列表
+   */
+  app.get("/api/reviews", async (req, res) => {
+    try {
+      const { status, type, limit = 50, offset = 0 } = req.query;
+
+      let query = "SELECT * FROM reviews WHERE 1=1";
+      const params: any[] = [];
+
+      if (status) {
+        query += " AND status = ?";
+        params.push(status);
+      }
+
+      if (type) {
+        query += " AND type = ?";
+        params.push(type);
+      }
+
+      query += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+      params.push(Number(limit), Number(offset));
+
+      const rows = await db.all(query, params);
+      const reviews = rows.map(row => ({
+        ...row,
+        time: formatTimeAgo(row.created_at),
+      }));
+
+      res.json(reviews);
+    } catch (error) {
+      console.error("Failed to fetch reviews:", error);
+      res.status(500).json({ error: "Failed to fetch reviews" });
+    }
+  });
+
+  /**
+   * GET /api/reviews/stats
+   * 获取审核统计
+   */
+  app.get("/api/reviews/stats", async (req, res) => {
+    try {
+      const pending = await db.get("SELECT COUNT(*) as count FROM reviews WHERE status = 'pending'");
+      const entityDisambig = await db.get("SELECT COUNT(*) as count FROM reviews WHERE status = 'pending' AND type = 'entity_disambig'");
+      const claimReview = await db.get("SELECT COUNT(*) as count FROM reviews WHERE status = 'pending' AND type = 'claim_review'");
+      const conflictResolve = await db.get("SELECT COUNT(*) as count FROM reviews WHERE status = 'pending' AND type = 'conflict_resolve'");
+
+      res.json({
+        total: pending.count,
+        entityDisambig: entityDisambig.count,
+        claimReview: claimReview.count,
+        conflictResolve: conflictResolve.count,
+      });
+    } catch (error) {
+      console.error("Failed to fetch review stats:", error);
+      res.status(500).json({ error: "Failed to fetch review stats" });
+    }
+  });
+
+  /**
+   * GET /api/reviews/:id
+   * 获取审核详情
+   */
+  app.get("/api/reviews/:id", async (req, res) => {
+    try {
+      const row = await db.get("SELECT * FROM reviews WHERE id = ?", [req.params.id]);
+      if (!row) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      res.json(row);
+    } catch (error) {
+      console.error("Failed to fetch review:", error);
+      res.status(500).json({ error: "Failed to fetch review" });
+    }
+  });
+
+  /**
+   * POST /api/reviews
+   * 创建审核任务
+   */
+  app.post("/api/reviews", async (req, res) => {
+    try {
+      const { type, topicId, topicName, source, sourceUrl, content, confidence, reason } = req.body;
+
+      const id = `review_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      await db.run(
+        `INSERT INTO reviews (id, type, topic_id, topic_name, source, source_url, content, confidence, reason, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        [id, type, topicId, topicName, source, sourceUrl, content, confidence, reason, new Date().toISOString()]
+      );
+
+      const created = await db.get("SELECT * FROM reviews WHERE id = ?", [id]);
+      res.status(201).json(created);
+    } catch (error) {
+      console.error("Failed to create review:", error);
+      res.status(500).json({ error: "Failed to create review" });
+    }
+  });
+
+  /**
+   * POST /api/reviews/:id/approve
+   * 审核通过
+   */
+  app.post("/api/reviews/:id/approve", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { notes } = req.body;
+
+      await db.run(
+        `UPDATE reviews SET status = 'approved', reviewed_at = ?, review_notes = ? WHERE id = ?`,
+        [new Date().toISOString(), notes || null, id]
+      );
+
+      const updated = await db.get("SELECT * FROM reviews WHERE id = ?", [id]);
+      res.json(updated);
+    } catch (error) {
+      console.error("Failed to approve review:", error);
+      res.status(500).json({ error: "Failed to approve review" });
+    }
+  });
+
+  /**
+   * POST /api/reviews/:id/reject
+   * 审核拒绝
+   */
+  app.post("/api/reviews/:id/reject", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { notes } = req.body;
+
+      await db.run(
+        `UPDATE reviews SET status = 'rejected', reviewed_at = ?, review_notes = ? WHERE id = ?`,
+        [new Date().toISOString(), notes || null, id]
+      );
+
+      const updated = await db.get("SELECT * FROM reviews WHERE id = ?", [id]);
+      res.json(updated);
+    } catch (error) {
+      console.error("Failed to reject review:", error);
+      res.status(500).json({ error: "Failed to reject review" });
+    }
+  });
+
+  /**
+   * POST /api/reviews/batch-approve
+   * 批量审核通过
+   */
+  app.post("/api/reviews/batch-approve", async (req, res) => {
+    try {
+      const { ids, notes } = req.body;
+
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: "ids must be a non-empty array" });
+      }
+
+      const placeholders = ids.map(() => '?').join(',');
+      await db.run(
+        `UPDATE reviews SET status = 'approved', reviewed_at = ?, review_notes = ? WHERE id IN (${placeholders})`,
+        [new Date().toISOString(), notes || null, ...ids]
+      );
+
+      res.json({ success: true, count: ids.length });
+    } catch (error) {
+      console.error("Failed to batch approve:", error);
+      res.status(500).json({ error: "Failed to batch approve" });
+    }
+  });
+
+  // ===== 实体消歧 API =====
+
+  const {
+    normalizeEntityAliases,
+    disambiguateEntities,
+    mergeEntityOrganizations,
+    resolveEntities,
+  } = await import('./src/services/entityResolutionService.ts');
+
+  /**
+   * POST /api/entities/resolve
+   * 实体消歧
+   */
+  app.post("/api/entities/resolve", async (req, res) => {
+    try {
+      const { entities, config } = req.body;
+
+      if (!Array.isArray(entities)) {
+        return res.status(400).json({ error: "entities must be an array" });
+      }
+
+      const result = await resolveEntities(entities, config || {});
+      res.json({ resolved: result.entities, count: result.entities.length, statistics: result.statistics });
+    } catch (error) {
+      console.error("Failed to resolve entities:", error);
+      res.status(500).json({ error: "Failed to resolve entities" });
+    }
+  });
+
+  /**
+   * POST /api/entities/normalize
+   * 别名归一化
+   */
+  app.post("/api/entities/normalize", async (req, res) => {
+    try {
+      const { entities } = req.body;
+
+      if (!Array.isArray(entities)) {
+        return res.status(400).json({ error: "entities must be an array" });
+      }
+
+      const normalized = await normalizeEntityAliases(entities);
+      res.json({ normalized, count: normalized.length });
+    } catch (error) {
+      console.error("Failed to normalize entities:", error);
+      res.status(500).json({ error: "Failed to normalize entities" });
+    }
+  });
+
+  /**
+   * POST /api/entities/disambiguate
+   * 同名消歧
+   */
+  app.post("/api/entities/disambiguate", async (req, res) => {
+    try {
+      const { entities, context } = req.body;
+
+      if (!Array.isArray(entities)) {
+        return res.status(400).json({ error: "entities must be an array" });
+      }
+
+      const disambiguated = await disambiguateEntities(entities, context || "");
+      res.json({ disambiguated, count: disambiguated.length });
+    } catch (error) {
+      console.error("Failed to disambiguate entities:", error);
+      res.status(500).json({ error: "Failed to disambiguate entities" });
+    }
+  });
+
+  /**
+   * POST /api/entities/merge-orgs
+   * 机构归并
+   */
+  app.post("/api/entities/merge-orgs", async (req, res) => {
+    try {
+      const { entities } = req.body;
+
+      if (!Array.isArray(entities)) {
+        return res.status(400).json({ error: "entities must be an array" });
+      }
+
+      const merged = await mergeEntityOrganizations(entities);
+      res.json({ merged, count: merged.length });
+    } catch (error) {
+      console.error("Failed to merge organizations:", error);
+      res.status(500).json({ error: "Failed to merge organizations" });
     }
   });
 

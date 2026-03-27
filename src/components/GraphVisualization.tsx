@@ -1,4 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import type { FC, MouseEvent } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -41,7 +42,7 @@ export interface GraphVisualizationProps {
 }
 
 // Custom Node Component
-const CustomNode: React.FC<{ data: GraphNodeData }> = ({ data }) => {
+const CustomNode: FC<{ data: GraphNodeData }> = ({ data }) => {
   const getNodeStyle = () => {
     switch (data.type) {
       case 'topic':
@@ -176,7 +177,7 @@ const applyLayout = (
   return { nodes: layoutedNodes, edges };
 };
 
-export const GraphVisualization: React.FC<GraphVisualizationProps> = ({
+export const GraphVisualization: FC<GraphVisualizationProps> = ({
   nodes: initialNodes,
   edges: initialEdges,
   onNodeClick,
@@ -227,12 +228,12 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
 
   // Update nodes when layout changes
-  React.useEffect(() => {
+  useEffect(() => {
     setNodes(layoutedNodes);
   }, [layoutedNodes, setNodes]);
 
   // Update edges when data changes
-  React.useEffect(() => {
+  useEffect(() => {
     setEdges(layoutedEdges);
   }, [layoutedEdges, setEdges]);
 
@@ -242,7 +243,7 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   );
 
   const handleNodeClick = useCallback(
-    (_event: React.MouseEvent, node: GraphNode) => {
+    (_event: MouseEvent, node: GraphNode) => {
       setSelectedNode(node);
       onNodeClick?.(node);
     },
@@ -250,7 +251,7 @@ export const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   );
 
   const handleNodeDoubleClick = useCallback(
-    (_event: React.MouseEvent, node: GraphNode) => {
+    (_event: MouseEvent, node: GraphNode) => {
       onNodeDoubleClick?.(node);
       if (node.data.url) {
         window.open(node.data.url, '_blank');
