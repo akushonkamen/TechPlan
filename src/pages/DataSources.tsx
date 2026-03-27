@@ -262,49 +262,66 @@ export default function DataSources() {
         ))}
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
-          <h3 className="font-medium text-gray-900">最新采集文档 (真实网络数据)</h3>
-          <button className="text-sm text-indigo-600 font-medium hover:text-indigo-700">查看全部</button>
+      <div className=”bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden”>
+        <div className=”p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50”>
+          <h3 className=”font-medium text-gray-900”>已采集文档 (数据库持久化)</h3>
+          <span className=”text-xs text-gray-500”>共 {dbDocuments.length} 条</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
+        <div className=”overflow-x-auto”>
+          <table className=”w-full text-left text-sm”>
+            <thead className=”bg-gray-50 text-gray-600 font-medium border-b border-gray-200”>
               <tr>
-                <th className="px-6 py-3">文档标题</th>
-                <th className="px-6 py-3">类型</th>
-                <th className="px-6 py-3">来源</th>
-                <th className="px-6 py-3">采集时间</th>
-                <th className="px-6 py-3 text-right">操作</th>
+                <th className=”px-6 py-3”>文档标题</th>
+                <th className=”px-6 py-3”>来源</th>
+                <th className=”px-6 py-3”>发布日期</th>
+                <th className=”px-6 py-3”>采集时间</th>
+                <th className=”px-6 py-3 text-right”>操作</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
-              {recentDocs.length === 0 ? (
+            <tbody className=”divide-y divide-gray-200”>
+              {isLoadingDbDocs ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                    暂无数据，请点击“手动触发同步”进行全网检索。
+                  <td colSpan={5} className=”px-6 py-8 text-center text-gray-500”>
+                    加载中...
+                  </td>
+                </tr>
+              ) : dbDocuments.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className=”px-6 py-8 text-center text-gray-500”>
+                    暂无数据，请点击”手动触发同步”进行全网检索。
                   </td>
                 </tr>
               ) : (
-                recentDocs.map((doc, i) => (
-                  <tr key={i} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 font-medium text-gray-900 max-w-md truncate" title={doc.title}>
+                dbDocuments.map((doc) => (
+                  <tr key={doc.id} className=”hover:bg-gray-50 transition-colors”>
+                    <td className=”px-6 py-4 font-medium text-gray-900 max-w-md truncate” title={doc.title}>
                       {doc.title}
                     </td>
-                    <td className="px-6 py-4">
-                      <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">{doc.type}</span>
+                    <td className=”px-6 py-4 text-gray-600”>{doc.source || '-'}</td>
+                    <td className=”px-6 py-4 text-gray-500”>{doc.published_date || '-'}</td>
+                    <td className=”px-6 py-4 text-gray-500”>
+                      {doc.collected_date ? new Date(doc.collected_date).toLocaleDateString('zh-CN') : '-'}
                     </td>
-                    <td className="px-6 py-4 text-gray-600">{doc.source}</td>
-                    <td className="px-6 py-4 text-gray-500">{doc.date}</td>
-                    <td className="px-6 py-4 text-right">
-                      <a 
-                        href={doc.url} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-indigo-600 hover:text-indigo-800 font-medium text-xs flex items-center gap-1 ml-auto justify-end"
-                      >
-                        查看原文 <ExternalLink className="w-3 h-3" />
-                      </a>
+                    <td className=”px-6 py-4 text-right”>
+                      <div className=”flex items-center gap-2 justify-end”>
+                        {doc.source_url && (
+                          <a
+                            href={doc.source_url}
+                            target=”_blank”
+                            rel=”noopener noreferrer”
+                            className=”text-indigo-600 hover:text-indigo-800 font-medium text-xs flex items-center gap-1”
+                          >
+                            查看 <ExternalLink className=”w-3 h-3” />
+                          </a>
+                        )}
+                        <button
+                          onClick={() => handleDeleteDocument(doc.id)}
+                          className=”text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors”
+                          title=”删除文档”
+                        >
+                          <Trash2 className=”w-4 h-4” />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -313,6 +330,42 @@ export default function DataSources() {
           </table>
         </div>
       </div>
+
+      {/* Latest fetched documents preview (non-persistent) */}
+      {recentDocs.length > 0 && (
+        <div className=”bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden”>
+          <div className=”p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50”>
+            <h3 className=”font-medium text-gray-900”>最新采集预览</h3>
+            <span className=”text-xs text-gray-500”>已保存到数据库</span>
+          </div>
+          <div className=”overflow-x-auto”>
+            <table className=”w-full text-left text-sm”>
+              <thead className=”bg-gray-50 text-gray-600 font-medium border-b border-gray-200”>
+                <tr>
+                  <th className=”px-6 py-3”>文档标题</th>
+                  <th className=”px-6 py-3”>类型</th>
+                  <th className=”px-6 py-3”>来源</th>
+                  <th className=”px-6 py-3”>发布日期</th>
+                </tr>
+              </thead>
+              <tbody className=”divide-y divide-gray-200”>
+                {recentDocs.map((doc, i) => (
+                  <tr key={i} className=”hover:bg-gray-50 transition-colors”>
+                    <td className=”px-6 py-4 font-medium text-gray-900 max-w-md truncate” title={doc.title}>
+                      {doc.title}
+                    </td>
+                    <td className=”px-6 py-4”>
+                      <span className=”px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs”>{doc.type}</span>
+                    </td>
+                    <td className=”px-6 py-4 text-gray-600”>{doc.source}</td>
+                    <td className=”px-6 py-4 text-gray-500”>{doc.date}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
