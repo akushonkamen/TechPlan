@@ -80,3 +80,72 @@ export interface Recommendation {
   confidence: number;
   generatedAt: string;
 }
+
+// ===== 知识抽取类型 =====
+
+export interface Entity {
+  id: string;
+  text: string;
+  type: 'person' | 'organization' | 'technology' | 'product' | 'location' | 'event' | 'other';
+  confidence: number;
+  metadata?: Record<string, any>;
+  document_id?: string;
+}
+
+export interface Relation {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+  confidence: number;
+  document_id?: string;
+}
+
+export interface Claim {
+  id: string;
+  text: string;
+  type: 'prediction' | 'opinion' | 'assertion' | 'finding' | 'announcement';
+  polarity: 'positive' | 'negative' | 'neutral';
+  confidence: number;
+  sourceContext?: string;
+  document_id?: string;
+}
+
+export interface Event {
+  id: string;
+  type: string;
+  title: string;
+  description: string;
+  time?: string;
+  location?: string;
+  participants: string[];
+  confidence: number;
+  document_id?: string;
+}
+
+export interface ExtractionResult {
+  entities: Entity[];
+  relations: Relation[];
+  claims: Claim[];
+  events: Event[];
+  metadata: {
+    textLength: number;
+    extractedAt: string;
+    model: string;
+  };
+}
+
+export interface GraphData {
+  nodes: Array<{
+    id: string;
+    label: string;
+    type: string;
+    confidence?: number;
+  }>;
+  links: Array<{
+    source: string;
+    target: string;
+    label: string;
+    confidence: number;
+  }>;
+}

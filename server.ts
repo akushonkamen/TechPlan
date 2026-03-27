@@ -4,6 +4,7 @@ import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import path from "path";
 import fs from "fs";
+import { getScheduler } from "./src/services/schedulerService.js";
 
 const PORT = 3000;
 
@@ -47,6 +48,59 @@ async function startServer() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE SET NULL
     );
+
+    CREATE TABLE IF NOT EXISTS entities (
+      id TEXT PRIMARY KEY,
+      document_id TEXT,
+      text TEXT NOT NULL,
+      type TEXT,
+      confidence REAL,
+      metadata TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS claims (
+      id TEXT PRIMARY KEY,
+      document_id TEXT,
+      text TEXT NOT NULL,
+      type TEXT,
+      polarity TEXT,
+      confidence REAL,
+      source_context TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS relations (
+      id TEXT PRIMARY KEY,
+      document_id TEXT,
+      source_text TEXT,
+      target_text TEXT,
+      relation TEXT,
+      confidence REAL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      document_id TEXT,
+      type TEXT,
+      title TEXT,
+      description TEXT,
+      event_time TEXT,
+      location TEXT,
+      participants TEXT,
+      confidence REAL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_entities_document ON entities(document_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_document ON claims(document_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_document ON relations(document_id);
+    CREATE INDEX IF NOT EXISTS idx_events_document ON events(document_id);
   `);
 
   // Seed data if empty
@@ -319,6 +373,423 @@ async function startServer() {
     }
   });
 
+  // ===== 知识抽取 API =====
+
+  // Import extraction service functions
+  const {
+    extractEntities,
+    extractRelations,
+    extractClaims,
+    extractEvents,
+    analyzeText,
+    toGraphFormat
+  } = await import('./src/services/extractionService.ts');
+
+  /**
+   * POST /api/extraction/entities
+   * 从文本中抽取实体
+   */
+  app.post("/api/extraction/entities", async (req, res) => {
+    try {
+      const { text, options } = req.body;
+
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({ error: "text is required and must be a string" });
+      }
+
+      const entities = await extractEntities(text, options);
+
+      // 如果提供了 document_id，保存到数据库
+      if (req.body.document_id && entities.length > 0) {
+        const { document_id } = req.body;
+        for (const entity of entities) {
+          await db.run(
+            `INSERT INTO entities (id, document_id, text, type, confidence, metadata)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              entity.id,
+              document_id,
+              entity.text,
+              entity.type,
+              entity.confidence,
+              entity.metadata ? JSON.stringify(entity.metadata) : null
+            ]
+          );
+        }
+      }
+
+      res.json({ entities, count: entities.length });
+    } catch (error) {
+      console.error("Failed to extract entities:", error);
+      res.status(500).json({ error: "Failed to extract entities" });
+    }
+  });
+
+  /**
+   * POST /api/extraction/relations
+   * 从文本中抽取关系
+   */
+  app.post("/api/extraction/relations", async (req, res) => {
+    try {
+      const { text, entities } = req.body;
+
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({ error: "text is required and must be a string" });
+      }
+
+      const relations = await extractRelations(text, entities);
+
+      // 如果提供了 document_id，保存到数据库
+      if (req.body.document_id && relations.length > 0) {
+        const { document_id } = req.body;
+        for (const relation of relations) {
+          await db.run(
+            `INSERT INTO relations (id, document_id, source_text, target_text, relation, confidence)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              relation.id,
+              document_id,
+              relation.source,
+              relation.target,
+              relation.relation,
+              relation.confidence
+            ]
+          );
+        }
+      }
+
+      res.json({ relations, count: relations.length });
+    } catch (error) {
+      console.error("Failed to extract relations:", error);
+      res.status(500).json({ error: "Failed to extract relations" });
+    }
+  });
+
+  /**
+   * POST /api/extraction/claims
+   * 从文本中抽取 Claims
+   */
+  app.post("/api/extraction/claims", async (req, res) => {
+    try {
+      const { text } = req.body;
+
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({ error: "text is required and must be a string" });
+      }
+
+      const claims = await extractClaims(text);
+
+      // 如果提供了 document_id，保存到数据库
+      if (req.body.document_id && claims.length > 0) {
+        const { document_id } = req.body;
+        for (const claim of claims) {
+          await db.run(
+            `INSERT INTO claims (id, document_id, text, type, polarity, confidence, source_context)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              claim.id,
+              document_id,
+              claim.text,
+              claim.type,
+              claim.polarity,
+              claim.confidence,
+              claim.sourceContext || null
+            ]
+          );
+        }
+      }
+
+      res.json({ claims, count: claims.length });
+    } catch (error) {
+      console.error("Failed to extract claims:", error);
+      res.status(500).json({ error: "Failed to extract claims" });
+    }
+  });
+
+  /**
+   * POST /api/extraction/events
+   * 从文本中抽取事件
+   */
+  app.post("/api/extraction/events", async (req, res) => {
+    try {
+      const { text } = req.body;
+
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({ error: "text is required and must be a string" });
+      }
+
+      const events = await extractEvents(text);
+
+      // 如果提供了 document_id，保存到数据库
+      if (req.body.document_id && events.length > 0) {
+        const { document_id } = req.body;
+        for (const event of events) {
+          await db.run(
+            `INSERT INTO events (id, document_id, type, title, description, event_time, location, participants, confidence)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              event.id,
+              document_id,
+              event.type,
+              event.title,
+              event.description,
+              event.time || null,
+              event.location || null,
+              JSON.stringify(event.participants),
+              event.confidence
+            ]
+          );
+        }
+      }
+
+      res.json({ events, count: events.length });
+    } catch (error) {
+      console.error("Failed to extract events:", error);
+      res.status(500).json({ error: "Failed to extract events" });
+    }
+  });
+
+  /**
+   * POST /api/extraction/analyze
+   * 综合分析（一次性抽取所有）
+   */
+  app.post("/api/extraction/analyze", async (req, res) => {
+    try {
+      const { text, options, document_id } = req.body;
+
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({ error: "text is required and must be a string" });
+      }
+
+      const result = await analyzeText(text, options);
+
+      // 如果提供了 document_id，保存所有结果到数据库
+      if (document_id) {
+        // 保存实体
+        for (const entity of result.entities) {
+          await db.run(
+            `INSERT INTO entities (id, document_id, text, type, confidence, metadata)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              entity.id,
+              document_id,
+              entity.text,
+              entity.type,
+              entity.confidence,
+              entity.metadata ? JSON.stringify(entity.metadata) : null
+            ]
+          );
+        }
+
+        // 保存关系
+        for (const relation of result.relations) {
+          await db.run(
+            `INSERT INTO relations (id, document_id, source_text, target_text, relation, confidence)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              relation.id,
+              document_id,
+              relation.source,
+              relation.target,
+              relation.relation,
+              relation.confidence
+            ]
+          );
+        }
+
+        // 保存 Claims
+        for (const claim of result.claims) {
+          await db.run(
+            `INSERT INTO claims (id, document_id, text, type, polarity, confidence, source_context)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              claim.id,
+              document_id,
+              claim.text,
+              claim.type,
+              claim.polarity,
+              claim.confidence,
+              claim.sourceContext || null
+            ]
+          );
+        }
+
+        // 保存事件
+        for (const event of result.events) {
+          await db.run(
+            `INSERT INTO events (id, document_id, type, title, description, event_time, location, participants, confidence)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              event.id,
+              document_id,
+              event.type,
+              event.title,
+              event.description,
+              event.time || null,
+              event.location || null,
+              JSON.stringify(event.participants),
+              event.confidence
+            ]
+          );
+        }
+      }
+
+      // 同时返回图谱格式
+      const graphFormat = toGraphFormat(result);
+
+      res.json({
+        ...result,
+        graph: graphFormat
+      });
+    } catch (error) {
+      console.error("Failed to analyze text:", error);
+      res.status(500).json({ error: "Failed to analyze text" });
+    }
+  });
+
+  /**
+   * GET /api/documents/:id/extraction
+   * 获取文档的所有抽取结果
+   */
+  app.get("/api/documents/:id/extraction", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // 并行获取所有抽取数据
+      const [entities, claims, relations, events] = await Promise.all([
+        db.all("SELECT * FROM entities WHERE document_id = ?", [id]),
+        db.all("SELECT * FROM claims WHERE document_id = ?", [id]),
+        db.all("SELECT * FROM relations WHERE document_id = ?", [id]),
+        db.all("SELECT * FROM events WHERE document_id = ?", [id])
+      ]);
+
+      // 解析 JSON 字段
+      const parsedEntities = entities.map((e: any) => ({
+        ...e,
+        metadata: e.metadata ? JSON.parse(e.metadata) : null
+      }));
+      const parsedEvents = events.map((e: any) => ({
+        ...e,
+        participants: e.participants ? JSON.parse(e.participants) : []
+      }));
+
+      res.json({
+        entities: parsedEntities,
+        claims,
+        relations,
+        events: parsedEvents,
+        stats: {
+          entityCount: parsedEntities.length,
+          claimCount: claims.length,
+          relationCount: relations.length,
+          eventCount: parsedEvents.length
+        }
+      });
+    } catch (error) {
+      console.error("Failed to fetch extraction results:", error);
+      res.status(500).json({ error: "Failed to fetch extraction results" });
+    }
+  });
+
+  /**
+   * GET /api/topics/:id/entities
+   * 获取主题下的所有实体（聚合）
+   */
+  app.get("/api/topics/:id/entities", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const entities = await db.all(
+        `SELECT e.*, d.title as document_title, d.source
+         FROM entities e
+         JOIN documents d ON e.document_id = d.id
+         WHERE d.topic_id = ?
+         ORDER BY e.confidence DESC`,
+        [id]
+      );
+
+      const parsedEntities = entities.map((e: any) => ({
+        ...e,
+        metadata: e.metadata ? JSON.parse(e.metadata) : null
+      }));
+
+      // 按类型分组统计
+      const byType = parsedEntities.reduce((acc: any, e: any) => {
+        acc[e.type] = (acc[e.type] || 0) + 1;
+        return acc;
+      }, {});
+
+      res.json({
+        entities: parsedEntities,
+        stats: {
+          total: parsedEntities.length,
+          byType
+        }
+      });
+    } catch (error) {
+      console.error("Failed to fetch topic entities:", error);
+      res.status(500).json({ error: "Failed to fetch topic entities" });
+    }
+  });
+
+  /**
+   * GET /api/topics/:id/graph
+   * 获取主题的知识图谱（节点和边）
+   */
+  app.get("/api/topics/:id/graph", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // 获取所有实体作为节点
+      const entities = await db.all(
+        `SELECT DISTINCT e.text, e.type
+         FROM entities e
+         JOIN documents d ON e.document_id = d.id
+         WHERE d.topic_id = ?
+         ORDER BY e.text`,
+        [id]
+      );
+
+      // 获取所有关系作为边
+      const relations = await db.all(
+        `SELECT r.source_text, r.target_text, r.relation, r.confidence
+         FROM relations r
+         JOIN documents d ON r.document_id = d.id
+         WHERE d.topic_id = ?`,
+        [id]
+      );
+
+      const nodes = entities.map((e: any, idx: number) => ({
+        id: `node_${idx}`,
+        label: e.text,
+        type: e.type
+      }));
+
+      const nodeMap = new Map(entities.map((e: any, idx: number) => [e.text.toLowerCase(), `node_${idx}`]));
+
+      const links = relations
+        .map((r: any) => {
+          const sourceId = nodeMap.get(r.source_text.toLowerCase());
+          const targetId = nodeMap.get(r.target_text.toLowerCase());
+          if (sourceId && targetId) {
+            return {
+              source: sourceId,
+              target: targetId,
+              label: r.relation,
+              confidence: r.confidence
+            };
+          }
+          return null;
+        })
+        .filter((l): l is NonNullable<typeof l> => l !== null);
+
+      res.json({ nodes, links });
+    } catch (error) {
+      console.error("Failed to fetch topic graph:", error);
+      res.status(500).json({ error: "Failed to fetch topic graph" });
+    }
+  });
+
   // ===== 去重 API =====
 
   interface Document {
@@ -479,6 +950,162 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to deduplicate documents:", error);
       res.status(500).json({ error: "Failed to deduplicate documents" });
+    }
+  });
+
+  // ===== 调度器 API =====
+
+  // 获取调度器实例
+  const scheduler = getScheduler(db);
+
+  // POST /api/scheduler/start - 启动调度器
+  app.post("/api/scheduler/start", async (req, res) => {
+    try {
+      await scheduler.start();
+      res.json({ message: "Scheduler started", status: scheduler.getStatus() });
+    } catch (error) {
+      console.error("Failed to start scheduler:", error);
+      res.status(500).json({ error: "Failed to start scheduler" });
+    }
+  });
+
+  // POST /api/scheduler/stop - 停止调度器
+  app.post("/api/scheduler/stop", async (req, res) => {
+    try {
+      await scheduler.stop();
+      res.json({ message: "Scheduler stopped", status: scheduler.getStatus() });
+    } catch (error) {
+      console.error("Failed to stop scheduler:", error);
+      res.status(500).json({ error: "Failed to stop scheduler" });
+    }
+  });
+
+  // GET /api/scheduler/status - 获取调度器状态
+  app.get("/api/scheduler/status", async (req, res) => {
+    try {
+      const status = scheduler.getStatus();
+      res.json(status);
+    } catch (error) {
+      console.error("Failed to get scheduler status:", error);
+      res.status(500).json({ error: "Failed to get scheduler status" });
+    }
+  });
+
+  // POST /api/scheduler/reload - 重新加载任务配置
+  app.post("/api/scheduler/reload", async (req, res) => {
+    try {
+      await scheduler.reload();
+      res.json({ message: "Scheduler reloaded", status: scheduler.getStatus() });
+    } catch (error) {
+      console.error("Failed to reload scheduler:", error);
+      res.status(500).json({ error: "Failed to reload scheduler" });
+    }
+  });
+
+  // POST /api/scheduler/sync - 从主题同步任务
+  app.post("/api/scheduler/sync", async (req, res) => {
+    try {
+      const created = await scheduler.syncTopics();
+      res.json({ message: `Synced ${created} new tasks`, created });
+    } catch (error) {
+      console.error("Failed to sync topics:", error);
+      res.status(500).json({ error: "Failed to sync topics" });
+    }
+  });
+
+  // GET /api/scheduler/jobs - 获取已注册的任务列表
+  app.get("/api/scheduler/jobs", async (req, res) => {
+    try {
+      const tasks = scheduler.getTasks();
+      res.json(tasks);
+    } catch (error) {
+      console.error("Failed to get jobs:", error);
+      res.status(500).json({ error: "Failed to get jobs" });
+    }
+  });
+
+  // POST /api/scheduler/jobs - 创建新任务
+  app.post("/api/scheduler/jobs", async (req, res) => {
+    try {
+      const { topic_id, schedule } = req.body;
+      if (!topic_id || !schedule) {
+        return res.status(400).json({ error: "topic_id and schedule are required" });
+      }
+      const task = await scheduler.createTask(topic_id, schedule);
+      res.status(201).json(task);
+    } catch (error) {
+      console.error("Failed to create job:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to create job" });
+    }
+  });
+
+  // PUT /api/scheduler/jobs/:id - 更新任务
+  app.put("/api/scheduler/jobs/:id", async (req, res) => {
+    try {
+      const task = await scheduler.updateTask(req.params.id, req.body);
+      res.json(task);
+    } catch (error) {
+      console.error("Failed to update job:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to update job" });
+    }
+  });
+
+  // DELETE /api/scheduler/jobs/:id - 删除任务
+  app.delete("/api/scheduler/jobs/:id", async (req, res) => {
+    try {
+      await scheduler.deleteTask(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete job:", error);
+      res.status(500).json({ error: "Failed to delete job" });
+    }
+  });
+
+  // POST /api/scheduler/jobs/:id/trigger - 手动触发任务
+  app.post("/api/scheduler/jobs/:id/trigger", async (req, res) => {
+    try {
+      const execution = await scheduler.triggerTask(req.params.id);
+      if (!execution) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.json(execution);
+    } catch (error) {
+      console.error("Failed to trigger job:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to trigger job" });
+    }
+  });
+
+  // GET /api/scheduler/logs - 获取执行日志
+  app.get("/api/scheduler/logs", async (req, res) => {
+    try {
+      const { limit, task_id, status } = req.query;
+      await scheduler.loadExecutionsFromDb(
+        limit ? parseInt(limit as string) : 100
+      );
+      const executions = scheduler.getExecutions({
+        limit: limit ? parseInt(limit as string) : undefined,
+        taskId: task_id as string,
+        status: status as string
+      });
+      res.json(executions);
+    } catch (error) {
+      console.error("Failed to get logs:", error);
+      res.status(500).json({ error: "Failed to get logs" });
+    }
+  });
+
+  // GET /api/scheduler/logs/:id - 获取单个执行日志详情
+  app.get("/api/scheduler/logs/:id", async (req, res) => {
+    try {
+      await scheduler.loadExecutionsFromDb(1000);
+      const execution = scheduler.getExecutions().find(e => e.id === req.params.id);
+      if (!execution) {
+        return res.status(404).json({ error: "Execution log not found" });
+      }
+      res.json(execution);
+    } catch (error) {
+      console.error("Failed to get log:", error);
+      res.status(500).json({ error: "Failed to get log" });
     }
   });
 
