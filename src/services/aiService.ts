@@ -20,8 +20,37 @@ export interface AIConfig {
 let currentConfig: AIConfig | null = null;
 
 export async function getAIConfig(): Promise<AIConfig> {
-  if (currentConfig) {
-    return currentConfig;
+  // 从配置文件读取（每次都重新读取以获取最新配置）
+  try {
+    const configPath = path.join(process.cwd(), 'config.json');
+    if (fs.existsSync(configPath)) {
+      const configContent = fs.readFileSync(configPath, 'utf-8');
+      const config = JSON.parse(configContent);
+
+      const provider = config.aiProvider || 'openai';
+      const apiKey = getConfigKey(config, provider);
+      const baseUrl = getConfigBaseUrl(config, provider);
+      const model = getConfigModel(config, provider);
+
+      if (apiKey) {
+        currentConfig = {
+          provider,
+          apiKey,
+          baseUrl,
+          model,
+        };
+
+        // 同时设置环境变量供 OpenAI SDK 使用
+        process.env.OPENAI_API_KEY = apiKey;
+        if (baseUrl) {
+          process.env.OPENAI_BASE_URL = baseUrl;
+        }
+
+        return currentConfig;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to read config file:', error);
   }
 
   // 优先从环境变量获取
@@ -43,35 +72,6 @@ export async function getAIConfig(): Promise<AIConfig> {
       model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview',
     };
     return currentConfig;
-  }
-
-  // 从配置文件读取
-  try {
-    const configPath = path.join(process.cwd(), 'config.json');
-    if (fs.existsSync(configPath)) {
-      const configContent = fs.readFileSync(configPath, 'utf-8');
-      const config = JSON.parse(configContent);
-
-      const provider = config.aiProvider || 'openai';
-      currentConfig = {
-        provider,
-        apiKey: getConfigKey(config, provider),
-        baseUrl: getConfigBaseUrl(config, provider),
-        model: getConfigModel(config, provider),
-      };
-
-      // 同时设置环境变量供 OpenAI SDK 使用
-      if (currentConfig.apiKey) {
-        process.env.OPENAI_API_KEY = currentConfig.apiKey;
-      }
-      if (currentConfig.baseUrl) {
-        process.env.OPENAI_BASE_URL = currentConfig.baseUrl;
-      }
-
-      return currentConfig;
-    }
-  } catch (error) {
-    console.error('Failed to read config file:', error);
   }
 
   // 返回空配置
