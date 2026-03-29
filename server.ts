@@ -1321,6 +1321,8 @@ async function startServer() {
       description: s.description,
       category: s.category,
       version: s.version,
+      params: s.params,
+      steps: s.steps,
     })));
   });
 

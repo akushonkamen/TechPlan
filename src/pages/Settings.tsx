@@ -41,14 +41,6 @@ const MODEL_PRESETS = {
   ],
 };
 
-const SKILL_OPTIONS = [
-  { value: 'research', label: '情报采集' },
-  { value: 'extract', label: '知识抽取' },
-  { value: 'report', label: '报告生成' },
-  { value: 'track-competitor', label: '友商追踪' },
-  { value: 'sync-graph', label: '图谱同步' },
-];
-
 type TabKey = 'ai' | 'graph' | 'skills' | 'optimize';
 
 export default function Settings() {
@@ -194,9 +186,9 @@ export default function Settings() {
   const handleOptimize = async () => {
     await optimizeSkill.optimize({
       skillName: selectedSkill,
-      evaluationCriteria: 'relevance,depth,accuracy',
-      maxIterations: 10,
-      convergenceThreshold: 8,
+      evaluationCriteria: optConfig?.evaluation_criteria ?? 'relevance,depth,accuracy',
+      maxIterations: optConfig?.max_iterations ?? 10,
+      convergenceThreshold: optConfig?.convergence_threshold ?? 8,
     });
   };
 

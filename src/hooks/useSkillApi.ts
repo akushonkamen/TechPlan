@@ -192,7 +192,7 @@ export function useOptimizationConfig(name: string) {
     } finally {
       setSaving(false);
     }
-  }, [name]);
+  }, [name, fetchConfig]);
 
   return { config, loading, error, save, saving, refetch: fetchConfig };
 }
