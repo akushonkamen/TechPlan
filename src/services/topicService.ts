@@ -3,7 +3,7 @@
  * 处理主题相关的 API 调用
  */
 
-const API_BASE = 'http://localhost:3000';
+const API_BASE = '';
 
 export interface Topic {
   id: string;

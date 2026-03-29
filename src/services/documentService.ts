@@ -3,7 +3,8 @@ import type { DbDocument, CreateDocumentInput } from '../types';
 // Re-export DbDocument for use in other modules
 export type { DbDocument };
 
-const API_BASE = '/api';
+// Use full URL for server-side calls
+const API_BASE = process.env.API_BASE_URL || '/api';
 
 export async function fetchAllDocuments(topicId?: string): Promise<DbDocument[]> {
   const url = topicId
