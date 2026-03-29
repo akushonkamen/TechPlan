@@ -28,7 +28,7 @@ export default function SkillCard({ skill, onClick, isExpanded }: SkillCardProps
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <h3 className="text-base font-semibold text-[#1d1d1f] truncate">{skill.displayName}</h3>
+          <h3 className="text-base font-semibold text-[#1d1d1f] truncate">{skill.displayName || skill.name}</h3>
           <div className="flex items-center gap-2 mt-2">
             <span
               className="px-2 py-0.5 rounded-full text-xs font-medium text-white"
@@ -36,7 +36,7 @@ export default function SkillCard({ skill, onClick, isExpanded }: SkillCardProps
             >
               {skill.category}
             </span>
-            <span className="text-xs text-[#86868b]">v{skill.version}</span>
+            <span className="text-xs text-[#86868b]">{skill.version ? `v${skill.version}` : ''}</span>
           </div>
         </div>
         <div className={`w-2 h-2 rounded-full transition-all ${isExpanded ? 'bg-[#0071e3]' : 'bg-[#e8e8ed]'}`} />

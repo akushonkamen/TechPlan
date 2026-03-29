@@ -451,7 +451,7 @@ export default function Settings() {
               ) : (
                 <select value={selectedSkill} onChange={e => setSelectedSkill(e.target.value)} className={inputClass}>
                   {allSkills.map(s => (
-                    <option key={s.name} value={s.name}>{s.displayName} v{s.version}</option>
+                    <option key={s.name} value={s.name}>{s.displayName || s.name} {s.version ? `v${s.version}` : ''}</option>
                   ))}
                 </select>
               )}

@@ -33,14 +33,14 @@ export interface SkillVersion {
 }
 
 export interface OptimizationConfig {
-  id: string;
+  id?: string;
   skill_name: string;
   evaluation_criteria: string;
   max_iterations: number;
   convergence_threshold: number;
   focus_area: string;
   custom_params: string | null;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export interface OptimizationHistoryEntry {

@@ -7,13 +7,16 @@ interface SkillDetailPanelProps {
 }
 
 export default function SkillDetailPanel({ skill, onShowVersionHistory }: SkillDetailPanelProps) {
+  const params = skill.params ?? [];
+  const steps = skill.steps ?? [];
+
   return (
     <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-6 animate-fade-in">
       <h3 className="text-lg font-semibold text-[#1d1d1f] mb-4">{skill.displayName}</h3>
 
       <p className="text-sm text-[#86868b] mb-6">{skill.description}</p>
 
-      {skill.params.length > 0 && (
+      {params.length > 0 && (
         <div className="mb-6">
           <h4 className="text-sm font-medium text-[#1d1d1f] mb-3">参数</h4>
           <div className="overflow-x-auto">
@@ -28,7 +31,7 @@ export default function SkillDetailPanel({ skill, onShowVersionHistory }: SkillD
                 </tr>
               </thead>
               <tbody>
-                {skill.params.map((param) => (
+                {params.map((param) => (
                   <tr key={param.name} className="border-b border-[#f5f5f7]">
                     <td className="py-2 px-3 text-[#1d1d1f] font-mono text-xs">{param.name}</td>
                     <td className="py-2 px-3 text-[#86868b]">{param.type}</td>
@@ -51,11 +54,11 @@ export default function SkillDetailPanel({ skill, onShowVersionHistory }: SkillD
         </div>
       )}
 
-      {skill.steps.length > 0 && (
+      {steps.length > 0 && (
         <div className="mb-6">
           <h4 className="text-sm font-medium text-[#1d1d1f] mb-3">执行步骤</h4>
           <ol className="space-y-2">
-            {skill.steps.map((step, index) => (
+            {steps.map((step, index) => (
               <li key={index} className="flex items-start gap-3 text-sm text-[#86868b]">
                 <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#f5f5f7] text-[#0071e3] text-xs font-medium flex items-center justify-center">
                   {index + 1}
