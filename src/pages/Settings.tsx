@@ -1,8 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Save, Eye, EyeOff, Key, AlertCircle, Check, Zap, Database, Cpu } from 'lucide-react';
+import { Save, Eye, EyeOff, Key, AlertCircle, Check, Zap, Database, Cpu, Layers } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
 import { useBilevelOptimization } from '../hooks/useSkills';
+import { useSkillsList, useOptimizationConfig, useOptHistory, type SkillConfig } from '../hooks/useSkillApi';
+import SkillCard from '../components/SkillCard';
+import SkillDetailPanel from '../components/SkillDetailPanel';
+import SkillVersionHistory from '../components/SkillVersionHistory';
+import OptimizationConfigForm from '../components/OptimizationConfigForm';
 
 const STORAGE_KEY = 'techplan_config';
 
@@ -44,7 +49,7 @@ const SKILL_OPTIONS = [
   { value: 'sync-graph', label: '图谱同步' },
 ];
 
-type TabKey = 'ai' | 'graph' | 'optimize';
+type TabKey = 'ai' | 'graph' | 'skills' | 'optimize';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabKey>('ai');
@@ -75,6 +80,14 @@ export default function Settings() {
   // Skill optimization
   const optimizeSkill = useBilevelOptimization();
   const [selectedSkill, setSelectedSkill] = useState('research');
+
+  // Skills management
+  const { skills: allSkills, loading: skillsLoading } = useSkillsList();
+  const { config: optConfig, loading: optConfigLoading, save: saveOptConfig, saving: optConfigSaving } = useOptimizationConfig(selectedSkill);
+  const { history: optHistory, loading: optHistoryLoading } = useOptHistory(selectedSkill);
+  const [selectedSkillDetail, setSelectedSkillDetail] = useState<string | null>(null);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [versionHistorySkill, setVersionHistorySkill] = useState<{ name: string; displayName: string } | null>(null);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -189,6 +202,7 @@ export default function Settings() {
   const tabs: Array<{ key: TabKey; label: string; icon: any }> = [
     { key: 'ai', label: 'AI 配置', icon: Zap },
     { key: 'graph', label: '图数据库', icon: Database },
+    { key: 'skills', label: '技能管理', icon: Layers },
     { key: 'optimize', label: '技能优化', icon: Cpu },
   ];
 
@@ -372,35 +386,125 @@ export default function Settings() {
         </div>
       )}
 
+      {/* Skills Tab */}
+      {activeTab === 'skills' && (
+        <div className="space-y-6 animate-fade-in">
+          {skillsLoading ? (
+            <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-12 text-center text-sm text-[#86868b]">
+              加载中...
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                {allSkills.map((skill) => (
+                  <div key={skill.name}>
+                    <SkillCard
+                      skill={skill}
+                      onClick={() => setSelectedSkillDetail(selectedSkillDetail === skill.name ? null : skill.name)}
+                      isExpanded={selectedSkillDetail === skill.name}
+                    />
+                    {selectedSkillDetail === skill.name && (
+                      <div className="mt-4">
+                        <SkillDetailPanel
+                          skill={skill}
+                          onShowVersionHistory={() => {
+                            setVersionHistorySkill({ name: skill.name, displayName: skill.displayName });
+                            setShowVersionHistory(true);
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {versionHistorySkill && (
+            <SkillVersionHistory
+              skillName={versionHistorySkill.name}
+              displayName={versionHistorySkill.displayName}
+              isOpen={showVersionHistory}
+              onClose={() => setShowVersionHistory(false)}
+              onRestored={() => {
+                // Refetch skills list after restore
+                window.location.reload();
+              }}
+            />
+          )}
+        </div>
+      )}
+
       {/* Optimize Tab */}
       {activeTab === 'optimize' && (
-        <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8 space-y-5 animate-fade-in">
-          <div>
-            <h3 className="text-base font-medium text-[#1d1d1f]">技能优化</h3>
-            <p className="text-sm text-[#86868b] mt-1">通过双层优化循环自动提升技能质量</p>
-          </div>
-          <div>
-            <label className={labelClass}>选择技能</label>
-            <select value={selectedSkill} onChange={e => setSelectedSkill(e.target.value)} className={inputClass}>
-              {SKILL_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <SkillButton
-              onClick={handleOptimize}
-              status={optimizeSkill.status === 'idle' ? 'idle' : optimizeSkill.status === 'running' ? 'running' : optimizeSkill.status === 'completed' ? 'completed' : 'failed'}
-            >
-              开始优化
-            </SkillButton>
-          </div>
-          {optimizeSkill.status === 'completed' && optimizeSkill.result && (
-            <div className="bg-[#34c759]/5 rounded-xl p-4 text-sm text-[#34c759]">
-              优化完成！技能质量已提升。
+        <div className="space-y-5 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8 space-y-5">
+            <div>
+              <h3 className="text-base font-medium text-[#1d1d1f]">技能优化</h3>
+              <p className="text-sm text-[#86868b] mt-1">通过双层优化循环自动提升技能质量</p>
             </div>
-          )}
-          {optimizeSkill.error && (
-            <div className="bg-[#ff3b30]/5 rounded-xl p-4 text-sm text-[#ff3b30]">
-              优化失败：{optimizeSkill.error}
+            <div>
+              <label className={labelClass}>选择技能</label>
+              {skillsLoading ? (
+                <div className="text-sm text-[#86868b]">加载中...</div>
+              ) : (
+                <select value={selectedSkill} onChange={e => setSelectedSkill(e.target.value)} className={inputClass}>
+                  {allSkills.map(s => (
+                    <option key={s.name} value={s.name}>{s.displayName} v{s.version}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <SkillButton
+                onClick={handleOptimize}
+                status={optimizeSkill.status === 'idle' ? 'idle' : optimizeSkill.status === 'running' ? 'running' : optimizeSkill.status === 'completed' ? 'completed' : 'failed'}
+              >
+                开始优化
+              </SkillButton>
+            </div>
+            {optimizeSkill.status === 'completed' && optimizeSkill.result && (
+              <div className="bg-[#34c759]/5 rounded-xl p-4 text-sm text-[#34c759]">
+                优化完成！技能质量已提升。
+              </div>
+            )}
+            {optimizeSkill.error && (
+              <div className="bg-[#ff3b30]/5 rounded-xl p-4 text-sm text-[#ff3b30]">
+                优化失败：{optimizeSkill.error}
+              </div>
+            )}
+          </div>
+
+          {/* Optimization Config Form */}
+          <OptimizationConfigForm
+            config={optConfig}
+            onSave={saveOptConfig}
+            saving={optConfigSaving}
+          />
+
+          {/* Optimization History */}
+          {!optHistoryLoading && optHistory.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-6">
+              <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">优化历史</h4>
+              <div className="space-y-3">
+                {optHistory.map((entry) => (
+                  <div key={entry.id} className="flex items-center justify-between py-3 border-b border-[#f5f5f7] last:border-0">
+                    <div className="flex items-center gap-4">
+                      <span className={entry.converged ? 'text-[#34c759]' : 'text-[#ff3b30]'}>
+                        {entry.converged ? '✓' : '✗'}
+                      </span>
+                      <div>
+                        <div className="text-sm text-[#1d1d1f]">
+                          {entry.iterations_completed} 次迭代 · 峰值 {entry.peak_score} · 最终 {entry.final_score}
+                        </div>
+                        <div className="text-xs text-[#86868b]">
+                          {new Date(entry.created_at).toLocaleString('zh-CN')} · 提取 {entry.lessons_extracted} 条经验
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
