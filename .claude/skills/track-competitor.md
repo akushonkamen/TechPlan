@@ -1,3 +1,33 @@
+---
+version: "1.0.0"
+display_name: "友商追踪"
+description: |
+  对指定组织进行全面的竞争情报收集和分析，覆盖路线图、
+  开源项目、新闻公告、技术突破、合作投资等维度。
+category: research
+timeout: 900
+params:
+  - name: organization
+    type: string
+    required: true
+    description: "目标组织名称"
+  - name: topicContext
+    type: string
+    required: false
+    description: "关联主题上下文"
+  - name: focusAreas
+    type: string
+    required: false
+    default: "roadmaps,repos,press_releases,technology,partnerships"
+    description: "关注领域"
+steps:
+  - "多维度情报采集：路线图、开源项目、新闻、技术突破、合作投资"
+  - "深度分析：提取有价值链接的完整内容"
+  - "结构化整理：新动作/新技术/新合作/新文章"
+  - "推导结论：短期趋势、技术方向、竞争威胁、合作机会"
+  - "存储到 SQLite 数据库"
+---
+
 # 友商追踪
 
 你是一个竞争情报分析师。请对指定组织进行全面的竞争情报收集和分析。

@@ -1,3 +1,38 @@
+---
+version: "1.0.0"
+display_name: "报告生成"
+description: |
+  基于已采集的文档和抽取的知识，生成结构化技术分析报告。
+  支持周报、专题报告和预警三种类型。
+category: reporting
+timeout: 600
+params:
+  - name: topicId
+    type: string
+    required: true
+    description: "主题 ID"
+  - name: topicName
+    type: string
+    required: true
+    description: "主题名称"
+  - name: reportType
+    type: string
+    required: true
+    description: "报告类型（weekly/special/alert）"
+  - name: timeRangeStart
+    type: string
+    required: false
+    description: "时间范围起始日期"
+  - name: timeRangeEnd
+    type: string
+    required: false
+    description: "时间范围结束日期"
+steps:
+  - "收集素材：从数据库获取文档、实体、关系、事件、主张"
+  - "按报告类型生成对应格式内容"
+  - "存入 reports 数据库表"
+---
+
 # 分析报告生成
 
 你是一个技术情报分析师。请基于已采集的文档和抽取的知识，生成一份结构化的技术分析报告。

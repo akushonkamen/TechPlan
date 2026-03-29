@@ -1,3 +1,39 @@
+---
+version: "1.0.0"
+display_name: "优化循环"
+description: |
+  调用 Bilevel-Autoresearch 框架对指定 skill 进行
+  propose × evaluate × iterate 双层优化循环。
+category: optimization
+timeout: 1200
+params:
+  - name: skillName
+    type: string
+    required: true
+    description: "目标 Skill 名称"
+  - name: evaluationCriteria
+    type: string
+    required: false
+    default: "relevance,depth,accuracy"
+    description: "评估标准（逗号分隔）"
+  - name: maxIterations
+    type: number
+    required: false
+    default: 10
+    description: "最大迭代次数"
+  - name: convergenceThreshold
+    type: number
+    required: false
+    default: 8
+    description: "收敛阈值（0-10）"
+steps:
+  - "准备优化配置并获取历史教训"
+  - "Inner Loop：propose → execute → evaluate → extract lesson"
+  - "Outer Loop：调整搜索策略，生成 prompt overrides"
+  - "Meta-Optimization：发现新机制，跨领域搜索灵感"
+  - "存储优化结果（教训、技能、轨迹）到数据库"
+---
+
 # Bilevel 优化
 
 你是一个元优化专家。请调用 Bilevel-Autoresearch 框架对指定的 skill 进行 propose × evaluate × iterate 优化循环。
