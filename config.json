@@ -5,6 +5,5 @@
   "openaiModel": "gpt-4o-mini",
   "geminiModel": "gemini-2.5-flash-preview",
   "neo4jUri": "bolt://localhost:7687",
-  "neo4jUser": "neo4j",
-  "neo4jPassword": ""
+  "neo4jUser": "neo4j"
 }
