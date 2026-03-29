@@ -12,6 +12,7 @@ import {
   Target
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import SkillTaskBar from './SkillTaskBar';
 
 const navigation = [
   { name: '仪表盘', href: '/', icon: LayoutDashboard },
@@ -110,12 +111,15 @@ export default function Layout({ children }: { children: ReactNode }) {
             </button>
           </div>
         </header>
-        
-        <main className="flex-1 overflow-auto p-8">
+
+        <main className="flex-1 overflow-auto p-8 pb-24">
           <div className="max-w-7xl mx-auto">
             {children}
           </div>
         </main>
+
+        {/* Global skill task bar - persists across all pages */}
+        <SkillTaskBar />
       </div>
     </div>
   );

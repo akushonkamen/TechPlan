@@ -2,8 +2,15 @@ import type { FormEvent } from 'react';
 import { useState, useEffect } from 'react';
 import { Plus, Search, MoreVertical, Edit2, Trash2, Play, X, Loader2, ExternalLink } from 'lucide-react';
 import type { Topic } from '../types';
-import { fetchRealTimeTechNews, FetchedDocument } from '../services/agentService';
 import TopicForm from '../components/TopicForm';
+
+interface FetchedDocument {
+  title: string;
+  source: string;
+  type: '新闻' | '论文' | '标准' | '内部文档';
+  date: string;
+  url: string;
+}
 
 export default function Topics() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -174,18 +181,43 @@ export default function Topics() {
   const handleResearch = async (topic: Topic) => {
     setResearchingTopicId(topic.id);
     try {
-      const docs = await fetchRealTimeTechNews(topic.name);
-      setResearchResults({ topicName: topic.name, docs });
+      const response = await fetch('/api/skill/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicId: topic.id,
+          topicName: topic.name,
+          keywords: JSON.stringify(topic.keywords),
+          organizations: JSON.stringify(topic.organizations),
+          maxResults: 10,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to start research');
+      }
+
+      // Poll until the skill completes, then refresh the topic list
+      const { executionId } = data;
+      if (executionId) {
+        const pollCompletion = async () => {
+          try {
+            const res = await fetch(`/api/skill/${executionId}/status`);
+            if (res.ok) {
+              const status = await res.json();
+              if (status.status === 'running') {
+                setTimeout(pollCompletion, 3000);
+              } else {
+                fetchTopics();
+              }
+            }
+          } catch { /* ignore polling errors */ }
+        };
+        setTimeout(pollCompletion, 3000);
+      }
     } catch (error: any) {
       console.error("Research failed:", error);
-      const errorMsg = error?.message || error?.toString() || "";
-      if (errorMsg.includes("API Key") || errorMsg.includes("未配置")) {
-        if (confirm("未配置 AI API Key，是否前往设置页面进行配置？")) {
-          window.location.href = "/settings";
-        }
-      } else {
-        alert("检索失败：" + errorMsg);
-      }
+      alert("检索失败：" + (error?.message || "未知错误"));
     } finally {
       setResearchingTopicId(null);
     }

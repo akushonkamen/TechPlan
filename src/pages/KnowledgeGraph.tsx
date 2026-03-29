@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Filter, RefreshCw } from 'lucide-react';
+import { Search, Filter, RefreshCw, Info } from 'lucide-react';
 import GraphVisualization, {
   GraphNode,
   GraphEdge,
@@ -13,7 +13,7 @@ interface ApiNode {
   properties: Record<string, any>;
 }
 
-interface ApiEdge {
+interface ApiLink {
   id: string;
   source: string;
   target: string;
@@ -24,12 +24,25 @@ interface ApiEdge {
 interface GraphStatus {
   backend: string;
   nodeCount?: number;
-  edgeCount?: number;
-  lastSync?: string;
+  relationshipCount?: number;
+  lastSyncAt?: string;
 }
 
+// 关系类型中文翻译
+const EDGE_LABELS: Record<string, string> = {
+  'HAS_ENTITY': '包含实体',
+  'ABOUT': '相关文档',
+  'HAS_KEYWORD': '关键词',
+  'HAS_ORGANIZATION': '关联组织',
+  'RELATED_TO': '相关',
+  'MENTIONS': '提及',
+  'SUPPORTS': '支持',
+  'CONTRADICTS': '反驳',
+  'DERIVED_FROM': '来源于',
+  'CITES': '引用',
+};
+
 export default function KnowledgeGraph() {
-  const [activeTab, setActiveTab] = useState<'evidence' | 'planning'>('evidence');
   const [searchQuery, setSearchQuery] = useState('');
   const [nodeFilters, setNodeFilters] = useState<Set<GraphNodeType>>(
     new Set(['topic', 'entity', 'event', 'claim', 'document'])
@@ -40,6 +53,7 @@ export default function KnowledgeGraph() {
   const [graphStatus, setGraphStatus] = useState<GraphStatus | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [topics, setTopics] = useState<Array<{ id: string; name: string }>>([]);
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     fetchGraphStatus();
@@ -47,20 +61,14 @@ export default function KnowledgeGraph() {
   }, []);
 
   useEffect(() => {
-    if (selectedTopic) {
-      fetchTopicGraph(selectedTopic);
-    }
+    if (selectedTopic) fetchTopicGraph(selectedTopic);
   }, [selectedTopic]);
 
   async function fetchGraphStatus() {
     try {
       const res = await fetch('/api/graph/status');
-      if (res.ok) {
-        setGraphStatus(await res.json());
-      }
-    } catch (error) {
-      console.error('Failed to fetch graph status:', error);
-    }
+      if (res.ok) setGraphStatus(await res.json());
+    } catch {}
   }
 
   async function fetchTopics() {
@@ -69,13 +77,19 @@ export default function KnowledgeGraph() {
       if (res.ok) {
         const data = await res.json();
         setTopics(data);
-        if (data.length > 0 && !selectedTopic) {
-          setSelectedTopic(data[0].id);
-        }
+        if (data.length > 0 && !selectedTopic) setSelectedTopic(data[0].id);
       }
-    } catch (error) {
-      console.error('Failed to fetch topics:', error);
-    }
+    } catch {}
+  }
+
+  function mapNodeType(type: string): GraphNodeType {
+    const m: Record<string, GraphNodeType> = {
+      topic: 'topic', entity: 'entity', event: 'event',
+      claim: 'claim', document: 'document',
+      organization: 'entity', person: 'entity', technology: 'entity',
+      paper: 'document', article: 'document',
+    };
+    return m[type.toLowerCase()] || 'entity';
   }
 
   async function fetchTopicGraph(topicId: string) {
@@ -84,37 +98,40 @@ export default function KnowledgeGraph() {
       const res = await fetch(`/api/graph/topic/${topicId}?depth=2`);
       if (res.ok) {
         const data = await res.json();
-        
-        const processedNodes: GraphNode[] = data.nodes.map((n: ApiNode, index: number) => ({
+        const apiNodes: ApiNode[] = data.nodes || [];
+        const apiLinks: ApiLink[] = data.links || [];
+
+        const processedNodes: GraphNode[] = apiNodes.map((n, index) => ({
           id: n.id,
-          type: 'custom',
-          position: { 
-            x: 400 + (index % 5) * 150, 
-            y: 200 + Math.floor(index / 5) * 100 
+          type: 'custom' as const,
+          position: {
+            x: 400 + (index % 5) * 150,
+            y: 200 + Math.floor(index / 5) * 100,
           },
           data: {
-            label: n.label,
+            label: n.label.length > 25 ? n.label.substring(0, 25) + '...' : n.label,
             type: mapNodeType(n.type),
-            description: n.properties?.description || n.properties?.title || '',
+            description: n.properties?.description || n.properties?.title || n.label,
             url: n.properties?.url,
           },
         }));
 
-        const processedEdges: GraphEdge[] = data.links.map((e: ApiEdge) => ({
+        const processedEdges: GraphEdge[] = apiLinks.map((e) => ({
           id: e.id,
           source: e.source,
           target: e.target,
           data: {
-            type: e.label.toLowerCase().replace(/_/g, '_'),
-            label: e.label,
+            type: e.label.toLowerCase(),
+            label: EDGE_LABELS[e.label] || e.label,
           },
         }));
 
         setNodes(processedNodes);
         setEdges(processedEdges);
       }
-    } catch (error) {
-      console.error('Failed to fetch topic graph:', error);
+    } catch {
+      setNodes([]);
+      setEdges([]);
     } finally {
       setLoading(false);
     }
@@ -122,32 +139,14 @@ export default function KnowledgeGraph() {
 
   async function handleSyncGraph() {
     try {
-      const res = await fetch('/api/graph/sync', { method: 'POST' });
-      if (res.ok) {
-        await fetchGraphStatus();
-        if (selectedTopic) {
-          await fetchTopicGraph(selectedTopic);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to sync graph:', error);
-    }
-  }
-
-  function mapNodeType(type: string): GraphNodeType {
-    const typeMap: Record<string, GraphNodeType> = {
-      'topic': 'topic',
-      'entity': 'entity',
-      'event': 'event',
-      'claim': 'claim',
-      'document': 'document',
-      'organization': 'entity',
-      'person': 'entity',
-      'technology': 'entity',
-      'paper': 'document',
-      'article': 'document',
-    };
-    return typeMap[type.toLowerCase()] || 'entity';
+      await fetch('/api/skill/sync-graph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topicId: selectedTopic || '' }),
+      });
+      await fetchGraphStatus();
+      if (selectedTopic) await fetchTopicGraph(selectedTopic);
+    } catch {}
   }
 
   const filteredNodes = nodes.filter(node => {
@@ -166,11 +165,8 @@ export default function KnowledgeGraph() {
 
   const toggleNodeFilter = (type: GraphNodeType) => {
     const newFilters = new Set(nodeFilters);
-    if (newFilters.has(type)) {
-      newFilters.delete(type);
-    } else {
-      newFilters.add(type);
-    }
+    if (newFilters.has(type)) newFilters.delete(type);
+    else newFilters.add(type);
     setNodeFilters(newFilters);
   };
 
@@ -179,29 +175,27 @@ export default function KnowledgeGraph() {
   };
 
   const handleNodeDoubleClick = (node: GraphNode) => {
-    console.log('Node double clicked:', node);
-    if (node.data.url) {
-      window.open(node.data.url, '_blank');
-    }
+    if (node.data.url) window.open(node.data.url, '_blank');
   };
 
   return (
     <div className="h-[calc(100vh-8rem)] flex flex-col space-y-4">
+      {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">知识图谱探索</h2>
-          <p className="mt-1 text-sm text-gray-500">探索事实证据链与规划建议网络。</p>
+          <h2 className="text-2xl font-bold text-gray-900">知识图谱</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            展示主题下的实体关系网络：技术实体、关联组织和采集文献之间的关联
+          </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <select
             value={selectedTopic || ''}
             onChange={(e) => setSelectedTopic(e.target.value)}
             className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
           >
             {topics.map((topic) => (
-              <option key={topic.id} value={topic.id}>
-                {topic.name}
-              </option>
+              <option key={topic.id} value={topic.id}>{topic.name}</option>
             ))}
           </select>
           <button
@@ -211,35 +205,63 @@ export default function KnowledgeGraph() {
             <RefreshCw className="w-4 h-4" />
             同步图谱
           </button>
-          <div className="flex bg-gray-100 p-1 rounded-lg">
-            <button
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'evidence' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('evidence')}
-            >
-              证据图谱 (事实层)
-            </button>
-            <button
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'planning' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('planning')}
-            >
-              规划图谱 (业务层)
-            </button>
-          </div>
+          <button
+            onClick={() => setShowHelp(!showHelp)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-md hover:bg-gray-50 ${showHelp ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-600 border-gray-300'}`}
+          >
+            <Info className="w-4 h-4" />
+            使用说明
+          </button>
         </div>
       </div>
 
+      {/* Help Panel */}
+      {showHelp && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <h4 className="font-medium text-blue-900 mb-1">图谱含义</h4>
+              <ul className="space-y-1 text-blue-700">
+                <li>🎯 <b>主题节点</b>：你追踪的技术方向</li>
+                <li>🏢 <b>实体节点</b>：关键技术、组织、人物</li>
+                <li>📄 <b>文献节点</b>：采集到的论文和新闻</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-medium text-blue-900 mb-1">交互操作</h4>
+              <ul className="space-y-1 text-blue-700">
+                <li>🖱️ <b>拖拽</b>：移动节点位置</li>
+                <li>🔍 <b>滚轮</b>：缩放图谱</li>
+                <li>👆 <b>单击</b>：查看节点详情</li>
+                <li>👆👆 <b>双击</b>：打开关联链接</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-medium text-blue-900 mb-1">数据来源</h4>
+              <ul className="space-y-1 text-blue-700">
+                <li>从「数据采集」页面采集的文档自动提取实体</li>
+                <li>点击「同步图谱」刷新最新数据</li>
+                <li>右上角切换布局方式优化展示</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stats Bar */}
       {graphStatus && (
         <div className="flex items-center gap-4 text-sm text-gray-500">
-          <span>后端: <span className="font-medium text-gray-700">{graphStatus.backend}</span></span>
+          <span>存储: <span className="font-medium text-gray-700">{graphStatus.backend}</span></span>
           {graphStatus.nodeCount !== undefined && (
             <span>节点: <span className="font-medium text-gray-700">{graphStatus.nodeCount}</span></span>
           )}
-          {graphStatus.edgeCount !== undefined && (
-            <span>关系: <span className="font-medium text-gray-700">{graphStatus.edgeCount}</span></span>
+          {graphStatus.relationshipCount !== undefined && (
+            <span>关系: <span className="font-medium text-gray-700">{graphStatus.relationshipCount}</span></span>
           )}
         </div>
       )}
 
+      {/* Graph Container */}
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
         {/* Toolbar */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-between bg-gray-50/50">
@@ -248,7 +270,7 @@ export default function KnowledgeGraph() {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="搜索实体、关系或主张..."
+                placeholder="搜索实体、组织或文献..."
                 className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none w-64"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -259,19 +281,15 @@ export default function KnowledgeGraph() {
                 <Filter className="w-4 h-4" />
                 节点类型
               </button>
-              {/* Filter Dropdown */}
               <div className="absolute top-full left-0 mt-1 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-20 min-w-[140px] hidden group-hover:block">
-                {[
+                {([
                   { value: 'topic' as GraphNodeType, label: '主题', color: 'bg-indigo-600' },
-                  { value: 'entity' as GraphNodeType, label: '实体', color: 'bg-blue-500' },
+                  { value: 'entity' as GraphNodeType, label: '实体/组织', color: 'bg-blue-500' },
                   { value: 'event' as GraphNodeType, label: '事件', color: 'bg-purple-500' },
                   { value: 'claim' as GraphNodeType, label: '主张', color: 'bg-amber-500' },
                   { value: 'document' as GraphNodeType, label: '文献', color: 'bg-emerald-500' },
-                ].map(({ value, label, color }) => (
-                  <label
-                    key={value}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50"
-                  >
+                ]).map(({ value, label, color }) => (
+                  <label key={value} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50">
                     <input
                       type="checkbox"
                       checked={nodeFilters.has(value)}
@@ -294,11 +312,13 @@ export default function KnowledgeGraph() {
         <div className="flex-1 relative">
           {loading ? (
             <div className="flex items-center justify-center h-full text-gray-400">
+              <RefreshCw className="w-6 h-6 animate-spin mr-2" />
               加载中...
             </div>
           ) : filteredNodes.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-gray-400">
-              <p className="mb-4">暂无图谱数据</p>
+              <p className="mb-2 text-lg">暂无图谱数据</p>
+              <p className="mb-4 text-sm">请先在「数据采集」页面采集文档，然后点击同步</p>
               <button
                 onClick={handleSyncGraph}
                 className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
