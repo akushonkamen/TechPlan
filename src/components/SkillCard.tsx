@@ -1,4 +1,5 @@
 import type { SkillConfig } from '../hooks/useSkillApi';
+import { CARD } from '../lib/design';
 
 // Category color mapping
 const CATEGORY_COLORS: Record<string, string> = {
@@ -22,7 +23,7 @@ export default function SkillCard({ skill, onClick, isExpanded }: SkillCardProps
   return (
     <div
       onClick={onClick}
-      className={`bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-5 cursor-pointer transition-all ${
+      className={`${CARD} p-5 cursor-pointer transition-all ${
         isExpanded ? 'ring-2 ring-[#0071e3]' : 'hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)]'
       }`}
     >

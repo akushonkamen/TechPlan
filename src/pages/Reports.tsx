@@ -5,10 +5,23 @@ import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
 import EmptyState from '../components/EmptyState';
 import { fetchTopics } from '../services/topicService';
+import { CARD, SPINNER } from '../lib/design';
+
+interface Report {
+  id: string;
+  title: string;
+  type: string;
+  summary?: string;
+  content?: { keyFindings?: string[] };
+  generated_at?: string;
+  topic_name?: string;
+  topic_id?: string;
+  metadata?: { documentSummary?: { total: number; dateRange: string } };
+}
 
 export default function Reports() {
-  const [reports, setReports] = useState<any[]>([]);
-  const [topics, setTopics] = useState<any[]>([]);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [topics, setTopics] = useState<{ id: string; name: string }[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [skillStatus, setSkillStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
@@ -80,7 +93,9 @@ export default function Reports() {
     try {
       await fetch(`/api/reports/${id}`, { method: 'DELETE' });
       await loadData();
-    } catch { /* ignore */ }
+    } catch {
+      alert('删除报告失败');
+    }
   };
 
   const getTypeLabel = (type: string) => {
@@ -106,7 +121,7 @@ export default function Reports() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <div className="w-6 h-6 border-2 border-[#d2d2d7] border-t-[#0071e3] rounded-full animate-spin" />
+          <div className={SPINNER} />
         </div>
       ) : reports.length === 0 ? (
         <EmptyState
@@ -119,7 +134,7 @@ export default function Reports() {
           {reports.map(report => {
             const isExpanded = expandedId === report.id;
             return (
-              <div key={report.id} className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden transition-all duration-200">
+              <div key={report.id} className={`${CARD} overflow-hidden transition-all duration-200`}>
                 <div
                   className="px-6 py-5 flex items-center justify-between cursor-pointer hover:bg-[#f5f5f7]/50 transition-colors"
                   onClick={() => setExpandedId(isExpanded ? null : report.id)}

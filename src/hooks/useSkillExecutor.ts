@@ -2,11 +2,19 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 
+export interface SkillResult {
+  totalCollected?: number;
+  extractionStats?: { entities?: number; relations?: number };
+  title?: string;
+  raw?: string;
+  [key: string]: unknown;
+}
+
 export interface SkillExecutionState {
   executionId: string | null;
   status: 'idle' | 'running' | 'completed' | 'failed' | 'timeout';
   progress: string[];
-  result: any;
+  result: SkillResult | null;
   error: string | null;
   startedAt: string | null;
 }

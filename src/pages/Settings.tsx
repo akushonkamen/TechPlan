@@ -8,6 +8,7 @@ import SkillCard from '../components/SkillCard';
 import SkillDetailPanel from '../components/SkillDetailPanel';
 import SkillVersionHistory from '../components/SkillVersionHistory';
 import OptimizationConfigForm from '../components/OptimizationConfigForm';
+import { INPUT, LABEL, BTN_PRIMARY, CARD } from '../lib/design';
 
 const STORAGE_KEY = 'techplan_config';
 
@@ -210,9 +211,6 @@ export default function Settings() {
     { key: 'optimize', label: '技能优化', icon: Cpu },
   ];
 
-  const inputClass = 'w-full px-3.5 py-2.5 bg-[#f5f5f7] border-0 rounded-xl text-sm focus:bg-white transition-all';
-  const labelClass = 'block text-sm font-medium text-[#1d1d1f] mb-1.5';
-
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader title="设置" description="配置 AI 模型、数据库连接和技能优化" />
@@ -238,9 +236,9 @@ export default function Settings() {
       {/* AI Config Tab */}
       {activeTab === 'ai' && (
         <div className="space-y-5 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8 space-y-5">
+          <div className={`${CARD} p-8 space-y-5`}>
             <div>
-              <label className={labelClass}>模型提供商</label>
+              <label className={LABEL}>模型提供商</label>
               <div className="flex gap-2">
                 {[
                   { value: 'openai' as const, label: 'OpenAI' },
@@ -265,14 +263,14 @@ export default function Settings() {
             {config.aiProvider === 'openai' && (
               <div className="space-y-4">
                 <div>
-                  <label className={labelClass}>API Key</label>
+                  <label className={LABEL}>API Key</label>
                   <div className="relative">
                     <input
                       type={showApiKey ? 'text' : 'password'}
                       value={config.openaiApiKey}
                       onChange={e => setConfig({ ...config, openaiApiKey: e.target.value })}
                       placeholder="sk-..."
-                      className={`${inputClass} pr-10 font-mono`}
+                      className={`${INPUT} pr-10 font-mono`}
                     />
                     <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeb5] hover:text-[#86868b]">
                       {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -280,12 +278,12 @@ export default function Settings() {
                   </div>
                 </div>
                 <div>
-                  <label className={labelClass}>Base URL（可选）</label>
-                  <input type="url" value={config.openaiBaseUrl} onChange={e => setConfig({ ...config, openaiBaseUrl: e.target.value })} placeholder="https://api.openai.com/v1" className={`${inputClass} font-mono`} />
+                  <label className={LABEL}>Base URL（可选）</label>
+                  <input type="url" value={config.openaiBaseUrl} onChange={e => setConfig({ ...config, openaiBaseUrl: e.target.value })} placeholder="https://api.openai.com/v1" className={`${INPUT} font-mono`} />
                 </div>
                 <div>
-                  <label className={labelClass}>模型</label>
-                  <select value={config.openaiModel} onChange={e => setConfig({ ...config, openaiModel: e.target.value })} className={inputClass}>
+                  <label className={LABEL}>模型</label>
+                  <select value={config.openaiModel} onChange={e => setConfig({ ...config, openaiModel: e.target.value })} className={INPUT}>
                     {MODEL_PRESETS.openai.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
@@ -295,21 +293,21 @@ export default function Settings() {
             {config.aiProvider === 'gemini' && (
               <div className="space-y-4">
                 <div>
-                  <label className={labelClass}>API Key</label>
+                  <label className={LABEL}>API Key</label>
                   <div className="relative">
-                    <input type={showApiKey ? 'text' : 'password'} value={config.geminiApiKey} onChange={e => setConfig({ ...config, geminiApiKey: e.target.value })} placeholder="AIza..." className={`${inputClass} pr-10 font-mono`} />
+                    <input type={showApiKey ? 'text' : 'password'} value={config.geminiApiKey} onChange={e => setConfig({ ...config, geminiApiKey: e.target.value })} placeholder="AIza..." className={`${INPUT} pr-10 font-mono`} />
                     <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeb5] hover:text-[#86868b]">
                       {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
                 <div>
-                  <label className={labelClass}>Base URL（可选）</label>
-                  <input type="url" value={config.geminiBaseUrl} onChange={e => setConfig({ ...config, geminiBaseUrl: e.target.value })} placeholder="默认使用 Google 端点" className={`${inputClass} font-mono`} />
+                  <label className={LABEL}>Base URL（可选）</label>
+                  <input type="url" value={config.geminiBaseUrl} onChange={e => setConfig({ ...config, geminiBaseUrl: e.target.value })} placeholder="默认使用 Google 端点" className={`${INPUT} font-mono`} />
                 </div>
                 <div>
-                  <label className={labelClass}>模型</label>
-                  <select value={config.geminiModel} onChange={e => setConfig({ ...config, geminiModel: e.target.value })} className={inputClass}>
+                  <label className={LABEL}>模型</label>
+                  <select value={config.geminiModel} onChange={e => setConfig({ ...config, geminiModel: e.target.value })} className={INPUT}>
                     {MODEL_PRESETS.gemini.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
@@ -319,21 +317,21 @@ export default function Settings() {
             {config.aiProvider === 'custom' && (
               <div className="space-y-4">
                 <div>
-                  <label className={labelClass}>API Key</label>
+                  <label className={LABEL}>API Key</label>
                   <div className="relative">
-                    <input type={showApiKey ? 'text' : 'password'} value={config.customApiKey} onChange={e => setConfig({ ...config, customApiKey: e.target.value })} placeholder="你的 API Key" className={`${inputClass} pr-10 font-mono`} />
+                    <input type={showApiKey ? 'text' : 'password'} value={config.customApiKey} onChange={e => setConfig({ ...config, customApiKey: e.target.value })} placeholder="你的 API Key" className={`${INPUT} pr-10 font-mono`} />
                     <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeb5] hover:text-[#86868b]">
                       {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
                 <div>
-                  <label className={labelClass}>Base URL</label>
-                  <input type="url" value={config.customBaseUrl} onChange={e => setConfig({ ...config, customBaseUrl: e.target.value })} placeholder="https://your-api-endpoint.com/v1" className={`${inputClass} font-mono`} />
+                  <label className={LABEL}>Base URL</label>
+                  <input type="url" value={config.customBaseUrl} onChange={e => setConfig({ ...config, customBaseUrl: e.target.value })} placeholder="https://your-api-endpoint.com/v1" className={`${INPUT} font-mono`} />
                 </div>
                 <div>
-                  <label className={labelClass}>模型名称</label>
-                  <input type="text" value={config.customModel} onChange={e => setConfig({ ...config, customModel: e.target.value })} placeholder="your-model-name" className={inputClass} />
+                  <label className={LABEL}>模型名称</label>
+                  <input type="text" value={config.customModel} onChange={e => setConfig({ ...config, customModel: e.target.value })} placeholder="your-model-name" className={INPUT} />
                 </div>
               </div>
             )}
@@ -366,22 +364,22 @@ export default function Settings() {
 
       {/* Graph DB Tab */}
       {activeTab === 'graph' && (
-        <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8 space-y-4 animate-fade-in">
+        <div className={`${CARD} p-8 space-y-4 animate-fade-in`}>
           <p className="text-sm text-[#86868b]">配置 Neo4j 图数据库连接（可选）。不配置则使用本地存储。</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>连接 URI</label>
-              <input type="text" value={config.neo4jUri} onChange={e => setConfig({ ...config, neo4jUri: e.target.value })} placeholder="bolt://localhost:7687" className={`${inputClass} font-mono`} />
+              <label className={LABEL}>连接 URI</label>
+              <input type="text" value={config.neo4jUri} onChange={e => setConfig({ ...config, neo4jUri: e.target.value })} placeholder="bolt://localhost:7687" className={`${INPUT} font-mono`} />
             </div>
             <div>
-              <label className={labelClass}>用户名</label>
-              <input type="text" value={config.neo4jUser} onChange={e => setConfig({ ...config, neo4jUser: e.target.value })} placeholder="neo4j" className={inputClass} />
+              <label className={LABEL}>用户名</label>
+              <input type="text" value={config.neo4jUser} onChange={e => setConfig({ ...config, neo4jUser: e.target.value })} placeholder="neo4j" className={INPUT} />
             </div>
           </div>
           <div className="max-w-sm">
-            <label className={labelClass}>密码</label>
+            <label className={LABEL}>密码</label>
             <div className="relative">
-              <input type={showNeo4jPassword ? 'text' : 'password'} value={config.neo4jPassword} onChange={e => setConfig({ ...config, neo4jPassword: e.target.value })} placeholder="密码" className={`${inputClass} pr-10 font-mono`} />
+              <input type={showNeo4jPassword ? 'text' : 'password'} value={config.neo4jPassword} onChange={e => setConfig({ ...config, neo4jPassword: e.target.value })} placeholder="密码" className={`${INPUT} pr-10 font-mono`} />
               <button type="button" onClick={() => setShowNeo4jPassword(!showNeo4jPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeb5] hover:text-[#86868b]">
                 {showNeo4jPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -394,7 +392,7 @@ export default function Settings() {
       {activeTab === 'skills' && (
         <div className="space-y-6 animate-fade-in">
           {skillsLoading ? (
-            <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-12 text-center text-sm text-[#86868b]">
+            <div className={`${CARD} p-12 text-center text-sm text-[#86868b]`}>
               加载中...
             </div>
           ) : (
@@ -439,17 +437,17 @@ export default function Settings() {
       {/* Optimize Tab */}
       {activeTab === 'optimize' && (
         <div className="space-y-5 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8 space-y-5">
+          <div className={`${CARD} p-8 space-y-5`}>
             <div>
               <h3 className="text-base font-medium text-[#1d1d1f]">技能优化</h3>
               <p className="text-sm text-[#86868b] mt-1">通过双层优化循环自动提升技能质量</p>
             </div>
             <div>
-              <label className={labelClass}>选择技能</label>
+              <label className={LABEL}>选择技能</label>
               {skillsLoading ? (
                 <div className="text-sm text-[#86868b]">加载中...</div>
               ) : (
-                <select value={selectedSkill} onChange={e => setSelectedSkill(e.target.value)} className={inputClass}>
+                <select value={selectedSkill} onChange={e => setSelectedSkill(e.target.value)} className={INPUT}>
                   {allSkills.map(s => (
                     <option key={s.name} value={s.name}>{s.displayName || s.name} {s.version ? `v${s.version}` : ''}</option>
                   ))}
@@ -494,7 +492,7 @@ export default function Settings() {
 
           {/* Optimization History */}
           {!optHistoryLoading && optHistory.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-6">
+            <div className={`${CARD} p-6`}>
               <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">优化历史</h4>
               <div className="space-y-3">
                 {optHistory.map((entry) => (
@@ -530,7 +528,7 @@ export default function Settings() {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-2 px-5 py-2.5 bg-[#0071e3] text-white rounded-full text-sm font-medium hover:bg-[#0062cc] transition-all disabled:opacity-50 active:scale-[0.97]"
+          className={`flex items-center gap-2 ${BTN_PRIMARY} disabled:opacity-50`}
         >
           {saving ? (
             <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />保存中...</>
