@@ -71,23 +71,23 @@ export function SkillStatusPanel({ state, skillName, onCancel, onReset }: SkillS
     : null;
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4 mb-4 bg-white">
+    <div className="border border-[#d2d2d7] rounded-2xl p-4 mb-4 bg-white">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           {state.status === 'running' && (
-            <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse" />
+            <div className="w-2.5 h-2.5 bg-[#0071e3] rounded-full animate-pulse" />
           )}
           {state.status === 'completed' && (
-            <div className="w-2.5 h-2.5 bg-green-500 rounded-full" />
+            <div className="w-2.5 h-2.5 bg-[#34c759] rounded-full" />
           )}
           {state.status === 'failed' && (
-            <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />
+            <div className="w-2.5 h-2.5 bg-[#ff3b30] rounded-full" />
           )}
           {state.status === 'timeout' && (
-            <div className="w-2.5 h-2.5 bg-yellow-500 rounded-full" />
+            <div className="w-2.5 h-2.5 bg-[#ff9f0a] rounded-full" />
           )}
-          <span className="font-medium text-sm">
+          <span className="font-medium text-sm text-[#1d1d1f]">
             {skillName === 'research' ? '情报采集' :
              skillName === 'extract' ? '知识抽取' :
              skillName === 'report' ? '报告生成' :
@@ -96,29 +96,29 @@ export function SkillStatusPanel({ state, skillName, onCancel, onReset }: SkillS
              skillName === 'optimize' ? '优化循环' :
              skillName}
           </span>
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-[#86868b]">
             {state.status === 'running' ? '执行中...' :
              state.status === 'completed' ? '完成' :
              state.status === 'failed' ? '失败' :
              '超时'}
           </span>
           {state.executionId && (
-            <span className="text-xs text-gray-300 font-mono">#{state.executionId.slice(0, 8)}</span>
+            <span className="text-xs text-[#aeaeb5] font-mono">#{state.executionId.slice(0, 8)}</span>
           )}
         </div>
         <div className="flex items-center gap-3">
           {state.status === 'running' && (
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-[#86868b]">
               已耗时 {formatElapsedTime(state.startedAt)}
             </span>
           )}
           {state.status === 'running' && onCancel && (
-            <button onClick={onCancel} className="text-xs text-red-500 hover:text-red-700 px-2 py-1 border border-red-200 rounded">
+            <button onClick={onCancel} className="text-xs text-[#ff3b30] hover:text-[#ff3b30]/80 px-2 py-1 border border-[#ff3b30]/30 rounded-lg">
               取消
             </button>
           )}
           {state.status !== 'running' && onReset && (
-            <button onClick={onReset} className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 border border-gray-200 rounded">
+            <button onClick={onReset} className="text-xs text-[#86868b] hover:text-[#1d1d1f] px-2 py-1 border border-[#d2d2d7] rounded-lg">
               关闭
             </button>
           )}
@@ -127,9 +127,9 @@ export function SkillStatusPanel({ state, skillName, onCancel, onReset }: SkillS
 
       {/* Current activity */}
       {state.status === 'running' && lastProgress && (
-        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
-          <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse shrink-0" />
-          <span className="text-xs text-blue-700 truncate">
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-[#0071e3]/5 rounded-xl border border-[#0071e3]/10">
+          <div className="w-1.5 h-1.5 bg-[#0071e3] rounded-full animate-pulse shrink-0" />
+          <span className="text-xs text-[#0071e3] truncate">
             {lastProgress.label}{lastProgress.detail}
           </span>
         </div>
@@ -137,16 +137,16 @@ export function SkillStatusPanel({ state, skillName, onCancel, onReset }: SkillS
 
       {/* Running indicator (no progress yet) */}
       {state.status === 'running' && !lastProgress && (
-        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
-          <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse shrink-0" />
-          <span className="text-xs text-gray-500">正在启动 Claude Code...</span>
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-[#f5f5f7] rounded-xl border border-[#d2d2d7]">
+          <div className="w-1.5 h-1.5 bg-[#86868b] rounded-full animate-pulse shrink-0" />
+          <span className="text-xs text-[#86868b]">正在启动 Claude Code...</span>
         </div>
       )}
 
       {/* Progress log */}
       {state.progress.length > 0 && (
-        <div ref={logRef} className="bg-gray-900 text-gray-100 rounded-lg p-3 max-h-48 overflow-y-auto mb-3">
-          <div className="text-xs text-gray-400 mb-2 font-mono">
+        <div ref={logRef} className="bg-[#1d1d1f] text-[#e8e8ed] rounded-xl p-3 max-h-48 overflow-y-auto mb-3">
+          <div className="text-xs text-[#86868b] mb-2 font-mono">
             ── Claude Code 实时输出 ({state.progress.length} 条) ──
           </div>
           {state.progress.map((raw, i) => {
@@ -154,14 +154,14 @@ export function SkillStatusPanel({ state, skillName, onCancel, onReset }: SkillS
             if (!parsed) return null;
             return (
               <div key={i} className="text-xs font-mono py-0.5 flex items-start gap-2">
-                <span className="text-gray-500 shrink-0 select-none">{String(i + 1).padStart(3, ' ')}│</span>
+                <span className="text-[#86868b] shrink-0 select-none">{String(i + 1).padStart(3, ' ')}│</span>
                 <span className={
                   parsed.label.includes('工具') ? 'text-cyan-300' :
-                  parsed.label.includes('Claude') ? 'text-green-300' :
-                  'text-gray-300'
+                  parsed.label.includes('Claude') ? 'text-[#34c759]' :
+                  'text-[#e8e8ed]'
                 }>
                   {parsed.label}
-                  {parsed.detail && <span className="text-gray-500">{parsed.detail}</span>}
+                  {parsed.detail && <span className="text-[#86868b]">{parsed.detail}</span>}
                 </span>
               </div>
             );
@@ -171,14 +171,14 @@ export function SkillStatusPanel({ state, skillName, onCancel, onReset }: SkillS
 
       {/* Error */}
       {state.error && (
-        <div className="bg-red-50 text-red-700 rounded-lg p-3 text-sm border border-red-100">
+        <div className="bg-[#ff3b30]/5 text-[#ff3b30] rounded-xl p-3 text-sm border border-[#ff3b30]/10">
           <span className="font-medium">错误: </span>{state.error}
         </div>
       )}
 
       {/* Result summary */}
       {state.status === 'completed' && state.result && (
-        <div className="bg-green-50 text-green-700 rounded-lg p-3 text-sm border border-green-100">
+        <div className="bg-[#34c759]/5 text-[#34c759] rounded-xl p-3 text-sm border border-[#34c759]/10">
           {typeof state.result === 'object'
             ? state.result.totalCollected
               ? `采集了 ${state.result.totalCollected} 篇文档`
