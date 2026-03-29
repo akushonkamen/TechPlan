@@ -82,12 +82,13 @@ export default function Settings() {
   const [selectedSkill, setSelectedSkill] = useState('research');
 
   // Skills management
-  const { skills: allSkills, loading: skillsLoading } = useSkillsList();
+  const { skills: allSkills, loading: skillsLoading, refetch: refetchSkills } = useSkillsList();
   const { config: optConfig, loading: optConfigLoading, save: saveOptConfig, saving: optConfigSaving } = useOptimizationConfig(selectedSkill);
   const { history: optHistory, loading: optHistoryLoading } = useOptHistory(selectedSkill);
   const [selectedSkillDetail, setSelectedSkillDetail] = useState<string | null>(null);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [versionHistorySkill, setVersionHistorySkill] = useState<{ name: string; displayName: string } | null>(null);
+  const [optConfigSaveStatus, setOptConfigSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -197,6 +198,17 @@ export default function Settings() {
       maxIterations: 10,
       convergenceThreshold: 8,
     });
+  };
+
+  const handleSaveOptConfig = async (nextConfig: Parameters<typeof saveOptConfig>[0]) => {
+    try {
+      await saveOptConfig(nextConfig);
+      setOptConfigSaveStatus('success');
+    } catch {
+      setOptConfigSaveStatus('error');
+    } finally {
+      setTimeout(() => setOptConfigSaveStatus('idle'), 3000);
+    }
   };
 
   const tabs: Array<{ key: TabKey; label: string; icon: any }> = [
@@ -426,10 +438,7 @@ export default function Settings() {
               displayName={versionHistorySkill.displayName}
               isOpen={showVersionHistory}
               onClose={() => setShowVersionHistory(false)}
-              onRestored={() => {
-                // Refetch skills list after restore
-                window.location.reload();
-              }}
+              onRestored={refetchSkills}
             />
           )}
         </div>
@@ -478,9 +487,18 @@ export default function Settings() {
           {/* Optimization Config Form */}
           <OptimizationConfigForm
             config={optConfig}
-            onSave={saveOptConfig}
+            onSave={handleSaveOptConfig}
             saving={optConfigSaving}
           />
+          {optConfigSaveStatus === 'success' && (
+            <div className="text-sm text-[#34c759]">优化配置已保存</div>
+          )}
+          {optConfigSaveStatus === 'error' && (
+            <div className="text-sm text-[#ff3b30]">优化配置保存失败，请稍后重试</div>
+          )}
+          {optConfigLoading && (
+            <div className="text-sm text-[#86868b]">正在加载优化配置...</div>
+          )}
 
           {/* Optimization History */}
           {!optHistoryLoading && optHistory.length > 0 && (

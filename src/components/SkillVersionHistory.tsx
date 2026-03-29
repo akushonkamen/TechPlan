@@ -1,5 +1,5 @@
 import { X, RotateCcw, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SkillVersion } from '../hooks/useSkillApi';
 
 interface SkillVersionHistoryProps {
@@ -35,11 +35,6 @@ export default function SkillVersionHistory({
     }
   };
 
-  // Load versions when modal opens
-  const handleOpen = () => {
-    fetchVersions();
-  };
-
   const handleRestore = async (version: string) => {
     setRestoring(version);
     try {
@@ -55,10 +50,12 @@ export default function SkillVersionHistory({
     }
   };
 
-  // Trigger fetch when modal opens
-  if (isOpen && versions.length === 0 && !loading) {
-    handleOpen();
-  }
+  useEffect(() => {
+    if (isOpen) {
+      fetchVersions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, skillName]);
 
   if (!isOpen) return null;
 

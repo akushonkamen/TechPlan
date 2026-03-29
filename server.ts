@@ -1496,7 +1496,11 @@ async function startServer() {
         );
       }
 
-      res.json({ success: true });
+      const saved = await db.get(
+        "SELECT * FROM optimization_configs WHERE skill_name = ?",
+        [name]
+      );
+      res.json(saved ?? { success: true });
     } catch (error) {
       console.error("Failed to update optimization config:", error);
       res.status(500).json({ error: "Failed to update optimization config" });
@@ -1531,6 +1535,50 @@ async function startServer() {
     const { executionId, promise } = skillExecutor.startExecution(name, params);
 
     promise.then(async (execution) => {
+      if (name === 'optimize') {
+        try {
+          const result = execution.result ?? {};
+          const optimization = result.optimizationResult ?? {};
+          const toNumber = (value: any, fallback = 0) => {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : fallback;
+          };
+
+          const id = `opth_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          const iterationsCompleted = toNumber(optimization.iterations ?? result.total_runs, 0);
+          const peakScore = toNumber(optimization.peakScore ?? result.peak_score, 0);
+          const finalScore = toNumber(optimization.finalScore ?? result.final_score ?? peakScore, peakScore);
+          const lessonsExtracted = toNumber(result.lessonsExtracted ?? result.lessons_extracted, 0);
+          const converged = optimization.converged ?? result.converged;
+          const resultSummary = typeof result === 'string'
+            ? result
+            : JSON.stringify({
+              skillName: result.skillName ?? params.skillName ?? '',
+              optimizationResult: optimization,
+              strategyChanges: result.strategyChanges ?? [],
+            });
+
+          await db.run(
+            `INSERT INTO optimization_history
+             (id, skill_name, iterations_completed, converged, peak_score, final_score, lessons_extracted, result_summary, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              id,
+              params.skillName ?? 'unknown',
+              iterationsCompleted,
+              converged ? 1 : 0,
+              peakScore,
+              finalScore,
+              lessonsExtracted,
+              resultSummary,
+              new Date().toISOString(),
+            ]
+          );
+        } catch (err) {
+          console.error('[Optimize] Failed to persist optimization_history:', err);
+        }
+      }
+
       ws.send(execution.id, 'result', JSON.stringify(execution.result ?? { error: execution.error }));
     }).catch((err) => {
       console.error(`[SkillExecutor] Error executing ${name}:`, err);

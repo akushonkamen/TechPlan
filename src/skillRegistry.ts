@@ -2,7 +2,6 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import * as yaml from "js-yaml";
 
 export interface SkillParamDef {
   name: string;
@@ -43,13 +42,112 @@ const SKILL_TIMEOUTS: Record<string, number> = {
 };
 
 interface FrontmatterData {
+  // camelCase keys
   displayName?: string;
+  // snake_case keys (as used in skill markdown files)
+  display_name?: string;
   description?: string;
   category?: string;
   version?: string;
   timeout?: number;
   params?: SkillParamDef[];
   steps?: string[];
+}
+
+function parseScalar(value: string): any {
+  const trimmed = value.trim();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+/**
+ * Minimal YAML parser for skill frontmatter subset.
+ * Supports scalar keys, block strings (|), arrays of objects (`params`) and arrays of strings (`steps`).
+ */
+function parseYamlSubset(frontmatterStr: string): FrontmatterData {
+  const result: any = {};
+  const lines = frontmatterStr.split('\n');
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith('#')) {
+      i++;
+      continue;
+    }
+
+    const keyMatch = /^([A-Za-z0-9_]+):\s*(.*)$/.exec(trimmed);
+    if (!keyMatch) {
+      i++;
+      continue;
+    }
+
+    const key = keyMatch[1];
+    const rawValue = keyMatch[2];
+
+    // Multiline string: description: |
+    if (rawValue === '|') {
+      const parts: string[] = [];
+      i++;
+      while (i < lines.length && (lines[i].startsWith('  ') || !lines[i].trim())) {
+        const l = lines[i];
+        parts.push(l.startsWith('  ') ? l.slice(2) : '');
+        i++;
+      }
+      result[key] = parts.join('\n').trim();
+      continue;
+    }
+
+    // Array section: params: / steps:
+    if (!rawValue) {
+      if (key === 'params') {
+        const params: SkillParamDef[] = [];
+        i++;
+        while (i < lines.length && lines[i].startsWith('  - ')) {
+          const first = lines[i].trim().slice(2).trim(); // remove "- "
+          const obj: any = {};
+          const firstKV = /^([A-Za-z0-9_]+):\s*(.*)$/.exec(first);
+          if (firstKV) obj[firstKV[1]] = parseScalar(firstKV[2]);
+          i++;
+          while (i < lines.length && lines[i].startsWith('    ')) {
+            const kv = /^([A-Za-z0-9_]+):\s*(.*)$/.exec(lines[i].trim());
+            if (kv) obj[kv[1]] = parseScalar(kv[2]);
+            i++;
+          }
+          params.push(obj as SkillParamDef);
+        }
+        result[key] = params;
+        continue;
+      }
+
+      if (key === 'steps') {
+        const steps: string[] = [];
+        i++;
+        while (i < lines.length && lines[i].startsWith('  - ')) {
+          const step = lines[i].trim().slice(2).trim();
+          steps.push(String(parseScalar(step)));
+          i++;
+        }
+        result[key] = steps;
+        continue;
+      }
+    }
+
+    result[key] = parseScalar(rawValue);
+    i++;
+  }
+
+  return result as FrontmatterData;
 }
 
 /**
@@ -74,7 +172,7 @@ function parseFrontmatter(content: string): { frontmatter: FrontmatterData | nul
   const body = trimmed.slice(endIdx + 5).trim(); // Skip \n---
 
   try {
-    const frontmatter = yaml.load(frontmatterStr) as FrontmatterData;
+    const frontmatter = parseYamlSubset(frontmatterStr);
     return { frontmatter, body };
   } catch (err) {
     console.warn(`[SkillRegistry] Failed to parse frontmatter: ${err}`);
@@ -100,10 +198,11 @@ export class SkillRegistry {
       const { frontmatter, body } = parseFrontmatter(content);
 
       if (frontmatter) {
+        const displayName = frontmatter.displayName ?? frontmatter.display_name ?? name;
         // New format with frontmatter
         this.skills.set(name, {
           name,
-          displayName: frontmatter.displayName ?? name,
+          displayName,
           description: frontmatter.description ?? `Skill: ${name}`,
           category: frontmatter.category ?? 'general',
           version: frontmatter.version ?? '0.0.0',
