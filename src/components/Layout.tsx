@@ -29,9 +29,9 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#f5f5f7] flex">
       {/* Sidebar */}
-      <div className="w-60 bg-white/80 backdrop-blur-sm border-r border-[#d2d2d7] flex flex-col fixed inset-y-0 left-0 z-40">
+      <div className="w-60 bg-white/80 backdrop-blur-xl flex flex-col fixed inset-y-0 left-0 z-40">
         {/* Logo */}
-        <div className="h-14 flex items-center px-5">
+        <div className="h-14 flex items-center px-5 border-b border-[#f5f5f7]">
           <div className="flex items-center gap-2">
             <Network className="w-5 h-5 text-[#0071e3]" />
             <span className="font-bold text-base tracking-tight text-[#1d1d1f]">TechPlan</span>
@@ -61,7 +61,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         </nav>
 
         {/* Bottom nav */}
-        <div className="px-3 py-2 border-t border-[#d2d2d7]">
+        <div className="px-3 py-2 border-t border-[#f5f5f7]">
           {bottomNavigation.map((item) => {
             const isActive = location.pathname === item.href;
             return (
@@ -83,9 +83,9 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
 
         {/* User avatar */}
-        <div className="px-3 py-3 border-t border-[#d2d2d7]">
+        <div className="px-3 py-3 border-t border-[#f5f5f7]">
           <div className="flex items-center gap-2.5 px-3 py-1.5">
-            <div className="w-7 h-7 rounded-full bg-[#0071e3]/10 flex items-center justify-center text-[#0071e3] font-semibold text-xs">
+            <div className="w-7 h-7 rounded-full bg-[#0071e3]/8 flex items-center justify-center text-[#0071e3] font-semibold text-xs">
               T
             </div>
             <span className="text-xs text-[#86868b]">TechPlan User</span>

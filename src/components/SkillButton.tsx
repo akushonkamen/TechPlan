@@ -22,7 +22,7 @@ export default function SkillButton({
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed';
 
-  const baseClasses = 'inline-flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-all duration-200';
+  const baseClasses = 'inline-flex items-center gap-2 px-5 py-2 rounded-[980px] text-sm font-medium transition-all duration-200';
 
   const variantClasses = variant === 'primary'
     ? isRunning
@@ -40,7 +40,7 @@ export default function SkillButton({
     <button
       onClick={onClick}
       disabled={disabled || isRunning}
-      className={`${baseClasses} ${variantClasses} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+      className={`${baseClasses} ${variantClasses} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       {isRunning && <Loader2 className="w-4 h-4 animate-spin" />}
       {isCompleted && <CheckCircle2 className="w-4 h-4" />}

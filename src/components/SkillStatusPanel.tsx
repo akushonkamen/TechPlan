@@ -2,6 +2,7 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import type { SkillExecutionState } from '../hooks/useSkillExecutor';
+import { CARD } from '../lib/design';
 
 interface SkillStatusPanelProps {
   state: SkillExecutionState;
@@ -71,7 +72,7 @@ export function SkillStatusPanel({ state, skillName, onCancel, onReset }: SkillS
     : null;
 
   return (
-    <div className="border border-[#d2d2d7] rounded-2xl p-4 mb-4 bg-white">
+    <div className={`${CARD} p-4 mb-4`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">

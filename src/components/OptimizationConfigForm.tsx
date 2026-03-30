@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react';
 import type { OptimizationConfig } from '../hooks/useSkillApi';
-import { CARD, INPUT, LABEL, BTN_PRIMARY } from '../lib/design';
+import { CARD, CARD_FLAT, INPUT, LABEL, BTN_PRIMARY } from '../lib/design';
 
 interface OptimizationConfigFormProps {
   config: OptimizationConfig | null;
@@ -22,7 +22,7 @@ export default function OptimizationConfigForm({
 }: OptimizationConfigFormProps) {
   if (!config) {
     return (
-      <div className="bg-[#f5f5f7] rounded-xl p-6 text-center text-sm text-[#86868b]">
+      <div className={`${CARD_FLAT} p-6 text-center text-sm text-[#86868b]`}>
         请选择一个技能以配置优化参数
       </div>
     );

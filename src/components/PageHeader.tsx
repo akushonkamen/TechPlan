@@ -9,12 +9,12 @@ interface PageHeaderProps {
 
 export default function PageHeader({ title, description, children, stats }: PageHeaderProps) {
   return (
-    <div className="mb-8 animate-fade-in">
+    <div className="mb-4 animate-fade-in">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-[#1d1d1f] leading-tight">{title}</h1>
+          <h1 className="text-[34px] font-semibold tracking-tight text-[#1d1d1f] leading-tight">{title}</h1>
           {description && (
-            <p className="mt-1 text-base text-[#86868b]">{description}</p>
+            <p className="mt-1 text-[15px] text-[#86868b]">{description}</p>
           )}
         </div>
         {children && (
