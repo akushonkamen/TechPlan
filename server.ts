@@ -9,17 +9,26 @@ import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import { SkillRegistry } from "./src/skillRegistry.js";
 import { SkillExecutor } from "./src/skillExecutor.js";
+import type { SkillExecution } from "./src/skillExecutor.js";
 import { SkillWebSocket } from "./src/websocket.js";
+import { SchedulerService } from "./src/scheduler.js";
 
 // 配置文件上传（使用内存存储）
+const MAX_UPLOAD_SIZE = parseInt(process.env.MAX_UPLOAD_SIZE_MB || '10') * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
+    fileSize: MAX_UPLOAD_SIZE,
   },
 });
 
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3000');
+
+/** Safely parse JSON, returning fallback on failure */
+function safeJsonParse(val: string | null | undefined, fallback: any = null): any {
+  if (!val) return fallback;
+  try { return JSON.parse(val); } catch { return val; }
+}
 
 async function startServer() {
   const app = express();
@@ -47,6 +56,17 @@ async function startServer() {
   function validateSkillName(name: string): boolean {
     return SKILL_NAME_PATTERN.test(name);
   }
+
+  // CORS middleware
+  app.use((_req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (_req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  });
 
   // Initialize SQLite database
   const dbPath = path.resolve(process.cwd(), "database.sqlite");
@@ -358,9 +378,9 @@ async function startServer() {
       // Parse JSON arrays back to arrays
       const topics = rows.map(row => ({
         ...row,
-        aliases: JSON.parse(row.aliases || "[]"),
-        keywords: JSON.parse(row.keywords || "[]"),
-        organizations: JSON.parse(row.organizations || "[]")
+        aliases: safeJsonParse(row.aliases, []),
+        keywords: safeJsonParse(row.keywords, []),
+        organizations: safeJsonParse(row.organizations, [])
       }));
       res.json(topics);
     } catch (error) {
@@ -398,7 +418,8 @@ async function startServer() {
 
   app.delete("/api/topics/:id", async (req, res) => {
     try {
-      await db.run("DELETE FROM topics WHERE id = ?", [req.params.id]);
+      const result = await db.run("DELETE FROM topics WHERE id = ?", [req.params.id]);
+      if (!result.changes) { res.status(404).json({ error: "Topic not found" }); return; }
       res.status(204).send();
     } catch (error) {
       console.error("Failed to delete topic:", error);
@@ -437,9 +458,9 @@ async function startServer() {
       if (row) {
         const updatedTopic = {
           ...row,
-          aliases: JSON.parse(row.aliases || "[]"),
-          keywords: JSON.parse(row.keywords || "[]"),
-          organizations: JSON.parse(row.organizations || "[]")
+          aliases: safeJsonParse(row.aliases, []),
+          keywords: safeJsonParse(row.keywords, []),
+          organizations: safeJsonParse(row.organizations, [])
         };
         res.json(updatedTopic);
       } else {
@@ -631,7 +652,7 @@ async function startServer() {
       const rows = await db.all(query, params);
       const documents = rows.map(row => ({
         ...row,
-        metadata: row.metadata ? JSON.parse(row.metadata) : null
+        metadata: safeJsonParse(row.metadata)
       }));
       res.json(documents);
     } catch (error) {
@@ -648,7 +669,7 @@ async function startServer() {
       }
       const document = {
         ...row,
-        metadata: row.metadata ? JSON.parse(row.metadata) : null
+        metadata: safeJsonParse(row.metadata)
       };
       res.json(document);
     } catch (error) {
@@ -665,7 +686,7 @@ async function startServer() {
       );
       const documents = rows.map(row => ({
         ...row,
-        metadata: row.metadata ? JSON.parse(row.metadata) : null
+        metadata: safeJsonParse(row.metadata)
       }));
       res.json(documents);
     } catch (error) {
@@ -699,7 +720,7 @@ async function startServer() {
       const created = await db.get("SELECT * FROM documents WHERE id = ?", [id]);
       const document = {
         ...created,
-        metadata: created.metadata ? JSON.parse(created.metadata) : null
+        metadata: safeJsonParse(created.metadata)
       };
       res.status(201).json(document);
     } catch (error) {
@@ -710,7 +731,8 @@ async function startServer() {
 
   app.delete("/api/documents/:id", async (req, res) => {
     try {
-      await db.run("DELETE FROM documents WHERE id = ?", [req.params.id]);
+      const result = await db.run("DELETE FROM documents WHERE id = ?", [req.params.id]);
+      if (!result.changes) { res.status(404).json({ error: "Document not found" }); return; }
       res.status(204).send();
     } catch (error) {
       console.error("Failed to delete document:", error);
@@ -809,11 +831,11 @@ async function startServer() {
       // 解析 JSON 字段
       const parsedEntities = entities.map((e: any) => ({
         ...e,
-        metadata: e.metadata ? JSON.parse(e.metadata) : null
+        metadata: safeJsonParse(e.metadata)
       }));
       const parsedEvents = events.map((e: any) => ({
         ...e,
-        participants: e.participants ? JSON.parse(e.participants) : []
+        participants: safeJsonParse(e.participants, [])
       }));
 
       res.json({
@@ -853,7 +875,7 @@ async function startServer() {
 
       const parsedEntities = entities.map((e: any) => ({
         ...e,
-        metadata: e.metadata ? JSON.parse(e.metadata) : null
+        metadata: safeJsonParse(e.metadata)
       }));
 
       // 按类型分组统计
@@ -968,7 +990,7 @@ async function startServer() {
   app.get("/api/graph/topic/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const depth = req.query.depth ? parseInt(req.query.depth as string) : 2;
+      const depth = Math.max(1, Math.min(10, parseInt(req.query.depth as string) || 2));
 
       const subgraph = await graphService.getTopicGraph(id, depth);
 
@@ -1069,7 +1091,7 @@ async function startServer() {
   app.get("/api/graph/related/:entityId", async (req, res) => {
     try {
       const { entityId } = req.params;
-      const depth = req.query.depth ? parseInt(req.query.depth as string) : 2;
+      const depth = Math.max(1, Math.min(10, parseInt(req.query.depth as string) || 2));
 
       const entities = await graphService.findRelatedEntities(entityId, depth);
 
@@ -1127,11 +1149,13 @@ async function startServer() {
 
       const rows = await db.all(query, params);
 
-      const reports = rows.map((row: any) => ({
-        ...row,
-        content: row.content ? JSON.parse(row.content) : null,
-        metadata: row.metadata ? JSON.parse(row.metadata) : null
-      }));
+      const reports = rows.map((row: any) => {
+        let parsedContent = row.content;
+        let parsedMetadata = row.metadata;
+        try { if (parsedContent) parsedContent = JSON.parse(parsedContent); } catch { /* keep raw string */ }
+        try { if (parsedMetadata) parsedMetadata = JSON.parse(parsedMetadata); } catch { /* keep raw string */ }
+        return { ...row, content: parsedContent, metadata: parsedMetadata };
+      });
 
       res.json(reports);
     } catch (error) {
@@ -1152,11 +1176,11 @@ async function startServer() {
         return res.status(404).json({ error: "Report not found" });
       }
 
-      const report = {
-        ...row,
-        content: row.content ? JSON.parse(row.content) : null,
-        metadata: row.metadata ? JSON.parse(row.metadata) : null
-      };
+      let parsedContent = row.content;
+      let parsedMetadata = row.metadata;
+      try { if (parsedContent) parsedContent = JSON.parse(parsedContent); } catch { /* keep raw string */ }
+      try { if (parsedMetadata) parsedMetadata = JSON.parse(parsedMetadata); } catch { /* keep raw string */ }
+      const report = { ...row, content: parsedContent, metadata: parsedMetadata };
 
       res.json(report);
     } catch (error) {
@@ -1171,11 +1195,222 @@ async function startServer() {
    */
   app.delete("/api/reports/:id", async (req, res) => {
     try {
-      await db.run("DELETE FROM reports WHERE id = ?", [req.params.id]);
+      const result = await db.run("DELETE FROM reports WHERE id = ?", [req.params.id]);
+      if (!result.changes) { res.status(404).json({ error: "Report not found" }); return; }
       res.status(204).send();
     } catch (error) {
       console.error("Failed to delete report:", error);
       res.status(500).json({ error: "Failed to delete report" });
+    }
+  });
+
+  // ===== Report Pipeline API (v2) =====
+
+  const { migrateReportTables } = await import('./src/services/reportService.js');
+  await migrateReportTables(db);
+
+  const { ReportReviewService } = await import('./src/services/reportReviewService.js');
+  const { ReportGraphService } = await import('./src/services/reportGraphService.js');
+  const reviewService = new ReportReviewService(db);
+  const reportGraphService = new ReportGraphService(db);
+
+  app.get("/api/reports/templates", async (_req, res) => {
+    try {
+      const rows = await db.all("SELECT * FROM report_templates WHERE is_active = 1");
+      res.json(rows.map(r => ({
+        ...r,
+        structure: safeJsonParse(r.structure, {}),
+        validation_rules: safeJsonParse(r.validation_rules, {}),
+      })));
+    } catch (error) {
+      console.error("Failed to fetch templates:", error);
+      res.status(500).json({ error: "Failed to fetch templates" });
+    }
+  });
+
+  app.get("/api/reports/:id/reviews", async (req, res) => {
+    try {
+      const reviews = await reviewService.getReviews(req.params.id);
+      res.json(reviews);
+    } catch (error) {
+      console.error("Failed to fetch reviews:", error);
+      res.status(500).json({ error: "Failed to fetch reviews" });
+    }
+  });
+
+  app.post("/api/reports/:id/reviews", async (req, res) => {
+    try {
+      const { reviewType, checklistResults, issues, comments, action } = req.body;
+      const review = await reviewService.submitReview(
+        req.params.id,
+        req.body.reviewerId || 'system',
+        reviewType,
+        checklistResults,
+        issues,
+        comments,
+        action
+      );
+      res.status(201).json(review);
+    } catch (error) {
+      console.error("Failed to submit review:", error);
+      res.status(500).json({ error: "Failed to submit review" });
+    }
+  });
+
+  app.get("/api/reports/:id/graph", async (req, res) => {
+    try {
+      const snapshot = await reportGraphService.getGraphSnapshot(req.params.id);
+      res.json(snapshot);
+    } catch (error) {
+      console.error("Failed to get report graph:", error);
+      res.status(500).json({ error: "Failed to get report graph" });
+    }
+  });
+
+  app.get("/api/reports/:id/section/:sectionId/evidence", async (req, res) => {
+    try {
+      const evidence = await reportGraphService.getSectionEvidence(req.params.id, req.params.sectionId);
+      res.json(evidence);
+    } catch (error) {
+      console.error("Failed to get section evidence:", error);
+      res.status(500).json({ error: "Failed to get section evidence" });
+    }
+  });
+
+  app.get("/api/reports/:id/evidence-path", async (req, res) => {
+    try {
+      const { from, to } = req.query;
+      if (!from || !to) {
+        res.status(400).json({ error: "Missing 'from' or 'to' parameter" });
+        return;
+      }
+      const path = await reportGraphService.findEvidencePath(req.params.id, from as string, to as string);
+      if (!path) {
+        res.status(404).json({ error: "Path not found" });
+        return;
+      }
+      res.json(path);
+    } catch (error) {
+      console.error("Failed to find evidence path:", error);
+      res.status(500).json({ error: "Failed to find evidence path" });
+    }
+  });
+
+  app.post("/api/reports/:id/feedback", async (req, res) => {
+    try {
+      const { type, content } = req.body;
+      const id = uuidv4();
+      await db.run(
+        `INSERT INTO report_feedback (id, report_id, user_id, feedback_type, content, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'new', ?)`,
+        [id, req.params.id, req.body.userId || null, type, JSON.stringify(content), new Date().toISOString()]
+      );
+      res.status(201).json({ id, status: 'created' });
+    } catch (error) {
+      console.error("Failed to submit feedback:", error);
+      res.status(500).json({ error: "Failed to submit feedback" });
+    }
+  });
+
+  app.get("/api/reports/:id/feedback", async (req, res) => {
+    try {
+      const rows = await db.all(
+        "SELECT * FROM report_feedback WHERE report_id = ? ORDER BY created_at DESC",
+        [req.params.id]
+      );
+      const feedback = rows.map(r => ({
+        ...r,
+        content: safeJsonParse(r.content, {}),
+      }));
+
+      const ratingRows = rows.filter(r => r.feedback_type === 'rating');
+      const avgRating = ratingRows.length > 0
+        ? ratingRows.reduce((sum, r) => sum + (safeJsonParse(r.content, {}).rating || 0), 0) / ratingRows.length
+        : 0;
+
+      res.json({
+        feedback,
+        stats: {
+          averageRating: Math.round(avgRating * 10) / 10,
+          totalFeedback: rows.length,
+          byType: rows.reduce((acc, r) => {
+            acc[r.feedback_type] = (acc[r.feedback_type] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>),
+        },
+      });
+    } catch (error) {
+      console.error("Failed to fetch feedback:", error);
+      res.status(500).json({ error: "Failed to fetch feedback" });
+    }
+  });
+
+  app.post("/api/reports/:id/publish", async (req, res) => {
+    try {
+      const { publishedBy } = req.body;
+      await db.run(
+        `UPDATE reports SET status = 'published', review_status = 'approved', published_at = ?, published_by = ? WHERE id = ?`,
+        [new Date().toISOString(), publishedBy || 'system', req.params.id]
+      );
+      res.json({ status: 'published' });
+    } catch (error) {
+      console.error("Failed to publish report:", error);
+      res.status(500).json({ error: "Failed to publish report" });
+    }
+  });
+
+  app.post("/api/reports/:id/versions", async (req, res) => {
+    try {
+      const { changeSummary, changedBy } = req.body;
+      const report = await db.get("SELECT * FROM reports WHERE id = ?", [req.params.id]);
+      if (!report) {
+        res.status(404).json({ error: "Report not found" });
+        return;
+      }
+
+      const latestVersion = await db.get(
+        "SELECT version FROM report_versions WHERE report_id = ? ORDER BY created_at DESC LIMIT 1",
+        [req.params.id]
+      );
+
+      let newVersion = '1.0.0';
+      if (latestVersion) {
+        const parts = latestVersion.version.split('.');
+        if (parts.length === 3) {
+          const patch = parseInt(parts[2]) + 1;
+          newVersion = `${parts[0]}.${parts[1]}.${patch}`;
+        }
+      }
+
+      const id = uuidv4();
+      await db.run(
+        `INSERT INTO report_versions (id, report_id, version, content, change_summary, changed_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, req.params.id, newVersion, report.content, changeSummary || '', changedBy || 'system', new Date().toISOString()]
+      );
+
+      await db.run(
+        `UPDATE reports SET version = ? WHERE id = ?`,
+        [newVersion, req.params.id]
+      );
+
+      res.status(201).json({ id, version: newVersion });
+    } catch (error) {
+      console.error("Failed to create version:", error);
+      res.status(500).json({ error: "Failed to create version" });
+    }
+  });
+
+  app.get("/api/reports/:id/versions", async (req, res) => {
+    try {
+      const rows = await db.all(
+        "SELECT id, version, change_summary, changed_by, created_at FROM report_versions WHERE report_id = ? ORDER BY created_at DESC",
+        [req.params.id]
+      );
+      res.json(rows);
+    } catch (error) {
+      console.error("Failed to fetch versions:", error);
+      res.status(500).json({ error: "Failed to fetch versions" });
     }
   });
 
@@ -1220,22 +1455,25 @@ async function startServer() {
       if (process.env.NEO4J_USER) config.neo4jUser = process.env.NEO4J_USER;
       if (process.env.NEO4J_PASSWORD) config.neo4jPassword = process.env.NEO4J_PASSWORD;
 
-      // 返回完整配置（本地开发环境，直接返回完整 key）
-      // 生产环境应该使用 session/cookie 来保护敏感信息
+      // Mask sensitive fields before sending to client
+      const mask = (val: string | undefined) => {
+        if (!val || val.length <= 4) return val ? '****' : '';
+        return '****' + val.slice(-4);
+      };
       res.json({
         aiProvider: config.aiProvider,
         openaiBaseUrl: config.openaiBaseUrl,
         openaiModel: config.openaiModel,
-        openaiApiKey: config.openaiApiKey || "",
+        openaiApiKey: mask(config.openaiApiKey),
         geminiBaseUrl: config.geminiBaseUrl,
         geminiModel: config.geminiModel,
-        geminiApiKey: config.geminiApiKey || "",
+        geminiApiKey: mask(config.geminiApiKey),
         customBaseUrl: config.customBaseUrl,
         customModel: config.customModel,
-        customApiKey: config.customApiKey || "",
+        customApiKey: mask(config.customApiKey),
         neo4jUri: config.neo4jUri,
         neo4jUser: config.neo4jUser,
-        neo4jPassword: config.neo4jPassword || "",
+        neo4jPassword: mask(config.neo4jPassword),
       });
     } catch (error) {
       console.error("Failed to load config:", error);
@@ -1328,6 +1566,7 @@ async function startServer() {
   const skillExecutor = new SkillExecutor(skillRegistry, db);
   const httpServer = createHttpServer(app);
   const ws = new SkillWebSocket(httpServer);
+  skillExecutor.setWebSocket(ws);
 
   // Clean up stale "running" executions from previous server session
   await skillExecutor.cleanupStale();
@@ -1550,6 +1789,159 @@ async function startServer() {
     }
   });
 
+  // ── Extracted report persistence handler (shared by HTTP endpoint & scheduler) ──
+  async function handleReportResult(execution: SkillExecution, params: Record<string, any>) {
+    try {
+      const envelope = execution.result ?? {};
+      let rawOutput = envelope.result ?? envelope.raw ?? envelope;
+
+      let parsed: any;
+      if (typeof rawOutput === 'string') {
+        let cleaned = rawOutput.trim();
+        const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+        if (fenceMatch) cleaned = fenceMatch[1].trim();
+        const first = cleaned.indexOf('{');
+        const last = cleaned.lastIndexOf('}');
+        if (first !== -1 && last > first) cleaned = cleaned.slice(first, last + 1);
+        try {
+          parsed = JSON.parse(cleaned);
+        } catch {
+          console.error('[Report] Failed to parse Claude output as JSON');
+          parsed = {};
+        }
+      } else if (typeof rawOutput === 'object' && rawOutput !== null) {
+        parsed = rawOutput;
+      } else {
+        parsed = {};
+      }
+
+      const content = parsed.content ?? parsed;
+      const meta = content.meta ?? {};
+      const execSummary = content.executiveSummary ?? {};
+
+      const rawKeyPoints = execSummary.keyPoints ?? [];
+      const normalizedKeyPoints = rawKeyPoints.map((kp: any) =>
+        typeof kp === 'object' ? (kp.point ?? kp.text ?? JSON.stringify(kp)) : String(kp)
+      );
+
+      const normalizedContent = {
+        executiveSummary: {
+          overview: execSummary.overview ?? '',
+          keyPoints: normalizedKeyPoints,
+          confidence: execSummary.confidence ?? meta.confidence ?? 'medium',
+          period: execSummary.period ?? meta.period ?? {},
+        },
+        sections: content.sections ?? [],
+        timeline: content.timeline ?? [],
+        metrics: content.metrics ?? {},
+      };
+
+      const hasSubstantialContent = (normalizedContent.sections?.length ?? 0) > 0
+        || (normalizedContent.executiveSummary.overview?.length ?? 0) > 50;
+      const rawStr = typeof rawOutput === 'string' ? rawOutput : String(rawOutput ?? '');
+      if (!hasSubstantialContent && rawStr.length > 100) {
+        const lastFenceEnd = rawStr.lastIndexOf('```');
+        const markdownBody = lastFenceEnd > 0 ? rawStr.slice(lastFenceEnd + 3).trim() : rawStr;
+        const overviewLine = rawStr.split('\n').find((l: string) =>
+          l.trim().length > 20 && !l.startsWith('#') && !l.startsWith('```') && !l.startsWith('{')
+        );
+        normalizedContent.executiveSummary.overview = overviewLine ?? '';
+        normalizedContent.sections = [{
+          id: 'raw_report',
+          title: '完整报告',
+          thesis: '',
+          content: markdownBody,
+          highlights: [],
+          signals: [],
+          entityRefs: [],
+        }];
+      }
+
+      const title = parsed.title ?? `${params.topicName ?? ''} 分析报告`;
+      const summary = parsed.summary ?? execSummary.overview ?? '';
+      const period = normalizedContent.executiveSummary.period ?? {};
+      const rptId = `rpt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      console.log('[Report] Parsed report:', {
+        title,
+        hasSummary: !!summary,
+        sectionsCount: normalizedContent.sections.length,
+        timelineCount: normalizedContent.timeline.length,
+        confidence: normalizedContent.executiveSummary.confidence,
+      });
+
+      const docCount = await db.get(
+        "SELECT COUNT(*) as count FROM documents WHERE topic_id = ?",
+        [params.topicId]
+      );
+      const entityCount = await db.get(
+        `SELECT COUNT(*) as count FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ?`,
+        [params.topicId]
+      );
+
+      await db.run(
+        `INSERT INTO reports (id, topic_id, topic_name, type, title, summary, content, status, generated_at, period_start, period_end, metadata, review_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, 'pending')`,
+        [
+          rptId,
+          params.topicId ?? null,
+          params.topicName ?? params.topicContext ?? '',
+          params.reportType ?? 'weekly',
+          title,
+          summary,
+          JSON.stringify(normalizedContent),
+          new Date().toISOString(),
+          period.start ?? null,
+          period.end ?? null,
+          JSON.stringify({
+            executionId: execution.id,
+            documentCount: docCount?.count || 0,
+            entityCount: entityCount?.count || 0,
+            ...(parsed.metadata ?? meta)
+          }),
+        ]
+      );
+      console.log(`[Report] Saved report ${rptId} for topic ${params.topicId}`);
+
+      try {
+        const autoReview = await reviewService.createAutoReview(rptId, normalizedContent, {
+          documentCount: docCount?.count || 0,
+          entityCount: entityCount?.count || 0,
+        });
+        console.log(`[Report] Auto review completed: ${autoReview.status}`);
+      } catch (reviewErr) {
+        console.error('[Report] Auto review failed:', reviewErr);
+      }
+
+      if (params.topicId && normalizedContent.sections) {
+        try {
+          const links = await reportGraphService.buildGraphLinks(rptId, params.topicId, normalizedContent);
+          console.log(`[Report] Built ${links.length} graph links`);
+        } catch (graphErr) {
+          console.error('[Report] Failed to build graph links:', graphErr);
+        }
+      }
+    } catch (err) {
+      console.error('[Report] Failed to persist report:', err);
+    }
+  }
+
+  // ── Scheduler ──
+  let schedulerConfig: { schedulerEnabled?: boolean; schedulerCheckIntervalMinutes?: number } = {};
+  try {
+    if (fs.existsSync(configPath)) {
+      const raw = await fs.promises.readFile(configPath, 'utf-8');
+      schedulerConfig = JSON.parse(raw);
+    }
+  } catch { /* use defaults */ }
+  const scheduler = new SchedulerService({
+    enabled: schedulerConfig.schedulerEnabled ?? false,
+    checkIntervalMinutes: schedulerConfig.schedulerCheckIntervalMinutes ?? 30,
+  });
+  scheduler.setDb(db);
+  scheduler.setStartExecution(skillExecutor.startExecution.bind(skillExecutor));
+  scheduler.setReportHandler(handleReportResult);
+
   // Trigger a skill execution
   app.post("/api/skill/:name", requireAdmin, async (req, res) => {
     const { name } = req.params;
@@ -1607,6 +1999,10 @@ async function startServer() {
         }
       }
 
+      if (name === 'report') {
+        await handleReportResult(execution, params);
+      }
+
       ws.send(execution.id, 'result', JSON.stringify(execution.result ?? { error: execution.error }));
     }).catch((err) => {
       console.error(`[SkillExecutor] Error executing ${name}:`, err);
@@ -1617,39 +2013,131 @@ async function startServer() {
 
   // Get progress lines for an execution (poll-based, reliable)
   app.get("/api/skill/:id/progress", (req, res) => {
-    const { id } = req.params;
-    const afterParam = parseInt(req.query.after as string) || 0;
-    const lines = skillExecutor.getProgress(id);
-    res.json({
-      lines: lines.slice(afterParam),
-      total: lines.length,
-    });
+    try {
+      const { id } = req.params;
+      const afterParam = parseInt(req.query.after as string) || 0;
+      const lines = skillExecutor.getProgress(id);
+      res.json({
+        lines: lines.slice(afterParam),
+        total: lines.length,
+      });
+    } catch (error) {
+      console.error("Failed to get progress:", error);
+      res.status(500).json({ error: "Failed to get progress" });
+    }
   });
 
   // Check skill execution status
   app.get("/api/skill/:id/status", async (req, res) => {
-    const { id } = req.params;
-    const row = await db.get("SELECT * FROM skill_executions WHERE id = ?", [id]);
-    if (!row) {
-      res.status(404).json({ error: "Execution not found" });
-      return;
+    try {
+      const { id } = req.params;
+      const row = await db.get("SELECT * FROM skill_executions WHERE id = ?", [id]);
+      if (!row) {
+        res.status(404).json({ error: "Execution not found" });
+        return;
+      }
+      res.json(row);
+    } catch (error) {
+      console.error("Failed to get execution status:", error);
+      res.status(500).json({ error: "Failed to get execution status" });
     }
-    res.json(row);
   });
 
   // List execution history
   app.get("/api/skill/executions", async (_req, res) => {
-    const rows = await db.all(
-      "SELECT id, skill_name, status, started_at, completed_at, error FROM skill_executions ORDER BY started_at DESC LIMIT 50"
-    );
-    res.json(rows);
+    try {
+      const rows = await db.all(
+        "SELECT id, skill_name, params, status, started_at, completed_at, result, error FROM skill_executions ORDER BY started_at DESC LIMIT 50"
+      );
+      const executions = rows.map((row: any) => ({
+        ...row,
+        params: safeJsonParse(row.params),
+        result: safeJsonParse(row.result),
+      }));
+      res.json(executions);
+    } catch (error) {
+      console.error("Failed to list executions:", error);
+      res.status(500).json({ error: "Failed to list executions" });
+    }
+  });
+
+  // Get single execution detail
+  app.get("/api/skill/executions/:id", async (req, res) => {
+    try {
+      const row = await db.get("SELECT * FROM skill_executions WHERE id = ?", [req.params.id]);
+      if (!row) { return res.status(404).json({ error: "Execution not found" }); }
+      res.json({
+        ...row,
+        params: safeJsonParse(row.params),
+        result: safeJsonParse(row.result),
+      });
+    } catch (error) {
+      console.error("Failed to fetch execution:", error);
+      res.status(500).json({ error: "Failed to fetch execution" });
+    }
   });
 
   // Cancel a running skill
   app.post("/api/skill/:id/cancel", (req, res) => {
-    const { id } = req.params;
-    const cancelled = skillExecutor.cancel(id);
-    res.json({ cancelled });
+    try {
+      const { id } = req.params;
+      const cancelled = skillExecutor.cancel(id);
+      res.json({ cancelled });
+    } catch (error) {
+      console.error("Failed to cancel execution:", error);
+      res.status(500).json({ error: "Failed to cancel execution" });
+    }
+  });
+
+  // ===== Scheduler API =====
+
+  /**
+   * GET /api/scheduler/status
+   * 获取调度器状态
+   */
+  app.get("/api/scheduler/status", async (_req, res) => {
+    try {
+      const status = scheduler.getStatus();
+      status.pendingTopics = await scheduler.getPendingTopics();
+      res.json(status);
+    } catch (error) {
+      console.error("Failed to get scheduler status:", error);
+      res.status(500).json({ error: "Failed to get scheduler status" });
+    }
+  });
+
+  /**
+   * POST /api/scheduler/toggle
+   * 开关调度器、修改检查间隔
+   */
+  app.post("/api/scheduler/toggle", async (req, res) => {
+    try {
+      const { enabled, checkIntervalMinutes } = req.body;
+
+      const newConfig: any = {};
+      if (typeof enabled === 'boolean') newConfig.enabled = enabled;
+      if (typeof checkIntervalMinutes === 'number') newConfig.checkIntervalMinutes = checkIntervalMinutes;
+
+      scheduler.restart(newConfig);
+
+      // Persist to config.json
+      try {
+        let existing: any = {};
+        if (fs.existsSync(configPath)) {
+          existing = JSON.parse(await fs.promises.readFile(configPath, 'utf-8'));
+        }
+        if (newConfig.enabled !== undefined) existing.schedulerEnabled = newConfig.enabled;
+        if (newConfig.checkIntervalMinutes !== undefined) existing.schedulerCheckIntervalMinutes = newConfig.checkIntervalMinutes;
+        await fs.promises.writeFile(configPath, JSON.stringify(existing, null, 2), 'utf-8');
+      } catch (cfgErr) {
+        console.error('[Scheduler] Failed to persist config:', cfgErr);
+      }
+
+      res.json({ success: true, config: scheduler.getConfig() });
+    } catch (error) {
+      console.error("Failed to toggle scheduler:", error);
+      res.status(500).json({ error: "Failed to toggle scheduler" });
+    }
   });
 
   // ===== Vite middleware for development (must be last) =====
@@ -1670,7 +2158,30 @@ async function startServer() {
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log(`WebSocket available at ws://localhost:${PORT}/ws`);
+    // Start scheduler if enabled
+    scheduler.start();
   });
+
+  // Graceful shutdown
+  const shutdown = (signal: string) => {
+    console.log(`\nReceived ${signal}, shutting down gracefully...`);
+    scheduler.stop();
+    httpServer.close(() => {
+      console.log('HTTP server closed');
+      db.close().then(() => {
+        console.log('Database closed');
+        process.exit(0);
+      });
+    });
+    // Force exit after 10s if graceful shutdown hangs
+    setTimeout(() => {
+      console.error('Forcing exit after timeout');
+      process.exit(1);
+    }, 10000);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch(console.error);

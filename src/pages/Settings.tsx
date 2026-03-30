@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Eye, EyeOff, Key, AlertCircle, Check, Zap, Database, Cpu, Layers } from 'lucide-react';
+import { Save, Eye, EyeOff, Key, AlertCircle, Check, Zap, Database, Cpu, Layers, Clock, Timer } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
 import { useBilevelOptimization } from '../hooks/useSkills';
@@ -8,7 +8,8 @@ import SkillCard from '../components/SkillCard';
 import SkillDetailPanel from '../components/SkillDetailPanel';
 import SkillVersionHistory from '../components/SkillVersionHistory';
 import OptimizationConfigForm from '../components/OptimizationConfigForm';
-import { INPUT, LABEL, BTN_PRIMARY, CARD } from '../lib/design';
+import ExecutionHistory from '../components/ExecutionHistory';
+import { INPUT, LABEL, BTN_PRIMARY, CARD, SEGMENT_TRACK, SEGMENT_ACTIVE, SEGMENT_INACTIVE } from '../lib/design';
 
 const STORAGE_KEY = 'techplan_config';
 
@@ -42,7 +43,7 @@ const MODEL_PRESETS = {
   ],
 };
 
-type TabKey = 'ai' | 'graph' | 'skills' | 'optimize';
+type TabKey = 'ai' | 'graph' | 'skills' | 'optimize' | 'history' | 'scheduler';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabKey>('ai');
@@ -83,6 +84,31 @@ export default function Settings() {
   const [versionHistorySkill, setVersionHistorySkill] = useState<{ name: string; displayName: string } | null>(null);
   const [optConfigSaveStatus, setOptConfigSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
+  // Scheduler state
+  const [schedulerStatus, setSchedulerStatus] = useState<{
+    running: boolean;
+    checkIntervalMinutes: number;
+    lastCheckAt: string | null;
+    nextCheckAt: string | null;
+    pendingTopics: Array<{
+      topicId: string;
+      topicName: string;
+      schedule: string;
+      lastReportAt: string | null;
+      dueInMinutes: number;
+    }>;
+    recentTriggers: Array<{
+      topicId: string;
+      topicName: string;
+      triggeredAt: string;
+      executionId: string;
+      status: string;
+    }>;
+  } | null>(null);
+  const [schedulerLoading, setSchedulerLoading] = useState(false);
+  const [schedulerToggling, setSchedulerToggling] = useState(false);
+  const [schedulerInterval, setSchedulerInterval] = useState(30);
+
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -101,6 +127,49 @@ export default function Settings() {
     };
     loadConfig();
   }, []);
+
+  // Fetch scheduler status
+  const fetchSchedulerStatus = async () => {
+    setSchedulerLoading(true);
+    try {
+      const res = await fetch('/api/scheduler/status');
+      if (res.ok) {
+        const data = await res.json();
+        setSchedulerStatus(data);
+        setSchedulerInterval(data.checkIntervalMinutes ?? 30);
+      }
+    } catch { /* ignore */ } finally {
+      setSchedulerLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'scheduler') fetchSchedulerStatus();
+  }, [activeTab]);
+
+  const handleSchedulerToggle = async (enabled: boolean) => {
+    setSchedulerToggling(true);
+    try {
+      const res = await fetch('/api/scheduler/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, checkIntervalMinutes: schedulerInterval }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.config) setSchedulerInterval(data.config.checkIntervalMinutes);
+        await fetchSchedulerStatus();
+      }
+    } catch { /* ignore */ } finally {
+      setSchedulerToggling(false);
+    }
+  };
+
+  const handleSchedulerIntervalChange = async () => {
+    const clamped = Math.max(5, Math.min(1440, schedulerInterval));
+    setSchedulerInterval(clamped);
+    await handleSchedulerToggle(schedulerStatus?.running ?? false);
+  };
 
   const getCurrentApiKey = () => {
     switch (config.aiProvider) {
@@ -175,9 +244,9 @@ export default function Settings() {
         setTestStatus('error');
         setTestError(result.error || '连接失败');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setTestStatus('error');
-      setTestError(error.message || '网络错误');
+      setTestError((error instanceof Error ? error.message : String(error)) || '网络错误');
     } finally {
       setTesting(false);
       setTimeout(() => setTestStatus('idle'), 5000);
@@ -209,6 +278,8 @@ export default function Settings() {
     { key: 'graph', label: '图数据库', icon: Database },
     { key: 'skills', label: '技能管理', icon: Layers },
     { key: 'optimize', label: '技能优化', icon: Cpu },
+    { key: 'history', label: '执行历史', icon: Clock },
+    { key: 'scheduler', label: '定时任务', icon: Timer },
   ];
 
   return (
@@ -216,15 +287,15 @@ export default function Settings() {
       <PageHeader title="设置" description="配置 AI 模型、数据库连接和技能优化" />
 
       {/* Tab bar */}
-      <div className="flex items-center gap-1 bg-[#f5f5f7] rounded-xl p-1 w-fit">
+      <div className={`flex items-center gap-1 ${SEGMENT_TRACK} w-fit`}>
         {tabs.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-[980px] text-sm font-medium transition-all ${
               activeTab === tab.key
-                ? 'bg-white text-[#1d1d1f] shadow-sm'
-                : 'text-[#86868b] hover:text-[#1d1d1f]'
+                ? SEGMENT_ACTIVE
+                : SEGMENT_INACTIVE
             }`}
           >
             <tab.icon className="w-4 h-4" />
@@ -248,7 +319,7 @@ export default function Settings() {
                   <button
                     key={p.value}
                     onClick={() => setConfig({ ...config, aiProvider: p.value })}
-                    className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                    className={`px-4 py-2 rounded-[980px] text-sm font-medium transition-all ${
                       config.aiProvider === p.value
                         ? 'bg-[#1d1d1f] text-white'
                         : 'bg-[#f5f5f7] text-[#86868b] hover:bg-[#e8e8ed]'
@@ -340,7 +411,7 @@ export default function Settings() {
               <button
                 onClick={handleTest}
                 disabled={!getCurrentApiKey() || testing}
-                className="px-4 py-2 rounded-full text-sm font-medium bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] transition-all disabled:opacity-40"
+                className="px-4 py-2 rounded-[980px] text-sm font-medium bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] transition-all disabled:opacity-40"
               >
                 {testing ? (
                   <span className="flex items-center gap-2">
@@ -434,6 +505,13 @@ export default function Settings() {
         </div>
       )}
 
+      {/* Execution History Tab */}
+      {activeTab === 'history' && (
+        <div className="animate-fade-in">
+          <ExecutionHistory />
+        </div>
+      )}
+
       {/* Optimize Tab */}
       {activeTab === 'optimize' && (
         <div className="space-y-5 animate-fade-in">
@@ -510,6 +588,141 @@ export default function Settings() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Scheduler Tab */}
+      {activeTab === 'scheduler' && (
+        <div className="space-y-5 animate-fade-in">
+          <div className={`${CARD} p-8 space-y-5`}>
+            <div>
+              <h3 className="text-base font-medium text-[#1d1d1f]">定时任务调度器</h3>
+              <p className="text-sm text-[#86868b] mt-1">按主题的采集频率自动触发周报生成</p>
+            </div>
+
+            {/* Enable/Disable Toggle */}
+            <div className="flex items-center justify-between py-3 border-b border-[#f5f5f7]">
+              <div>
+                <div className="text-sm font-medium text-[#1d1d1f]">启用调度器</div>
+                <div className="text-xs text-[#86868b] mt-0.5">
+                  {schedulerStatus?.running
+                    ? `运行中 · 每 ${schedulerStatus.checkIntervalMinutes} 分钟检查`
+                    : '未启用'}
+                </div>
+              </div>
+              <button
+                onClick={() => handleSchedulerToggle(!schedulerStatus?.running)}
+                disabled={schedulerToggling}
+                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
+                  schedulerStatus?.running ? 'bg-[#34c759]' : 'bg-[#d2d2d7]'
+                } ${schedulerToggling ? 'opacity-50' : ''}`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                    schedulerStatus?.running ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Check Interval */}
+            <div>
+              <label className={LABEL}>检查间隔（分钟）</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={5}
+                  max={1440}
+                  value={schedulerInterval}
+                  onChange={e => setSchedulerInterval(Number(e.target.value))}
+                  onBlur={handleSchedulerIntervalChange}
+                  className={`${INPUT} w-32`}
+                  disabled={!schedulerStatus?.running}
+                />
+                <span className="text-xs text-[#86868b]">最小 5，最大 1440（24h）</span>
+              </div>
+            </div>
+
+            {/* Status Info */}
+            {schedulerStatus && (
+              <div className="grid grid-cols-3 gap-4 py-3 border-t border-[#f5f5f7]">
+                <div>
+                  <div className="text-xs text-[#86868b]">运行状态</div>
+                  <div className={`text-sm font-medium mt-1 ${schedulerStatus.running ? 'text-[#34c759]' : 'text-[#86868b]'}`}>
+                    {schedulerStatus.running ? '运行中' : '已停止'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-[#86868b]">上次检查</div>
+                  <div className="text-sm text-[#1d1d1f] mt-1">
+                    {schedulerStatus.lastCheckAt
+                      ? new Date(schedulerStatus.lastCheckAt).toLocaleString('zh-CN')
+                      : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-[#86868b]">下次检查</div>
+                  <div className="text-sm text-[#1d1d1f] mt-1">
+                    {schedulerStatus.nextCheckAt
+                      ? new Date(schedulerStatus.nextCheckAt).toLocaleString('zh-CN')
+                      : '—'}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Pending Topics */}
+          <div className={`${CARD} p-6`}>
+            <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">待触发主题</h4>
+            {schedulerLoading ? (
+              <div className="text-sm text-[#86868b]">加载中...</div>
+            ) : (schedulerStatus?.pendingTopics?.length ?? 0) === 0 ? (
+              <div className="text-sm text-[#86868b]">暂无到期主题</div>
+            ) : (
+              <div className="space-y-3">
+                {schedulerStatus?.pendingTopics.map(topic => (
+                  <div key={topic.topicId} className="flex items-center justify-between py-3 border-b border-[#f5f5f7] last:border-0">
+                    <div>
+                      <div className="text-sm text-[#1d1d1f]">{topic.topicName}</div>
+                      <div className="text-xs text-[#86868b] mt-0.5">
+                        周期: {topic.schedule === 'daily' ? '每日' : topic.schedule === 'weekly' ? '每周' : '每月'}
+                        {topic.lastReportAt && ` · 上次报告: ${new Date(topic.lastReportAt).toLocaleString('zh-CN')}`}
+                      </div>
+                    </div>
+                    <span className="text-xs text-[#ff9500] bg-[#ff9500]/10 px-2 py-1 rounded-full">待触发</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Recent Triggers */}
+          {(schedulerStatus?.recentTriggers?.length ?? 0) > 0 && (
+            <div className={`${CARD} p-6`}>
+              <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">最近触发记录</h4>
+              <div className="space-y-3">
+                {schedulerStatus?.recentTriggers.slice(0, 10).map((trigger, i) => (
+                  <div key={i} className="flex items-center justify-between py-3 border-b border-[#f5f5f7] last:border-0">
+                    <div>
+                      <div className="text-sm text-[#1d1d1f]">{trigger.topicName}</div>
+                      <div className="text-xs text-[#86868b] mt-0.5">
+                        {new Date(trigger.triggeredAt).toLocaleString('zh-CN')}
+                      </div>
+                    </div>
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      trigger.status === 'completed' ? 'text-[#34c759] bg-[#34c759]/10' :
+                      trigger.status === 'running' ? 'text-[#0071e3] bg-[#0071e3]/10' :
+                      'text-[#ff3b30] bg-[#ff3b30]/10'
+                    }`}>
+                      {trigger.status === 'completed' ? '完成' :
+                       trigger.status === 'running' ? '运行中' : '失败'}
+                    </span>
                   </div>
                 ))}
               </div>
