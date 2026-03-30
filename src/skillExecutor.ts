@@ -26,6 +26,7 @@ function shellEscape(s: string): string {
 interface QueuedExecution {
   config: { name: string; prompt: string; timeout: number };
   params: Record<string, any>;
+  executionId?: string;
   resolve: (execution: SkillExecution) => void;
   reject: (error: Error) => void;
 }
@@ -86,6 +87,12 @@ export class SkillExecutor {
     params: Record<string, any>,
     preassignedId?: string,
   ): Promise<SkillExecution> {
+    if (this.runningCount >= MAX_CONCURRENT) {
+      return new Promise<SkillExecution>((resolve, reject) => {
+        this.queue.push({ config, params, executionId: preassignedId, resolve, reject });
+      });
+    }
+
     const execution: SkillExecution = {
       id: preassignedId || randomUUID(),
       skillName: config.name,
@@ -282,7 +289,7 @@ export class SkillExecutor {
     // Process queue
     if (this.queue.length > 0 && this.runningCount < MAX_CONCURRENT) {
       const next = this.queue.shift()!;
-      this.run(next.config, next.params)
+      this.run(next.config, next.params, next.executionId)
         .then(next.resolve)
         .catch(next.reject);
     }
