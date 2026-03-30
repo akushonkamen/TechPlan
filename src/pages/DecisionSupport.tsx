@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Target, CheckCircle2, TrendingUp, TrendingDown, AlertTriangle, Users, Zap, Clock, Network } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
 import EmptyState from '../components/EmptyState';
-import { CARD, SPINNER } from '../lib/design';
+import { CARD, SPINNER, INPUT, TOAST_SUCCESS, TOAST_ERROR } from '../lib/design';
 
 interface Topic {
   id: string;
@@ -40,10 +40,10 @@ const scoreDimensions = [
 ];
 
 const recommendationLabels: Record<string, { label: string; color: string }> = {
-  'continuous_tracking': { label: '持续跟踪', color: 'bg-blue-50 text-blue-600' },
-  'small_pilot': { label: '小规模试点', color: 'bg-amber-50 text-amber-600' },
-  'heavy_investment': { label: '重点投入', color: 'bg-emerald-50 text-emerald-600' },
-  'joint_development': { label: '联合布局', color: 'bg-purple-50 text-purple-600' },
+  'continuous_tracking': { label: '持续跟踪', color: 'bg-[#0071e3]/5 text-[#0071e3]' },
+  'small_pilot': { label: '小规模试点', color: 'bg-[#ff9f0a]/5 text-[#ff9f0a]' },
+  'heavy_investment': { label: '重点投入', color: 'bg-[#34c759]/5 text-[#34c759]' },
+  'joint_development': { label: '联合布局', color: 'bg-[#5856d6]/5 text-[#5856d6]' },
   'risk_avoidance': { label: '规避风险', color: 'bg-[#ff3b30]/10 text-[#ff3b30]' },
 };
 
@@ -68,6 +68,26 @@ export default function DecisionSupport() {
   // Competitor tracking state
   const [competitorOrg, setCompetitorOrg] = useState('');
   const [competitorStatus, setCompetitorStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
+  const [toast, setToast] = useState<{message: string; type: 'success' | 'error'} | null>(null);
+  const mountedRef = useRef(true);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      timeoutsRef.current.forEach(clearTimeout);
+    };
+  }, []);
+
+  const safeTimeout = (fn: () => void, ms: number) => {
+    const id = setTimeout(() => { if (mountedRef.current) fn(); }, ms);
+    timeoutsRef.current.push(id);
+  };
+
+  const resetStatusAfterDelay = () => {
+    safeTimeout(() => setCompetitorStatus('idle'), 3000);
+    safeTimeout(() => setToast(null), 3000);
+  };
 
   useEffect(() => { fetchTopics(); }, []);
   useEffect(() => { if (selectedTopic) fetchScoringCard(selectedTopic); }, [selectedTopic]);
@@ -116,7 +136,12 @@ export default function DecisionSupport() {
       const { executionId } = await res.json();
 
       await new Promise<void>((resolve, reject) => {
+        let attempts = 0;
+        const MAX_ATTEMPTS = 120; // ~6 min cap
         const poll = async () => {
+          if (!mountedRef.current) { reject(new Error('unmounted')); return; }
+          attempts++;
+          if (attempts > MAX_ATTEMPTS) { reject(new Error('追踪超时')); return; }
           try {
             const statusRes = await fetch(`/api/skill/${executionId}/status`);
             if (statusRes.ok) {
@@ -144,10 +169,12 @@ export default function DecisionSupport() {
       }
 
       setCompetitorStatus('completed');
-      setTimeout(() => setCompetitorStatus('idle'), 3000);
+      setToast({message: '友商追踪完成', type: 'success'});
+      resetStatusAfterDelay();
     } catch {
       setCompetitorStatus('failed');
-      setTimeout(() => setCompetitorStatus('idle'), 3000);
+      setToast({message: '友商追踪失败', type: 'error'});
+      resetStatusAfterDelay();
     }
   }
 
@@ -165,7 +192,7 @@ export default function DecisionSupport() {
         <select
           value={selectedTopic || ''}
           onChange={e => setSelectedTopic(e.target.value)}
-          className="px-3.5 py-2 bg-[#f5f5f7] rounded-xl text-sm focus:bg-white transition-all"
+          className="px-3.5 py-2 bg-[#f5f5f7] rounded-[980px] text-sm focus:bg-white transition-all"
         >
           {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
@@ -181,7 +208,7 @@ export default function DecisionSupport() {
                 <p className="text-sm text-[#86868b] mt-0.5">{scoringCard.direction}</p>
               </div>
               <div className="text-right">
-                <div className={`text-5xl font-bold tracking-tight ${getScoreColor(scoringCard.overallScore)}`}>
+                <div className={`text-5xl font-semibold tracking-tight ${getScoreColor(scoringCard.overallScore)}`}>
                   {scoringCard.overallScore}
                 </div>
                 <div className="text-xs text-[#86868b]">/ 100</div>
@@ -212,7 +239,7 @@ export default function DecisionSupport() {
                       <Icon className="w-3.5 h-3.5 text-[#86868b]" />
                       <span className="text-[10px] text-[#86868b]">{label}</span>
                     </div>
-                    <span className={`text-2xl font-bold ${getScoreColor(score)}`}>{score}</span>
+                    <span className={`text-2xl font-semibold ${getScoreColor(score)}`}>{score}</span>
                     <div className="mt-2 h-1.5 bg-[#d2d2d7] rounded-full overflow-hidden">
                       <div className={`h-full ${getScoreBg(score)} rounded-full transition-all`} style={{ width: `${score}%` }} />
                     </div>
@@ -258,7 +285,7 @@ export default function DecisionSupport() {
             value={competitorOrg}
             onChange={e => setCompetitorOrg(e.target.value)}
             placeholder="输入组织名称，如 OpenAI, Google DeepMind..."
-            className="flex-1 px-3.5 py-2.5 bg-[#f5f5f7] rounded-xl text-sm focus:bg-white transition-all"
+            className={`flex-1 ${INPUT}`}
             onKeyDown={e => e.key === 'Enter' && handleCompetitorTrack()}
           />
           <SkillButton onClick={handleCompetitorTrack} status={competitorStatus} disabled={!competitorOrg.trim()}>
@@ -273,6 +300,12 @@ export default function DecisionSupport() {
           title="选择主题开始分析"
           description="选择一个技术主题，查看多维度评分和决策建议"
         />
+      )}
+
+      {toast && (
+        <div className={`animate-fade-in ${toast.type === 'success' ? TOAST_SUCCESS : TOAST_ERROR}`}>
+          {toast.message}
+        </div>
       )}
     </div>
   );
