@@ -3,6 +3,7 @@
 import { spawn, ChildProcess } from "child_process";
 import { randomUUID } from "crypto";
 import { SkillRegistry } from "./skillRegistry.js";
+import type { SkillWebSocket } from "./websocket.js";
 
 export interface SkillExecution {
   id: string;
@@ -23,6 +24,11 @@ function shellEscape(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
+// Strip ANSI escape codes (from `script` pseudo-TTY wrapper)
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
+
 interface QueuedExecution {
   config: { name: string; prompt: string; timeout: number };
   params: Record<string, any>;
@@ -37,11 +43,17 @@ export class SkillExecutor {
   private queue: QueuedExecution[] = [];
   // In-memory progress store — keyed by executionId
   private progressLines = new Map<string, string[]>();
+  private ws: SkillWebSocket | null = null;
 
   constructor(
     private registry: SkillRegistry,
     private db: any,
   ) {}
+
+  /** Inject the WebSocket instance after construction. */
+  setWebSocket(ws: SkillWebSocket) {
+    this.ws = ws;
+  }
 
   /** Get accumulated progress lines for an execution (poll-based). */
   getProgress(executionId: string): string[] {
@@ -117,6 +129,8 @@ export class SkillExecutor {
         if (arr) {
           arr.push(line);
         }
+        // Push to WebSocket subscribers in real-time
+        this.ws?.send(execution.id, 'progress', line);
       };
 
       // claude CLI requires a TTY to output data.
@@ -158,8 +172,10 @@ export class SkillExecutor {
         stdout += chunk;
 
         // Parse stream-json lines for structured progress
+        // Strip ANSI escape codes from `script` pseudo-TTY wrapper
         const lines = chunk.split('\n').filter(l => l.trim());
-        for (const line of lines) {
+        for (const rawLine of lines) {
+          const line = stripAnsi(rawLine);
           try {
             const parsed = JSON.parse(line);
 
@@ -190,7 +206,45 @@ export class SkillExecutor {
                 }
               }
             } else if (parsed.type === 'result') {
-              execution.result = parsed;
+              // Parse the actual result content from Claude CLI output
+              // Claude CLI returns: { type: "result", result: "{...actual JSON...}" }
+              // The result field may contain extra text before the JSON
+              console.log('[SkillExecutor] Received result type, parsing...');
+              
+              const resultStr = parsed.result;
+              let parsedResult: any = null;
+              
+              if (typeof resultStr === 'string') {
+                // Find the outermost JSON object in the result string
+                // The result may have extra text before/after the JSON
+                const firstBrace = resultStr.indexOf('{');
+                const lastBrace = resultStr.lastIndexOf('}');
+                
+                if (firstBrace !== -1 && lastBrace > firstBrace) {
+                  const extracted = resultStr.slice(firstBrace, lastBrace + 1);
+                  console.log('[SkillExecutor] Extracted JSON from result, length:', extracted.length);
+                  
+                  try {
+                    parsedResult = JSON.parse(extracted);
+                    console.log('[SkillExecutor] Successfully parsed result JSON');
+                    console.log('[SkillExecutor] Result title:', parsedResult.title);
+                  } catch (parseErr) {
+                    console.error('[SkillExecutor] Failed to parse extracted JSON:', parseErr);
+                    parsedResult = { raw: resultStr, parseError: String(parseErr) };
+                  }
+                } else {
+                  console.log('[SkillExecutor] No JSON object found in result');
+                  parsedResult = { raw: resultStr };
+                }
+              } else if (resultStr && typeof resultStr === 'object') {
+                parsedResult = resultStr;
+                console.log('[SkillExecutor] Result is already an object');
+              } else {
+                parsedResult = parsed;
+                console.log('[SkillExecutor] Using parsed as result');
+              }
+              
+              execution.result = parsedResult;
               const durationSec = parsed.duration_ms
                 ? Math.round(parsed.duration_ms / 1000)
                 : 0;
@@ -232,10 +286,48 @@ export class SkillExecutor {
         if (code === 0) {
           execution.status = 'completed';
           if (!execution.result) {
-            try {
-              execution.result = JSON.parse(stdout);
-            } catch {
-              execution.result = { raw: stdout.slice(-2000) };
+            // Strip ANSI escape codes from accumulated stdout
+            const cleanStdout = stripAnsi(stdout);
+            const lines = cleanStdout.split('\n').map(l => l.trim()).filter(Boolean);
+
+            // Scan from end to start for the result line
+            let foundResult = false;
+            for (let i = lines.length - 1; i >= 0; i--) {
+              if (lines[i].includes('"type":"result"')) {
+                try {
+                  const parsed = JSON.parse(lines[i]);
+                  if (parsed.type === 'result' && parsed.result !== undefined) {
+                    const resultStr = parsed.result;
+                    if (typeof resultStr === 'string') {
+                      const firstBrace = resultStr.indexOf('{');
+                      const lastBrace = resultStr.lastIndexOf('}');
+                      if (firstBrace !== -1 && lastBrace > firstBrace) {
+                        try {
+                          execution.result = JSON.parse(resultStr.slice(firstBrace, lastBrace + 1));
+                          console.log('[SkillExecutor] Extracted result JSON from close handler');
+                        } catch {
+                          execution.result = { raw: resultStr };
+                        }
+                      } else {
+                        execution.result = { raw: resultStr };
+                      }
+                    } else {
+                      execution.result = resultStr;
+                    }
+                    foundResult = true;
+                    break;
+                  }
+                } catch { /* skip malformed line */ }
+              }
+            }
+
+            if (!foundResult) {
+              // Last resort: try parsing whole stdout as single JSON
+              try {
+                execution.result = JSON.parse(cleanStdout);
+              } catch {
+                execution.result = { raw: cleanStdout };
+              }
             }
           }
         } else if (execution.status !== 'timeout') {
@@ -278,6 +370,11 @@ export class SkillExecutor {
         execution.id,
       ],
     ).catch((err: Error) => console.error('[SkillExecutor] DB update error:', err));
+
+    // Send terminal WebSocket message so frontend knows execution ended
+    if (execution.status === 'failed' || execution.status === 'timeout') {
+      this.ws?.send(execution.id, 'error', execution.error ?? 'Execution failed');
+    }
 
     resolve(execution);
 
