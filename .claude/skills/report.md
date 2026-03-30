@@ -1,9 +1,9 @@
 ---
-version: "1.0.0"
-display_name: "报告生成"
+version: "3.1.0"
+display_name: "咨询级报告生成"
 description: |
-  基于已采集的文档和抽取的知识，生成结构化技术分析报告。
-  支持周报、专题报告和预警三种类型。
+  六阶段生成标准化技术情报周报：数据收集→信号识别→分析框架→内容生成→质量检查→图谱关联。
+  输出严格 JSON，符合 ReportContent v2 schema。
 category: reporting
 timeout: 600
 params:
@@ -22,102 +22,436 @@ params:
   - name: timeRangeStart
     type: string
     required: false
-    description: "时间范围起始日期"
+    description: "时间范围起始日期（默认 7 天前）"
   - name: timeRangeEnd
     type: string
     required: false
-    description: "时间范围结束日期"
+    description: "时间范围结束日期（默认今天）"
 steps:
-  - "收集素材：从数据库获取文档、实体、关系、事件、主张"
-  - "按报告类型生成对应格式内容"
-  - "存入 reports 数据库表"
+  - "数据收集：查询文档/实体/关系/事件/主张 + 时间分布 + 组织活跃度"
+  - "信号识别：从数据中提取突破/趋势/衰减信号"
+  - "分析框架：竞争者画像、资本方向、交叉验证、差距评估"
+  - "内容生成：按 6 章节生成严格 JSON，包含实体引用"
+  - "质量检查：验证数据完整性、格式规范性、逻辑一致性"
+  - "图谱关联：提取 entityRefs 用于后续图谱关联"
 ---
 
-# 分析报告生成
+# 咨询级技术情报周报生成 v3.1
 
-你是一个技术情报分析师。请基于已采集的文档和抽取的知识，生成一份结构化的技术分析报告。
+你是一个资深技术情报分析师，对标 Gartner/McKinsey 技术情报周报标准。
+请严格按六阶段流程完成报告，最终输出 **纯 JSON**（无 markdown 包裹）。
 
 ## 任务参数
 
 - 主题 ID：{{topicId}}
 - 主题名称：{{topicName}}
 - 报告类型：{{reportType}}
-- 时间范围起始：{{timeRangeStart}}
-- 时间范围结束：{{timeRangeEnd}}
+- 时间范围：{{timeRangeStart}} ~ {{timeRangeEnd}}
 
-## 执行步骤
+---
 
-### 1. 收集素材
+## 第一阶段：数据收集
 
-使用 Bash 工具从数据库获取相关数据：
-
-```bash
-# 获取文档
-sqlite3 -json database.sqlite "SELECT id, title, source, published_date, content FROM documents WHERE topic_id = '{{topicId}}' ORDER BY published_date DESC LIMIT 30;"
-
-# 获取实体
-sqlite3 -json database.sqlite "SELECT e.text, e.type, e.confidence, COUNT(*) as mentions FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = '{{topicId}}' GROUP BY e.text ORDER BY mentions DESC LIMIT 30;"
-
-# 获取关系
-sqlite3 -json database.sqlite "SELECT r.source_text, r.relation, r.target_text, r.confidence FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = '{{topicId}}' ORDER BY r.confidence DESC LIMIT 30;"
-
-# 获取事件
-sqlite3 -json database.sqlite "SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = '{{topicId}}' ORDER BY ev.event_time DESC LIMIT 20;"
-
-# 获取主张
-sqlite3 -json database.sqlite "SELECT c.text, c.polarity, c.confidence FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = '{{topicId}}' ORDER BY c.confidence DESC LIMIT 20;"
-```
-
-### 2. 生成报告
-
-根据报告类型生成对应格式的报告：
-
-#### 周报 (weekly)
-结构：
-1. **概要**: 本周关键动态总结（3-5 条）
-2. **技术进展**: 重要技术突破和发展
-3. **组织动向**: 关注企业的关键动作
-4. **竞争格局**: 竞争态势变化
-5. **投资与合作**: 重要投资、合作事件
-6. **风险与机会**: 潜在风险和机遇分析
-7. **下周展望**: 值得关注的方向
-
-#### 专题报告 (special)
-结构：
-1. **背景**: 技术领域概述
-2. **现状分析**: 当前发展阶段
-3. **关键玩家**: 主要参与方及其策略
-4. **技术路线图**: 技术演进路径
-5. **SWOT 分析**: 优势、劣势、机会、威胁
-6. **建议**: 战略建议
-
-#### 预警 (alert)
-结构：
-1. **预警内容**: 简明扼要的预警描述
-2. **触发因素**: 导致预警的事件
-3. **影响评估**: 对业务的影响
-4. **建议行动**: 应对措施
-
-### 3. 存入数据库
+使用 Bash 工具执行以下 Node.js 脚本查询数据：
 
 ```bash
-sqlite3 database.sqlite "INSERT INTO reports (id, topic_id, topic_name, type, title, summary, content, status, generated_at, period_start, period_end, metadata) VALUES ('$(uuidgen)', '{{topicId}}', '{{topicName}}', '{{reportType}}', '报告标题', '摘要', '报告正文（JSON转义的完整内容）', 'completed', '$(date -I)', '{{timeRangeStart}}', '{{timeRangeEnd}}', '{}');"
+node -e "
+const Database = require('better-sqlite3');
+const db = new Database('database.sqlite');
+
+const topicId = '{{topicId}}';
+
+// 1. 获取文档
+const docs = db.prepare(\`
+  SELECT id, title, source, published_date, substr(content, 1, 500) as excerpt 
+  FROM documents WHERE topic_id = ? ORDER BY published_date DESC LIMIT 30
+\`).all(topicId);
+
+// 2. 获取实体
+const entities = db.prepare(\`
+  SELECT e.text, e.type, e.confidence, COUNT(*) as mentions 
+  FROM entities e JOIN documents d ON e.document_id = d.id 
+  WHERE d.topic_id = ? GROUP BY e.text ORDER BY mentions DESC LIMIT 30
+\`).all(topicId);
+
+// 3. 获取关系
+const relations = db.prepare(\`
+  SELECT r.source_text, r.relation, r.target_text, r.confidence 
+  FROM relations r JOIN documents d ON r.document_id = d.id 
+  WHERE d.topic_id = ? ORDER BY r.confidence DESC LIMIT 30
+\`).all(topicId);
+
+// 4. 获取事件
+const events = db.prepare(\`
+  SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants 
+  FROM events ev JOIN documents d ON ev.document_id = d.id 
+  WHERE d.topic_id = ? ORDER BY ev.event_time DESC LIMIT 20
+\`).all(topicId);
+
+// 5. 获取主张
+const claims = db.prepare(\`
+  SELECT c.text, c.polarity, c.confidence 
+  FROM claims c JOIN documents d ON c.document_id = d.id 
+  WHERE d.topic_id = ? ORDER BY c.confidence DESC LIMIT 20
+\`).all(topicId);
+
+// 6. 时间分布
+const timeDist = db.prepare(\`
+  SELECT date(ev.event_time) as d, count(*) as cnt 
+  FROM events ev JOIN documents d ON ev.document_id = d.id 
+  WHERE d.topic_id = ? AND ev.event_time >= date('now', '-30 days') 
+  GROUP BY d ORDER BY d
+\`).all(topicId);
+
+// 7. 组织活跃度
+const orgActivity = db.prepare(\`
+  SELECT e.text, e.type, COUNT(*) as cnt 
+  FROM entities e JOIN documents d ON e.document_id = d.id 
+  WHERE d.topic_id = ? AND e.type = 'Organization' 
+  GROUP BY e.text ORDER BY cnt DESC LIMIT 15
+\`).all(topicId);
+
+// 8. 统计
+const docCount = db.prepare('SELECT COUNT(*) as count FROM documents WHERE topic_id = ?').get(topicId);
+const entityCount = db.prepare('SELECT COUNT(DISTINCT e.text) as count FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ?').get(topicId);
+
+console.log(JSON.stringify({ docs, entities, relations, events, claims, timeDist, orgActivity, docCount, entityCount }, null, 2));
+"
 ```
 
-### 4. 返回结果
+**重要**：如果 better-sqlite3 不可用，使用以下替代方案：
+
+```bash
+node -e "
+const sqlite3 = require('sqlite3').verbose();
+const db = new sqlite3.Database('database.sqlite');
+
+const topicId = '{{topicId}}';
+const results = {};
+
+db.serialize(() => {
+  db.all('SELECT id, title, source, published_date FROM documents WHERE topic_id = ? ORDER BY published_date DESC LIMIT 30', [topicId], (err, rows) => {
+    results.docs = rows || [];
+    db.all('SELECT text, type, confidence FROM entities WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ?) LIMIT 30', [topicId], (err, rows) => {
+      results.entities = rows || [];
+      db.all('SELECT source_text, relation, target_text FROM relations WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ?) LIMIT 30', [topicId], (err, rows) => {
+        results.relations = rows || [];
+        db.all('SELECT type, title, description, event_time FROM events WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ?) ORDER BY event_time DESC LIMIT 20', [topicId], (err, rows) => {
+          results.events = rows || [];
+          db.get('SELECT COUNT(*) as count FROM documents WHERE topic_id = ?', [topicId], (err, row) => {
+            results.docCount = row?.count || 0;
+            db.close();
+            console.log(JSON.stringify(results, null, 2));
+          });
+        });
+      });
+    });
+  });
+});
+"
+```
+
+---
+
+## 第二阶段：信号识别
+
+基于收集到的数据，进行以下分析：
+
+### 2a. 信号分类标准
+
+| 信号类型 | 定义 | 识别规则 | 示例 |
+|----------|------|----------|------|
+| breakthrough | 单次出现但影响重大 | 高影响事件 + 权威来源 + 独特性 | GPT-5 发布、量子纠错突破 |
+| trend | 多次提及的同一主题 | 同一实体 3+ 次提及 | 某技术路线持续升温 |
+| milestone | 技术发展的重要节点 | 进展节点 + 阶段性成果 | 量产时间表确定 |
+| declining | 活跃度下降的方向 | 提及频率下降 > 50% | 某技术路线被放弃 |
+
+### 2b. 竞争者画像
+
+按组织实体聚合所有相关行动，推断策略意图：
+- **技术押注方向**：从事件类型和内容推断
+- **资本投入信号**：从 funding、investment 事件推断
+- **合作/竞争关系变化**：从关系类型推断
+
+### 2c. 资本方向
+
+从 funding、partnership、investment 类事件中推断：
+- 资本流向的技术方向
+- 新兴投资热点
+- 投资降温领域
+
+### 2d. 交叉验证
+
+检查 claims 中的正负面主张：
+- 多源佐证的主张（2+ 来源）→ 高置信度 (> 0.8)
+- 单一来源的主张 → 标注需验证 (0.5-0.8)
+- 矛盾主张 → 标注争议点 (< 0.5)
+
+### 2e. 差距评估
+
+识别哪些关键词/主题未被充分覆盖，标注信息盲区。
+
+---
+
+## 第三阶段：分析框架
+
+### 3a. 技术雷达扫描
+
+```
+技术成熟度评估模型：
+├── 突破性进展
+│   └── 标准：单次高影响 + 权威来源 + 独特性
+├── 里程碑事件
+│   └── 标准：进展节点 + 阶段性成果
+├── 趋势性信号
+│   └── 标准：3+ 次提及 + 一致性方向
+└── 衰减信号
+    └── 标准：频率下降 > 50% + 投资减少
+```
+
+### 3b. 竞争态势分析
+
+```
+组织动态矩阵：
+| 组织名称 | 技术投入 | 资本动作 | 产品发布 | 合作关系 | 策略意图 |
+|----------|----------|----------|----------|----------|----------|
+| ...      | ...      | ...      | ...      | ...      | ...      |
+```
+
+### 3c. 投资与合作分析
+
+```
+资本流向分析：
+├── 重点交易事件
+├── 投资热点识别
+└── 投资降温领域
+```
+
+### 3d. 风险与机遇识别
+
+```
+信号分类：
+├── 威胁信号
+│   └── 标准：负面影响 + 高可能性 + 高影响
+├── 机会信号
+│   └── 标准：正面影响 + 可操作性 + 时间窗口
+└── 影响评估
+    └── 标准：影响范围 + 影响程度 + 时间紧迫性
+```
+
+---
+
+## 第四阶段：内容生成
+
+严格按以下 JSON Schema 输出。**不要**输出任何 markdown 代码块标记。
+
+### 输出格式 v2.0
 
 ```json
 {
-  "topicId": "{{topicId}}",
-  "topicName": "{{topicName}}",
-  "reportType": "{{reportType}}",
-  "title": "报告标题",
-  "summary": "报告摘要",
-  "contentLength": 5000,
-  "sourcesUsed": 15,
-  "period": {
-    "start": "2025-01-01",
-    "end": "2025-01-07"
+  "title": "{{topicName}} 技术情报周报 · YYYY-MM-DD",
+  "summary": "执行摘要的 overview 内容（1-2 段核心判断）",
+  "content": {
+    "version": "2.0",
+    "meta": {
+      "reportId": "自动生成",
+      "topicId": "{{topicId}}",
+      "topicName": "{{topicName}}",
+      "period": {
+        "start": "{{timeRangeStart}}",
+        "end": "{{timeRangeEnd}}"
+      },
+      "generatedAt": "YYYY-MM-DDTHH:mm:ssZ",
+      "dataCoverage": {
+        "documents": 数字,
+        "entities": 数字,
+        "events": 数字,
+        "claims": 数字
+      },
+      "confidence": "high|medium|low",
+      "confidenceReason": "置信度评估理由"
+    },
+    "executiveSummary": {
+      "overview": "1-2 段核心判断，凝练本周最关键的发现和趋势（200-400字）",
+      "keyPoints": [
+        {
+          "point": "【判断】+ 【依据】+ 【影响】",
+          "evidence": ["支撑证据1", "支撑证据2"],
+          "impact": "影响描述"
+        }
+      ],
+      "recommendedActions": [
+        {
+          "action": "建议行动",
+          "priority": "high|medium|low",
+          "rationale": "行动理由"
+        }
+      ]
+    },
+    "sections": [
+      {
+        "id": "exec_overview",
+        "title": "执行摘要",
+        "thesis": "一句话核心论点",
+        "content": "Markdown 格式的详细分析正文（300-500 字）",
+        "highlights": ["要点 1", "要点 2", "要点 3"],
+        "signals": [
+          {
+            "type": "trend|opportunity|threat|milestone|breakthrough",
+            "title": "信号标题",
+            "description": "信号描述",
+            "confidence": 0.85
+          }
+        ],
+        "entityRefs": ["实体名1", "实体名2"]
+      },
+      {
+        "id": "tech_radar",
+        "title": "技术雷达",
+        "thesis": "技术发展态势一句话总结",
+        "content": "技术突破、里程碑、趋势、衰减信号分析",
+        "highlights": ["技术要点1", "技术要点2"],
+        "signals": [],
+        "entityRefs": ["技术实体1", "技术实体2"]
+      },
+      {
+        "id": "competitive_moves",
+        "title": "竞争态势",
+        "thesis": "竞争格局变化一句话总结",
+        "content": "组织动态分析和策略意图推断",
+        "highlights": ["竞争要点1", "竞争要点2"],
+        "signals": [],
+        "entityRefs": ["组织名1", "组织名2"]
+      },
+      {
+        "id": "investment_deals",
+        "title": "投资与合作",
+        "thesis": "资本流向一句话总结",
+        "content": "投资事件和合作动态分析",
+        "highlights": ["投资要点1", "投资要点2"],
+        "signals": [],
+        "entityRefs": ["投资方1", "被投方1"]
+      },
+      {
+        "id": "risk_opportunity",
+        "title": "风险与机遇",
+        "thesis": "风险机遇一句话总结",
+        "content": "威胁和机会识别分析",
+        "highlights": ["风险要点1", "机遇要点1"],
+        "signals": [],
+        "entityRefs": ["相关实体1"]
+      },
+      {
+        "id": "outlook",
+        "title": "下周展望",
+        "thesis": "未来趋势一句话预判",
+        "content": "基于信号的预判和关注点",
+        "highlights": ["关注点1", "关注点2"],
+        "signals": [],
+        "entityRefs": []
+      }
+    ],
+    "timeline": [
+      {
+        "date": "YYYY-MM-DD",
+        "event": "事件描述",
+        "significance": "So What? 这个事件意味着什么",
+        "entityRefs": ["相关实体1"]
+      }
+    ],
+    "metrics": {
+      "documentsAnalyzed": 数字,
+      "entitiesCovered": 数字,
+      "sourcesCredibility": "X 篇一级来源 / Y 篇二级来源"
+    }
+  },
+  "metadata": {
+    "documentsAnalyzed": 数字,
+    "entitiesCovered": 数字,
+    "period": { "start": "...", "end": "..." },
+    "sourcesCredibility": "X 篇一级来源 / Y 篇二级来源",
+    "dataGaps": ["信息缺口1", "信息缺口2"]
+  }
+}
+```
+
+---
+
+## 第五阶段：质量检查
+
+输出 JSON 前确认：
+
+### 5a. 数据完整性检查
+- [ ] `executiveSummary.keyPoints` 有 3-5 条
+- [ ] `sections` 包含全部 6 个章节
+- [ ] 每个 section 至少有 1 个 signal
+- [ ] `timeline` 至少有 3 条事件（如果事件数据充足）
+
+### 5b. 格式规范性检查
+- [ ] 所有 `entityRefs` 中的实体名在数据中真实存在
+- [ ] 所有 `confidence` 值在 0-1 之间
+- [ ] 日期使用 YYYY-MM-DD 格式
+
+### 5c. 逻辑一致性检查
+- [ ] 执行摘要与各章节内容一致
+- [ ] 信号标记有明确依据
+- [ ] 推荐行动有充分理由
+
+### 5d. 专业性检查
+- [ ] 专业术语使用正确
+- [ ] 实体名称统一规范
+- [ ] 无歧义表述
+
+---
+
+## 第六阶段：图谱关联准备
+
+### 6a. 实体引用规范
+
+在 `entityRefs` 字段中，确保：
+1. 实体名称与数据库中的 `entities.text` 完全匹配
+2. 优先引用高提及量的实体
+3. 每个章节引用 2-5 个关键实体
+
+### 6b. 信号实体关联
+
+每个信号应关联到：
+1. 相关技术实体
+2. 相关组织实体
+3. 相关事件（如有）
+
+---
+
+## 重要约束
+
+1. **只输出 JSON**，不要包裹在 markdown 代码块中
+2. **不要执行数据库写入操作**，由 server.ts 后处理负责写入数据库
+3. 如果某个章节数据不足，仍保留章节但标注"数据不足，待后续采集补充"
+4. 日期使用 YYYY-MM-DD 格式
+5. 使用中文输出所有内容
+6. `entityRefs` 必须是数据库中真实存在的实体名称
+7. 每个信号必须有明确的类型和置信度
+
+---
+
+## 数据不足时的处理
+
+如果数据库查询返回空结果或数据不足：
+
+1. **仍生成报告框架**：保留所有章节结构
+2. **标注数据缺口**：在 `metadata.dataGaps` 中列出缺失的数据类型
+3. **降低置信度**：将 `meta.confidence` 设为 `low`
+4. **说明原因**：在 `meta.confidenceReason` 中说明数据不足的情况
+
+示例：
+```json
+{
+  "meta": {
+    "confidence": "low",
+    "confidenceReason": "数据库中该主题的文档数量不足（仅 2 篇），建议先执行数据采集"
+  },
+  "metadata": {
+    "dataGaps": ["缺乏近期新闻数据", "缺乏投资事件数据", "缺乏技术论文数据"]
   }
 }
 ```

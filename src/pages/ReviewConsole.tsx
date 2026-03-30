@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
-import { Check, X, AlertCircle, MessageSquareWarning, ExternalLink, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Check, X, AlertCircle, MessageSquareWarning, ExternalLink, RefreshCw, CheckCheck } from 'lucide-react';
+import PageHeader from '../components/PageHeader';
+import { CARD, TOAST_SUCCESS, TOAST_ERROR, SEGMENT_TRACK, SEGMENT_ACTIVE, SEGMENT_INACTIVE } from '../lib/design';
 
 interface Review {
   id: string;
@@ -34,6 +36,22 @@ export default function ReviewConsole() {
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [archivedActions, setArchivedActions] = useState<Array<{ id: string; action: 'approve' | 'reject'; content: string; type: string; time: string }>>([]);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    };
+  }, []);
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 3000);
+  };
 
   useEffect(() => {
     fetchData();
@@ -79,6 +97,11 @@ export default function ReviewConsole() {
         if (stats) {
           setStats({ ...stats, total: stats.total - 1 });
         }
+        const review = reviews.find(r => r.id === id);
+        if (review) {
+          setArchivedActions(prev => [{ id, action: 'approve' as const, content: review.content.slice(0, 50), type: typeLabels[review.type] || review.type, time: new Date().toLocaleTimeString('zh-CN') }, ...prev].slice(0, 10));
+        }
+        showToast('已通过', 'success');
       }
     } catch (error) {
       console.error('Failed to approve:', error);
@@ -101,11 +124,32 @@ export default function ReviewConsole() {
         if (stats) {
           setStats({ ...stats, total: stats.total - 1 });
         }
+        const review = reviews.find(r => r.id === id);
+        if (review) {
+          setArchivedActions(prev => [{ id, action: 'reject' as const, content: review.content.slice(0, 50), type: typeLabels[review.type] || review.type, time: new Date().toLocaleTimeString('zh-CN') }, ...prev].slice(0, 10));
+        }
+        showToast('已拒绝', 'success');
       }
     } catch (error) {
       console.error('Failed to reject:', error);
     } finally {
       setProcessingId(null);
+    }
+  }
+
+  async function handleApproveAll() {
+    if (!confirm(`确认通过全部 ${reviews.length} 条记录？`)) return;
+    setProcessingId('batch');
+    try {
+      await Promise.all(reviews.map(r => fetch(`/api/reviews/${r.id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes: '' }) })));
+      showToast(`已通过 ${reviews.length} 条记录`, 'success');
+      setReviews([]);
+      if (stats) setStats({ ...stats, total: 0 });
+    } catch {
+      showToast('批量操作部分失败', 'error');
+    } finally {
+      setProcessingId(null);
+      fetchData();
     }
   }
 
@@ -122,41 +166,33 @@ export default function ReviewConsole() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-[#1d1d1f]">审核台</h2>
-          <p className="mt-1 text-sm text-[#86868b]">人工复核低置信度抽取结果、实体消歧与矛盾证据。</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <button
-            onClick={fetchData}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-[#86868b] border border-[#d2d2d7] rounded-lg hover:bg-[#f5f5f7] transition-colors"
-          >
-            <RefreshCw className="w-4 h-4" />
-            刷新
+      <PageHeader title="审核台" description="人工复核低置信度抽取结果、实体消歧与矛盾证据">
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-[#86868b]">待处理 <span className="bg-[#ff3b30]/10 text-[#ff3b30] font-semibold px-2 py-0.5 rounded-full">{stats?.total || 0}</span></span>
+          <button onClick={fetchData} className="flex items-center gap-1.5 px-4 py-2 bg-[#f5f5f7] rounded-[980px] text-sm font-medium hover:bg-[#e8e8ed] transition-all">
+            <RefreshCw className="w-3.5 h-3.5" /> 刷新
           </button>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-[#86868b]">待处理任务:</span>
-            <span className="bg-[#ff3b30]/10 text-[#ff3b30] font-bold px-2 py-0.5 rounded-full">
-              {stats?.total || 0}
-            </span>
-          </div>
+          {reviews.length > 0 && (
+            <button onClick={handleApproveAll} disabled={processingId === 'batch'} className="flex items-center gap-1.5 px-4 py-2 bg-[#34c759] text-white rounded-[980px] text-sm font-semibold hover:bg-[#2fb550] transition-all disabled:opacity-50">
+              <CheckCheck className="w-3.5 h-3.5" /> 全部通过 ({reviews.length})
+            </button>
+          )}
         </div>
-      </div>
+      </PageHeader>
 
-      <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden">
-        <div className="p-4 border-b border-[#f5f5f7] flex justify-between items-center bg-[#f5f5f7]/50">
-          <div className="flex gap-4">
+      <div className={`${CARD} overflow-hidden`}>
+        <div className="p-4 border-b border-[#f5f5f7]">
+          <div className={`inline-flex items-center gap-1 ${SEGMENT_TRACK}`}>
             {[
-              { key: null, label: '全部待办' },
+              { key: null as string | null, label: '全部待办' },
               { key: 'entity_disambig', label: `实体消歧 (${stats?.entityDisambig || 0})` },
               { key: 'claim_review', label: `主张审核 (${stats?.claimReview || 0})` },
               { key: 'conflict_resolve', label: `矛盾处理 (${stats?.conflictResolve || 0})` },
             ].map(({ key, label }) => (
               <button
                 key={key ?? 'all'}
-                className={`text-sm font-medium pb-4 -mb-4 transition-colors ${activeFilter === key ? 'text-[#0071e3] border-b-2 border-[#0071e3]' : 'text-[#86868b] hover:text-[#1d1d1f]'}`}
                 onClick={() => setActiveFilter(key)}
+                className={`px-3 py-1.5 text-sm font-medium transition-all ${activeFilter === key ? SEGMENT_ACTIVE : SEGMENT_INACTIVE}`}
               >
                 {label}
               </button>
@@ -186,17 +222,36 @@ export default function ReviewConsole() {
                     <span className="text-xs text-[#86868b]">{review.time}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleReject(review.id)}
-                      disabled={processingId === review.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#d2d2d7] text-[#1d1d1f] rounded-lg hover:bg-[#ff3b30]/5 hover:text-[#ff3b30] hover:border-[#ff3b30]/20 transition-colors text-sm font-medium disabled:opacity-50"
-                    >
-                      <X className="w-4 h-4" /> 拒绝/修正
-                    </button>
+                    {rejectingId === review.id ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-[#ff3b30]">确认拒绝？</span>
+                        <button
+                          onClick={() => { handleReject(review.id); setRejectingId(null); }}
+                          disabled={processingId === review.id}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-[#ff3b30] text-white rounded-[980px] text-xs font-semibold hover:bg-[#ff453a] transition-all disabled:opacity-50"
+                        >
+                          确认
+                        </button>
+                        <button
+                          onClick={() => setRejectingId(null)}
+                          className="px-2.5 py-1.5 bg-[#f5f5f7] text-[#1d1d1f] rounded-[980px] text-xs font-medium hover:bg-[#e8e8ed] transition-all"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setRejectingId(review.id)}
+                        disabled={processingId === review.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#d2d2d7] text-[#1d1d1f] rounded-full hover:bg-[#ff3b30]/5 hover:text-[#ff3b30] hover:border-[#ff3b30]/20 transition-colors text-sm font-medium disabled:opacity-50"
+                      >
+                        <X className="w-4 h-4" /> 拒绝/修正
+                      </button>
+                    )}
                     <button
                       onClick={() => handleApprove(review.id)}
                       disabled={processingId === review.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0071e3] text-white rounded-lg hover:bg-[#0062cc] transition-colors text-sm font-medium disabled:opacity-50"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0071e3] text-white rounded-[980px] hover:bg-[#0062cc] transition-colors text-sm font-medium disabled:opacity-50"
                     >
                       <Check className="w-4 h-4" /> 通过并入库
                     </button>
@@ -245,6 +300,29 @@ export default function ReviewConsole() {
           </div>
         )}
       </div>
+
+      {archivedActions.length > 0 && (
+        <div className={`${CARD} p-5`}>
+          <h4 className="text-[13px] font-semibold text-[#86868b] mb-3">最近操作</h4>
+          <div className="space-y-2">
+            {archivedActions.map((a, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                {a.action === 'approve' ? <Check className="w-3.5 h-3.5 text-[#34c759]" /> : <X className="w-3.5 h-3.5 text-[#ff3b30]" />}
+                <span className="text-[#86868b]">{a.time}</span>
+                <span className="text-[#1d1d1f]">{a.action === 'approve' ? '通过' : '拒绝'}了</span>
+                <span className="text-[#86868b] truncate">"{a.content}"</span>
+                <span className="text-xs text-[#aeaeb5]">{a.type}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className={`animate-fade-in ${toast.type === 'success' ? TOAST_SUCCESS : TOAST_ERROR}`}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }
