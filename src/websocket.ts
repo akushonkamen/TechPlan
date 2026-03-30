@@ -49,7 +49,7 @@ export class SkillWebSocket {
     const entries = Array.from(this.clients.entries());
 
     for (const [, client] of entries) {
-      if (client.executionId === executionId || !client.executionId) {
+      if (client.executionId === executionId) {
         if (client.ws.readyState === WebSocket.OPEN) {
           client.ws.send(message);
         }

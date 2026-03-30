@@ -275,13 +275,25 @@ class GraphService {
 
       for (const doc of documents) {
         try {
+          const parsedMetadata = (() => {
+            if (!doc.metadata) return null;
+            if (typeof doc.metadata === 'string') {
+              try {
+                return JSON.parse(doc.metadata);
+              } catch {
+                return null;
+              }
+            }
+            return doc.metadata;
+          })();
+
           const docNode = await this.createNode('Document', {
             id: doc.id,
             title: doc.title,
             source: doc.source,
             sourceUrl: doc.source_url,
             publishedDate: doc.published_date,
-            type: doc.metadata?.type || 'news',
+            type: parsedMetadata?.type || 'news',
           });
           result.nodesCreated++;
 
