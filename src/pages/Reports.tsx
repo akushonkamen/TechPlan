@@ -277,12 +277,11 @@ export default function Reports() {
 
     setSkillStatus('running');
     try {
-      const res = await fetch('/api/skill/report', {
+      const res = await fetch('/api/reports/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topicId: selectedTopicId,
-          topicName: topic.name,
           reportType,
         }),
       });
@@ -339,13 +338,21 @@ export default function Reports() {
   };
 
   const getTypeLabel = (type: string) => {
-    const map: Record<string, string> = { weekly: '周报', special: '专题', alert: '预警', executive_summary: '摘要' };
+    const map: Record<string, string> = {
+      daily: '日报', weekly: '周报', monthly: '月报', quarterly: '季报',
+      tech_topic: '技术专题', competitor: '友商分析', alert: '预警',
+      special: '专题', executive_summary: '摘要',
+    };
     return map[type] || type;
   };
 
   const reportTypeOptions = [
+    { value: 'daily', label: '日报' },
     { value: 'weekly', label: '周报' },
-    { value: 'special', label: '专题报告' },
+    { value: 'monthly', label: '月报' },
+    { value: 'quarterly', label: '季报' },
+    { value: 'tech_topic', label: '技术专题' },
+    { value: 'competitor', label: '友商分析' },
     { value: 'alert', label: '预警' },
   ];
 

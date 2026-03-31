@@ -1228,6 +1228,124 @@ async function startServer() {
     }
   });
 
+  // ── Report Type Configs ──
+  app.get("/api/report-types", async (req, res) => {
+    try {
+      const { active } = req.query;
+      let query = "SELECT * FROM report_type_configs";
+      const params: any[] = [];
+      if (active === '1' || active === 'true') {
+        query += " WHERE is_active = 1";
+      }
+      query += " ORDER BY schedule, type";
+      const rows = await db.all(query, params);
+      res.json(rows.map((r: any) => ({
+        ...r,
+        review_config: r.review_config ? JSON.parse(r.review_config) : null,
+        distribution_config: r.distribution_config ? JSON.parse(r.distribution_config) : null,
+        trigger_rules: r.trigger_rules ? JSON.parse(r.trigger_rules) : null,
+      })));
+    } catch (error) {
+      console.error("Failed to fetch report types:", error);
+      res.status(500).json({ error: "Failed to fetch report types" });
+    }
+  });
+
+  // ── Unified Report Generation ──
+  const REPORT_TYPE_TO_SKILL: Record<string, string> = {
+    daily: 'report-daily',
+    weekly: 'report',
+    monthly: 'report-monthly',
+    quarterly: 'report-quarterly',
+    tech_topic: 'report-tech-topic',
+    competitor: 'report-competitor',
+    alert: 'report-alert',
+  };
+
+  function computePeriod(reportType: string, period?: { start?: string; end?: string }) {
+    const now = new Date();
+    if (period?.start && period?.end) return period;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    switch (reportType) {
+      case 'daily': {
+        const today = fmt(now);
+        return { start: today, end: today };
+      }
+      case 'weekly': {
+        const weekAgo = new Date(now.getTime() - 7 * 86400000);
+        return { start: fmt(weekAgo), end: fmt(now) };
+      }
+      case 'monthly': {
+        const monthStart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+        const monthEnd = fmt(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+        return { start: monthStart, end: monthEnd };
+      }
+      case 'quarterly': {
+        const q = Math.floor(now.getMonth() / 3);
+        const qStart = new Date(now.getFullYear(), q * 3, 1);
+        const qEnd = new Date(now.getFullYear(), q * 3 + 3, 0);
+        return { start: fmt(qStart), end: fmt(qEnd) };
+      }
+      default: {
+        const weekAgo = new Date(now.getTime() - 7 * 86400000);
+        return { start: fmt(weekAgo), end: fmt(now) };
+      }
+    }
+  }
+
+  app.post("/api/reports/generate", requireAdmin, async (req, res) => {
+    try {
+      const { topicId, reportType, period, options } = req.body;
+      if (!topicId || !reportType) {
+        res.status(400).json({ error: "topicId and reportType are required" });
+        return;
+      }
+      const skillName = REPORT_TYPE_TO_SKILL[reportType];
+      if (!skillName) {
+        res.status(400).json({ error: `Unknown report type: ${reportType}. Valid: ${Object.keys(REPORT_TYPE_TO_SKILL).join(', ')}` });
+        return;
+      }
+      if (!skillRegistry.get(skillName)) {
+        res.status(400).json({ error: `Skill not found: ${skillName}. The skill file may not exist yet.` });
+        return;
+      }
+      const topic = await db.get("SELECT id, name FROM topics WHERE id = ?", [topicId]);
+      if (!topic) {
+        res.status(404).json({ error: "Topic not found" });
+        return;
+      }
+      const computedPeriod = computePeriod(reportType, period);
+      const params: Record<string, any> = {
+        topicId: topic.id,
+        topicName: topic.name,
+        reportType,
+        timeRangeStart: computedPeriod.start,
+        timeRangeEnd: computedPeriod.end,
+        ...(options?.customParams ?? {}),
+      };
+      const { executionId, promise } = skillExecutor.startExecution(skillName, params);
+
+      // Route report results through handleReportResult
+      promise.then(async (execution) => {
+        if (reportType === 'alert') {
+          // Alerts skip review — direct insert
+          await handleReportResult(execution, params);
+        } else {
+          await handleReportResult(execution, params);
+        }
+        ws.send(execution.id, 'result', JSON.stringify(execution.result ?? { error: execution.error }));
+      }).catch((err) => {
+        console.error(`[ReportGenerate] Error:`, err);
+      });
+
+      res.json({ executionId, skillName, reportType, period: computedPeriod, status: 'started' });
+    } catch (error) {
+      console.error("Failed to generate report:", error);
+      res.status(500).json({ error: "Failed to generate report" });
+    }
+  });
+
   app.get("/api/reports/:id/reviews", async (req, res) => {
     try {
       const reviews = await reviewService.getReviews(req.params.id);
@@ -1789,6 +1907,153 @@ async function startServer() {
     }
   });
 
+  // ── Helpers for robust report JSON extraction ──
+  function tryParseReportJson(str: string): any {
+    if (!str || typeof str !== 'string') return null;
+    let cleaned = str.trim();
+    const fm = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+    if (fm) cleaned = fm[1].trim();
+    const first = cleaned.indexOf('{');
+    const last = cleaned.lastIndexOf('}');
+    if (first === -1 || last <= first) return null;
+    let candidate = cleaned.slice(first, last + 1);
+
+    // Strategy: try multiple repair levels
+    const repairs = [
+      // Level 0: direct parse
+      candidate,
+      // Level 1: trailing commas + control chars
+      candidate
+        .replace(/,\s*([}\]])/g, '$1')
+        .replace(/\t/g, '\\t')
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ''),
+      // Level 2: line-based newline escaping inside strings
+      (() => {
+        const lines = candidate.split('\n');
+        const fixed: string[] = [];
+        let inStr = false;
+        for (const line of lines) {
+          const qc = (line.match(/(?<!\\)"/g) || []).length;
+          if (!inStr) {
+            fixed.push(line);
+            if (qc % 2 === 1) inStr = true;
+          } else {
+            fixed.push('\\n' + line);
+            if (qc % 2 === 1) inStr = false;
+          }
+        }
+        return fixed.join('\n')
+          .replace(/,\s*([}\]])/g, '$1')
+          .replace(/\t/g, '\\t');
+      })(),
+      // Level 3: aggressive — escape ALL newlines that look like they're inside strings
+      candidate
+        .replace(/,\s*([}\]])/g, '$1')
+        .replace(/\t/g, '\\t')
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+        // Replace literal newlines inside JSON string values
+        .split('\n').map((line, i, arr) => {
+          // Count open quotes up to this line
+          const soFar = arr.slice(0, i + 1).join('').replace(/\\"/g, '');
+          const quoteCount = (soFar.match(/"/g) || []).length;
+          // If odd number of quotes, we're inside a string
+          if (quoteCount % 2 === 1 && i > 0) return '\\n' + line;
+          return line;
+        }).join(''),
+    ];
+
+    for (const repaired of repairs) {
+      try {
+        const obj = JSON.parse(repaired);
+        if (obj && typeof obj === 'object') return obj;
+      } catch { /* try next repair */ }
+    }
+
+    // Last resort: find the deepest nested JSON with "title" or "sections"
+    const titleIdx = candidate.indexOf('"title"');
+    if (titleIdx > -1) {
+      // Walk back to find enclosing {
+      let depth = 0, start = -1;
+      for (let i = titleIdx; i >= 0; i--) {
+        if (candidate[i] === '}') depth++;
+        if (candidate[i] === '{') { depth--; if (depth < 0) { start = i; break; } }
+      }
+      if (start >= 0) {
+        for (const repaired of repairs.slice(0, 3)) {
+          const sub = repaired.slice(start);
+          const lastBrace = sub.lastIndexOf('}');
+          if (lastBrace > 0) {
+            try {
+              const obj = JSON.parse(sub.slice(0, lastBrace + 1));
+              if (obj && typeof obj === 'object') return obj;
+            } catch { /* continue */ }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function extractReportFromStdout(stdout: string): any {
+    if (!stdout) return null;
+    const clean = stdout.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    const lines = clean.split('\n');
+
+    // Strategy 1: Scan stream-json "result" lines from end
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.type === 'result' && parsed.result) {
+          const resultStr = typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result);
+          const report = tryParseReportJson(resultStr);
+          if (report) return report;
+        }
+      } catch { /* not a JSON line */ }
+    }
+
+    // Strategy 2: Scan assistant text blocks for report JSON
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line || !line.includes('"sections"')) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.type === 'assistant' && parsed.message?.content) {
+          for (const block of parsed.message.content) {
+            if (block.type === 'text' && block.text) {
+              const report = tryParseReportJson(block.text);
+              if (report) return report;
+            }
+          }
+        }
+      } catch { /* not a JSON line */ }
+    }
+
+    // Strategy 3: Brute-force — find "sections" key and extract enclosing JSON
+    const sectionsIdx = clean.indexOf('"sections"');
+    if (sectionsIdx > -1) {
+      let braceCount = 0, start = -1;
+      for (let i = sectionsIdx; i >= 0; i--) {
+        if (clean[i] === '}') braceCount++;
+        if (clean[i] === '{') { braceCount--; if (braceCount < 0) { start = i; break; } }
+      }
+      if (start >= 0) {
+        braceCount = 0;
+        for (let i = start; i < clean.length; i++) {
+          if (clean[i] === '{') braceCount++;
+          if (clean[i] === '}') { braceCount--; if (braceCount === 0) {
+            const report = tryParseReportJson(clean.slice(start, i + 1));
+            if (report) return report;
+            break;
+          } }
+        }
+      }
+    }
+    return null;
+  }
+
   // ── Extracted report persistence handler (shared by HTTP endpoint & scheduler) ──
   async function handleReportResult(execution: SkillExecution, params: Record<string, any>) {
     try {
@@ -1815,26 +2080,203 @@ async function startServer() {
         parsed = {};
       }
 
+      // Fallback: scan raw stdout for report JSON when primary parsing yields nothing useful
+      const hasReportStructure = (obj: any): boolean =>
+        obj && typeof obj === 'object' && (
+          Array.isArray(obj.sections) ||
+          (obj.content && Array.isArray(obj.content.sections)) ||
+          Array.isArray(obj.keyUpdates) ||
+          Array.isArray(obj.alerts) ||
+          obj.alertSummary ||
+          obj.technologyOverview ||
+          obj.companyProfile ||
+          obj.swotAnalysis ||
+          obj.monthlyOverview ||
+          obj.strategicExecution ||
+          obj.title ||
+          obj.summary ||
+          (obj.content && (obj.content.keyUpdates || obj.content.alertSummary || obj.content.swotAnalysis))
+        );
+      if (!hasReportStructure(parsed)) {
+        console.log('[Report] Primary parsing empty, scanning stdout for report JSON...');
+        const report = extractReportFromStdout(execution.stdout);
+        if (report) {
+          parsed = report;
+          console.log('[Report] Recovered report JSON from stdout fallback');
+        }
+      }
+
       const content = parsed.content ?? parsed;
       const meta = content.meta ?? {};
-      const execSummary = content.executiveSummary ?? {};
+      const reportType = params.reportType ?? parsed.type ?? meta.type ?? 'weekly';
 
-      const rawKeyPoints = execSummary.keyPoints ?? [];
-      const normalizedKeyPoints = rawKeyPoints.map((kp: any) =>
-        typeof kp === 'object' ? (kp.point ?? kp.text ?? JSON.stringify(kp)) : String(kp)
-      );
+      // ── Multi-type report normalization ──
+      // All report types are normalized to { executiveSummary, sections, timeline, metrics }
+      let normalizedContent: any;
 
-      const normalizedContent = {
-        executiveSummary: {
-          overview: execSummary.overview ?? '',
-          keyPoints: normalizedKeyPoints,
-          confidence: execSummary.confidence ?? meta.confidence ?? 'medium',
-          period: execSummary.period ?? meta.period ?? {},
-        },
-        sections: content.sections ?? [],
-        timeline: content.timeline ?? [],
-        metrics: content.metrics ?? {},
-      };
+      if (reportType === 'daily' && (content.keyUpdates || content.dataHighlights || content.alerts)) {
+        // Daily report format
+        normalizedContent = {
+          executiveSummary: {
+            overview: parsed.summary ?? content.summary ?? '',
+            keyPoints: (content.keyUpdates ?? []).map((u: any) =>
+              typeof u === 'object' ? `[${u.type ?? 'update'}] ${u.title}: ${u.summary ?? ''}` : String(u)
+            ),
+            confidence: meta.confidence ?? 'low',
+            period: meta.period ?? { start: params.timeRangeStart, end: params.timeRangeEnd },
+          },
+          sections: [
+            ...(content.keyUpdates?.length ? [{
+              id: 'key_updates', title: '关键更新', thesis: `检测到 ${content.keyUpdates.length} 条重要更新`,
+              content: content.keyUpdates.map((u: any) => `**${u.title}** (${u.significance ?? '中'}影响): ${u.summary ?? ''}`).join('\n'),
+              highlights: content.keyUpdates.map((u: any) => u.title),
+              signals: content.keyUpdates.map((u: any) => ({ type: u.type ?? 'trend', title: u.title, description: u.summary ?? '', confidence: 0.7 })),
+              entityRefs: [],
+            }] : []),
+            ...(content.dataHighlights ? [{
+              id: 'data_highlights', title: '数据亮点', thesis: '24h 数据采集概况',
+              content: [
+                content.dataHighlights.documentsAdded?.length ? `新增文档: ${content.dataHighlights.documentsAdded.join('; ')}` : '',
+                content.dataHighlights.topEntities?.length ? `高频实体: ${content.dataHighlights.topEntities.join(', ')}` : '',
+              ].filter(Boolean).join('\n'),
+              highlights: [...(content.dataHighlights.documentsAdded ?? []), ...(content.dataHighlights.topEntities ?? [])],
+              signals: [], entityRefs: content.dataHighlights.topEntities ?? [],
+            }] : []),
+            ...(content.alerts?.length ? [{
+              id: 'alerts', title: '预警信号', thesis: `检测到 ${content.alerts.length} 条预警`,
+              content: content.alerts.map((a: any) => `**[${a.alertType ?? 'alert'}]** ${a.title}: ${a.description ?? ''}\n建议: ${a.recommendedAction ?? ''}`).join('\n\n'),
+              highlights: content.alerts.map((a: any) => a.title),
+              signals: content.alerts.map((a: any) => ({ type: 'threat', title: a.title, description: a.description ?? '', confidence: 0.7 })),
+              entityRefs: [],
+            }] : []),
+          ],
+          timeline: (content.dataHighlights?.eventsTimeline ?? []).map((e: any) => ({
+            date: e.time ?? params.timeRangeStart, event: e.event ?? String(e), significance: '', entityRefs: [],
+          })),
+          metrics: meta.dataCoverage ?? {},
+        };
+      } else if (reportType === 'alert' && (content.alertSummary || content.eventAnalysis)) {
+        // Alert report format
+        const alert = content.alertSummary ?? {};
+        normalizedContent = {
+          executiveSummary: {
+            overview: `${alert.title ?? '预警报告'}: ${alert.description ?? parsed.summary ?? ''}`,
+            keyPoints: [alert.title ?? '预警'].filter(Boolean),
+            confidence: alert.confidence ?? 'medium',
+            period: meta.period ?? {},
+          },
+          sections: [
+            ...(content.eventAnalysis ? [{
+              id: 'event_analysis', title: '事件分析', thesis: '事件经过与上下文',
+              content: [content.eventAnalysis.what, content.eventAnalysis.who, content.eventAnalysis.timeline, content.eventAnalysis.context].filter(Boolean).join('\n\n'),
+              highlights: [content.eventAnalysis.what, content.eventAnalysis.who].filter(Boolean),
+              signals: [], entityRefs: content.entityRefs ?? [],
+            }] : []),
+            ...(content.impactAssessment ? [{
+              id: 'impact', title: '影响评估', thesis: `影响范围: ${content.impactAssessment.scope ?? '待评估'}`,
+              content: `范围: ${content.impactAssessment.scope ?? '-'}\n程度: ${content.impactAssessment.magnitude ?? '-'}\n紧迫性: ${content.impactAssessment.urgency ?? '-'}`,
+              highlights: content.impactAssessment.affectedAreas ?? [],
+              signals: [{ type: alert.severity === 'critical' ? 'threat' : 'trend', title: alert.title ?? '预警', description: alert.description ?? '', confidence: alert.confidence ?? 0.7 }],
+              entityRefs: [],
+            }] : []),
+            ...(content.recommendedActions?.length ? [{
+              id: 'actions', title: '建议行动', thesis: `${content.recommendedActions.length} 条建议行动`,
+              content: content.recommendedActions.map((a: any) => `[${a.priority ?? '中'}] ${a.action}${a.timeline ? ` (${a.timeline})` : ''}: ${a.rationale ?? ''}`).join('\n'),
+              highlights: content.recommendedActions.map((a: any) => a.action),
+              signals: [], entityRefs: [],
+            }] : []),
+          ],
+          timeline: [],
+          metrics: {},
+        };
+      } else {
+        // Weekly/monthly/quarterly/tech-topic/competitor — standard format with sections
+        const execSummary = content.executiveSummary ?? {};
+        const rawKeyPoints = execSummary.keyPoints ?? [];
+        const normalizedKeyPoints = rawKeyPoints.map((kp: any) =>
+          typeof kp === 'object' ? (kp.point ?? kp.text ?? JSON.stringify(kp)) : String(kp)
+        );
+
+        normalizedContent = {
+          executiveSummary: {
+            overview: execSummary.overview ?? content.monthlyOverview ?? content.summary ?? parsed.summary ?? '',
+            keyPoints: normalizedKeyPoints,
+            confidence: execSummary.confidence ?? meta.confidence ?? 'medium',
+            period: execSummary.period ?? meta.period ?? {},
+          },
+          sections: content.sections ?? [],
+          timeline: content.timeline ?? [],
+          metrics: content.metrics ?? {},
+        };
+
+        // Handle monthly report specific fields — convert to sections if no sections exist
+        if (reportType === 'monthly' && !content.sections?.length) {
+          const monthlySections: any[] = [];
+          if (content.technologyTrends?.length) monthlySections.push({
+            id: 'tech_trends', title: '技术趋势', thesis: '技术发展趋势分析',
+            content: content.technologyTrends.map((t: any) => `${t.trend} (${t.direction}, ${t.changeRate ?? '-'}): ${(t.keyDrivers ?? []).join(', ')}`).join('\n'),
+            highlights: content.technologyTrends.map((t: any) => t.trend), signals: [], entityRefs: [],
+          });
+          if (content.competitiveLandscape) monthlySections.push({
+            id: 'competitive', title: '竞争格局', thesis: '竞争格局变化分析',
+            content: JSON.stringify(content.competitiveLandscape, null, 2),
+            highlights: [], signals: [], entityRefs: [],
+          });
+          if (content.riskAssessment?.length) monthlySections.push({
+            id: 'risk', title: '风险评估', thesis: '风险与机遇',
+            content: content.riskAssessment.map((r: any) => `[${r.probability}/${r.impact}] ${r.risk}: ${r.mitigation ?? ''}`).join('\n'),
+            highlights: content.riskAssessment.map((r: any) => r.risk), signals: [], entityRefs: [],
+          });
+          if (content.nextMonthOutlook) monthlySections.push({
+            id: 'outlook', title: '下月展望', thesis: '未来关注重点',
+            content: (content.nextMonthOutlook.focusAreas ?? []).join('\n'),
+            highlights: content.nextMonthOutlook.focusAreas ?? [], signals: [], entityRefs: [],
+          });
+          normalizedContent.sections = monthlySections;
+          normalizedContent.executiveSummary.overview = normalizedContent.executiveSummary.overview || content.monthlyOverview || '';
+        }
+
+        // Handle tech-topic report fields
+        if (reportType === 'tech_topic' && !content.sections?.length) {
+          const sections: any[] = [];
+          if (content.technologyOverview) sections.push({
+            id: 'tech_overview', title: '技术概述', thesis: `${content.technologyOverview.definition ?? ''}`,
+            content: `原理: ${(content.technologyOverview.corePrinciples ?? []).join(', ')}\n组件: ${(content.technologyOverview.keyComponents ?? []).join(', ')}\n领域: ${(content.technologyOverview.applicationDomains ?? []).join(', ')}`,
+            highlights: content.technologyOverview.keyComponents ?? [], signals: [], entityRefs: [],
+          });
+          if (content.competitiveLandscape?.competitiveMatrix) sections.push({
+            id: 'competitive', title: '竞争格局', thesis: '竞争矩阵分析',
+            content: content.competitiveLandscape.competitiveMatrix.map((p: any) => `${p.player}: 优势[${(p.strengths ?? []).join(',')}] 劣势[${(p.weaknesses ?? []).join(',')}]`).join('\n'),
+            highlights: [], signals: [], entityRefs: [],
+          });
+          if (content.riskOpportunity) sections.push({
+            id: 'risk_opp', title: '风险与机遇', thesis: '风险评估与机会识别',
+            content: `风险: ${(content.riskOpportunity.risks ?? []).map((r: any) => r.risk).join('; ')}\n机遇: ${(content.riskOpportunity.opportunities ?? []).map((o: any) => o.opportunity).join('; ')}`,
+            highlights: [], signals: [], entityRefs: [],
+          });
+          normalizedContent.sections = sections;
+        }
+
+        // Handle competitor report fields
+        if (reportType === 'competitor' && !content.sections?.length) {
+          const sections: any[] = [];
+          if (content.companyProfile) sections.push({
+            id: 'profile', title: '公司概况', thesis: content.companyProfile.basicInfo?.name ?? params.competitorName ?? '',
+            content: JSON.stringify(content.companyProfile, null, 2), highlights: [], signals: [], entityRefs: [],
+          });
+          if (content.swotAnalysis) sections.push({
+            id: 'swot', title: 'SWOT 分析', thesis: '优势/劣势/机遇/威胁',
+            content: `优势: ${(content.swotAnalysis.strengths ?? []).map((s: any) => s.strength ?? s).join('; ')}\n劣势: ${(content.swotAnalysis.weaknesses ?? []).map((w: any) => w.weakness ?? w).join('; ')}\n机遇: ${(content.swotAnalysis.opportunities ?? []).map((o: any) => o.opportunity ?? o).join('; ')}\n威胁: ${(content.swotAnalysis.threats ?? []).map((t: any) => t.threat ?? t).join('; ')}`,
+            highlights: [], signals: [], entityRefs: [],
+          });
+          if (content.competitiveAssessment) sections.push({
+            id: 'assessment', title: '竞争评估', thesis: `威胁等级: ${content.competitiveAssessment.threatLevel ?? '-'}`,
+            content: `威胁领域: ${(content.competitiveAssessment.threatAreas ?? []).join(', ')}\n建议: ${(content.competitiveAssessment.recommendedResponse ?? []).map((r: any) => r.action).join('; ')}`,
+            highlights: content.competitiveAssessment.threatAreas ?? [], signals: [], entityRefs: [],
+          });
+          normalizedContent.sections = sections;
+        }
+      }
 
       const hasSubstantialContent = (normalizedContent.sections?.length ?? 0) > 0
         || (normalizedContent.executiveSummary.overview?.length ?? 0) > 50;
@@ -1999,7 +2441,7 @@ async function startServer() {
         }
       }
 
-      if (name === 'report') {
+      if (name === 'report' || name.startsWith('report-')) {
         await handleReportResult(execution, params);
       }
 
