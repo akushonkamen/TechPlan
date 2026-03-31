@@ -1324,6 +1324,15 @@ async function startServer() {
         timeRangeEnd: computedPeriod.end,
         ...(options?.customParams ?? {}),
       };
+      // Auto-select default competitor for competitor report type
+      if (reportType === 'competitor' && !params.competitorName) {
+        try {
+          const orgs = JSON.parse(typeof topic.organizations === 'string' ? JSON.parse(topic.organizations) : []);
+          params.competitorName = orgs[0] || "Pinecone";
+        } catch {
+          params.competitorName = "Pinecone";
+        }
+      }
       const { executionId, promise } = skillExecutor.startExecution(skillName, params);
 
       // Route report results through handleReportResult
@@ -2300,7 +2309,7 @@ async function startServer() {
       }
 
       const title = parsed.title ?? `${params.topicName ?? ''} 分析报告`;
-      const summary = parsed.summary ?? execSummary.overview ?? '';
+      const summary = parsed.summary ?? normalizedContent.executiveSummary.overview ?? '';
       const period = normalizedContent.executiveSummary.period ?? {};
       const rptId = `rpt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
