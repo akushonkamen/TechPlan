@@ -1,10 +1,9 @@
 import type { FormEvent, ChangeEvent } from 'react';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, Search, Edit2, Trash2, Loader2, Tags, Upload, FileText, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import type { Topic } from '../types';
 import TopicForm from '../components/TopicForm';
 import PageHeader from '../components/PageHeader';
-import SkillButton from '../components/SkillButton';
 import EmptyState from '../components/EmptyState';
 import { CARD, BTN_PRIMARY, SPINNER } from '../lib/design';
 
@@ -18,9 +17,6 @@ export default function Topics() {
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Per-topic skill status tracking (3-step pipeline: research→extract→sync-graph)
-  const [topicSkillStatus, setTopicSkillStatus] = useState<Record<string, 'idle' | 'researching' | 'extracting' | 'syncing' | 'completed' | 'failed'>>({});
 
   // Per-topic document counts + expanded state
   const [topicDocCounts, setTopicDocCounts] = useState<Record<string, number>>({});
@@ -55,7 +51,7 @@ export default function Topics() {
     priority: 'medium' as 'high' | 'medium' | 'low',
     keywords: '',
     organizations: '',
-    schedule: 'weekly' as 'daily' | 'weekly' | 'monthly',
+    schedule: 'weekly' as 'daily' | 'weekly' | 'monthly' | 'disabled',
   });
 
   useEffect(() => { fetchTopics(); }, []);
@@ -170,127 +166,7 @@ export default function Topics() {
     }
   };
 
-  // Chain: research → extract → sync-graph (three-step pipeline)
-  const handleCollect = useCallback(async (topic: Topic) => {
-    setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'researching' }));
-
-    try {
-      // Step 1: Trigger research
-      const researchRes = await fetch('/api/skill/research', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topicId: topic.id,
-          topicName: topic.name,
-          keywords: JSON.stringify(topic.keywords),
-          organizations: JSON.stringify(topic.organizations),
-          maxResults: 10,
-        }),
-      });
-
-      if (!researchRes.ok) throw new Error('启动采集失败');
-      const { executionId: researchId } = await researchRes.json();
-
-      // Poll until research completes
-      await new Promise<void>((resolve, reject) => {
-        let attempts = 0;
-        const MAX_ATTEMPTS = 120;
-        const poll = async () => {
-          if (!mountedRef.current) { reject(new Error('unmounted')); return; }
-          attempts++;
-          if (attempts > MAX_ATTEMPTS) { reject(new Error('采集超时')); return; }
-          try {
-            const res = await fetch(`/api/skill/${researchId}/status`);
-            if (res.ok) {
-              const status = await res.json();
-              if (status.status === 'completed') { resolve(); return; }
-              if (status.status === 'failed') { reject(new Error('采集失败')); return; }
-            }
-          } catch { /* ignore */ }
-          setTimeout(poll, 3000);
-        };
-        setTimeout(poll, 3000);
-      });
-
-      // Step 2: Trigger extract
-      setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'extracting' }));
-      const extractRes = await fetch('/api/skill/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topicId: topic.id,
-          extractTypes: 'entities,relations,claims,events',
-        }),
-      });
-
-      if (!extractRes.ok) throw new Error('启动抽取失败');
-      const { executionId: extractId } = await extractRes.json();
-
-      await new Promise<void>((resolve, reject) => {
-        let attempts = 0;
-        const MAX_ATTEMPTS = 120;
-        const poll = async () => {
-          if (!mountedRef.current) { reject(new Error('unmounted')); return; }
-          attempts++;
-          if (attempts > MAX_ATTEMPTS) { reject(new Error('抽取超时')); return; }
-          try {
-            const res = await fetch(`/api/skill/${extractId}/status`);
-            if (res.ok) {
-              const status = await res.json();
-              if (status.status === 'completed') { resolve(); return; }
-              if (status.status === 'failed') { reject(new Error('抽取失败')); return; }
-            }
-          } catch { /* ignore */ }
-          setTimeout(poll, 3000);
-        };
-        setTimeout(poll, 3000);
-      });
-
-      // Step 3: Auto-trigger sync-graph
-      setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'syncing' }));
-      const syncRes = await fetch('/api/skill/sync-graph', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topicId: topic.id }),
-      });
-
-      if (syncRes.ok) {
-        const { executionId: syncId } = await syncRes.json();
-        await new Promise<void>((resolve) => {
-          let attempts = 0;
-          const MAX_ATTEMPTS = 120;
-          const poll = async () => {
-            if (!mountedRef.current) { resolve(); return; }
-            attempts++;
-            if (attempts > MAX_ATTEMPTS) { resolve(); return; }
-            try {
-              const res = await fetch(`/api/skill/${syncId}/status`);
-              if (res.ok) {
-                const status = await res.json();
-                if (status.status === 'completed' || status.status === 'failed') { resolve(); return; }
-              }
-            } catch { /* ignore */ }
-            setTimeout(poll, 3000);
-          };
-          setTimeout(poll, 3000);
-        });
-      }
-
-      setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'completed' }));
-      await fetchTopics();
-      if (expandedTopicId === topic.id) await fetchTopicDocs(topic.id);
-      safeTimeout(() => {
-        setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'idle' }));
-      }, 3000);
-    } catch (error) {
-      setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'failed' }));
-      safeTimeout(() => {
-        setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'idle' }));
-      }, 3000);
-    }
-  }, [expandedTopicId]);
-
-  // File upload logic (from DataSources)
+  // File upload logic
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -301,7 +177,7 @@ export default function Topics() {
     setUploadedFile({ name: file.name, title: file.name.replace(/\.[^/.]+$/, ''), size: file.size });
   };
 
-  const handleFileUpload = async (analyze: boolean) => {
+  const handleFileUpload = async () => {
     if (!uploadedFile || !fileInputRef.current?.files?.[0] || !uploadTopicId) return;
     const file = fileInputRef.current.files[0];
     setUploadingFile(uploadedFile.name);
@@ -316,48 +192,6 @@ export default function Topics() {
       if (fileInputRef.current) fileInputRef.current.value = '';
       await fetchTopics();
       if (expandedTopicId) await fetchTopicDocs(expandedTopicId);
-
-      // If analyze, also trigger extract → sync-graph chain
-      if (analyze && uploadTopicId) {
-        setTopicSkillStatus(prev => ({ ...prev, [uploadTopicId]: 'extracting' }));
-        const extractRes = await fetch('/api/skill/extract', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topicId: uploadTopicId, extractTypes: 'entities,relations,claims,events' }),
-        });
-        if (extractRes.ok) {
-          const { executionId } = await extractRes.json();
-          await new Promise<void>(resolve => {
-            const poll = async () => {
-              const s = await fetch(`/api/skill/${executionId}/status`);
-              if (s.ok) { const d = await s.json(); if (d.status === 'completed' || d.status === 'failed') { resolve(); return; } }
-              setTimeout(poll, 3000);
-            };
-            setTimeout(poll, 3000);
-          });
-        }
-
-        // Auto sync-graph
-        const syncRes = await fetch('/api/skill/sync-graph', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topicId: uploadTopicId }),
-        });
-        if (syncRes.ok) {
-          const { executionId } = await syncRes.json();
-          await new Promise<void>(resolve => {
-            const poll = async () => {
-              const s = await fetch(`/api/skill/${executionId}/status`);
-              if (s.ok) { const d = await s.json(); if (d.status === 'completed' || d.status === 'failed') { resolve(); return; } }
-              setTimeout(poll, 3000);
-            };
-            setTimeout(poll, 3000);
-          });
-        }
-
-        setTopicSkillStatus(prev => ({ ...prev, [uploadTopicId]: 'completed' }));
-        setTimeout(() => setTopicSkillStatus(prev => ({ ...prev, [uploadTopicId]: 'idle' })), 3000);
-      }
     } catch (error: unknown) {
       setUploadError(`上传失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -390,27 +224,9 @@ export default function Topics() {
     low: 'bg-[#34c759]/10 text-[#34c759]',
   };
 
-  const getSkillButtonStatus = (topicId: string): 'idle' | 'running' | 'completed' | 'failed' => {
-    const s = topicSkillStatus[topicId];
-    if (s === 'researching' || s === 'extracting' || s === 'syncing') return 'running';
-    if (s === 'completed') return 'completed';
-    if (s === 'failed') return 'failed';
-    return 'idle';
-  };
-
-  const getSkillButtonLabel = (topicId: string): string => {
-    const s = topicSkillStatus[topicId];
-    if (s === 'researching') return '采集中...';
-    if (s === 'extracting') return '抽取中...';
-    if (s === 'syncing') return '同步图谱...';
-    if (s === 'completed') return '已完成';
-    if (s === 'failed') return '重试';
-    return '采集';
-  };
-
   return (
     <div className="space-y-6 animate-fade-in">
-      <PageHeader title="主题追踪" description="管理技术主题、采集文档、自动提取知识并同步图谱">
+      <PageHeader title="主题追踪" description="管理技术追踪主题，查看文档，设置优先级和关键词">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#aeaeb5]" />
           <input
@@ -438,7 +254,7 @@ export default function Topics() {
         <EmptyState
           icon={<Tags className="w-12 h-12" />}
           title="暂无主题"
-          description="创建一个技术追踪主题，开始自动化情报采集"
+          description="创建一个技术追踪主题，开始文档管理和报告生成"
           action={
             <button onClick={openCreateModal} className="flex items-center gap-2 px-5 py-2 bg-[#0071e3] text-white rounded-[980px] text-sm font-medium hover:bg-[#0062cc] transition-all">
               <Plus className="w-4 h-4" />新建主题
@@ -486,23 +302,14 @@ export default function Topics() {
 
                   {/* Actions */}
                   <div className="flex items-center justify-between pt-3 border-t border-[#f5f5f7]">
-                    <div className="flex items-center gap-2">
-                      <SkillButton
-                        onClick={() => handleCollect(topic)}
-                        status={getSkillButtonStatus(topic.id)}
-                        variant="secondary"
-                      >
-                        {getSkillButtonLabel(topic.id)}
-                      </SkillButton>
-                      <button
-                        onClick={() => toggleExpand(topic.id)}
-                        className="flex items-center gap-1 px-3 py-2 text-xs text-[#86868b] hover:text-[#1d1d1f] transition-colors"
-                      >
-                        <FileText className="w-3.5 h-3.5" />
-                        {docCount} 篇
-                        {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => toggleExpand(topic.id)}
+                      className="flex items-center gap-1 px-3 py-2 text-xs text-[#86868b] hover:text-[#1d1d1f] transition-colors"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      {docCount} 篇
+                      {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    </button>
                     <div className="flex items-center gap-1">
                       <button onClick={() => openEditModal(topic)} className="p-2 text-[#aeaeb5] hover:text-[#0071e3] rounded-full hover:bg-[#0071e3]/5 transition-all" title="编辑">
                         <Edit2 className="w-3.5 h-3.5" />
@@ -525,7 +332,7 @@ export default function Topics() {
                           <span className="text-xs text-[#aeaeb5]">{topicDocs.length} 篇</span>
                         </div>
                         {topicDocs.length === 0 ? (
-                          <p className="text-xs text-[#aeaeb5] py-4 text-center">暂无文档，点击「采集」或上传文件</p>
+                          <p className="text-xs text-[#aeaeb5] py-4 text-center">暂无文档，请上传文件或生成报告</p>
                         ) : (
                           <div className="space-y-1 max-h-64 overflow-y-auto">
                             {topicDocs.map((doc: any) => (
@@ -574,12 +381,9 @@ export default function Topics() {
                                 <X className="w-3.5 h-3.5" />
                               </button>
                             </div>
-                            <div className="mt-2 flex gap-2">
-                              <button onClick={() => handleFileUpload(false)} disabled={uploadingFile !== null} className="flex-1 py-1.5 text-xs font-medium bg-white rounded-full hover:bg-[#e8e8ed] transition-all disabled:opacity-40">
-                                上传
-                              </button>
-                              <button onClick={() => handleFileUpload(true)} disabled={uploadingFile !== null} className="flex-1 py-1.5 text-xs font-medium bg-[#0071e3] text-white rounded-full hover:bg-[#0062cc] transition-all disabled:opacity-40">
-                                上传并分析
+                            <div className="mt-2">
+                              <button onClick={() => handleFileUpload()} disabled={uploadingFile !== null} className="w-full py-1.5 text-xs font-medium bg-[#0071e3] text-white rounded-full hover:bg-[#0062cc] transition-all disabled:opacity-40">
+                                {uploadingFile ? '上传中...' : '上传'}
                               </button>
                             </div>
                           </div>
