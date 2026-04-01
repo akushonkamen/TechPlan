@@ -196,18 +196,24 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
   const [layout, setLayout] = useState<'force' | 'hierarchical' | 'circular' | 'grid'>('force');
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const rfInstance = useRef<any>(null);
+  const autoFitTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Auto-focus on highlighted nodes when focusNodeIds changes
   useEffect(() => {
     if (focusNodeIds?.length && rfInstance.current) {
-      const timer = setTimeout(() => {
+      autoFitTimerRef.current = setTimeout(() => {
         rfInstance.current?.fitView({
           nodes: focusNodeIds.map(id => ({ id })),
           padding: 0.3,
           duration: 600,
         });
       }, 400);
-      return () => clearTimeout(timer);
+      return () => {
+        if (autoFitTimerRef.current) {
+          clearTimeout(autoFitTimerRef.current);
+          autoFitTimerRef.current = null;
+        }
+      };
     }
   }, [focusNodeIds]);
 
@@ -253,7 +259,12 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
 
   useEffect(() => {
-    setNodes(layoutedNodes);
+    // Only update if actually different to prevent potential loops
+    const currentJSON = JSON.stringify(nodes);
+    const newJSON = JSON.stringify(layoutedNodes);
+    if (currentJSON !== newJSON) {
+      setNodes(layoutedNodes);
+    }
   }, [layoutedNodes, setNodes]);
 
   useEffect(() => {

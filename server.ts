@@ -1329,7 +1329,9 @@ async function startServer() {
       // Auto-select default competitor for competitor report type
       if (reportType === 'competitor' && !params.competitorName) {
         try {
-          const orgs = JSON.parse(typeof topic.organizations === 'string' ? JSON.parse(topic.organizations) : []);
+          const orgs = typeof topic.organizations === 'string'
+            ? JSON.parse(topic.organizations)
+            : (Array.isArray(topic.organizations) ? topic.organizations : []);
           params.competitorName = orgs[0] || "Pinecone";
         } catch {
           params.competitorName = "Pinecone";

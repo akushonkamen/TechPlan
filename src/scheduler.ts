@@ -77,6 +77,10 @@ export class SchedulerService {
   start() {
     if (this.timer) return;
     if (!this.config.enabled) return;
+    if (!this.db || !this.startExecution || !this.reportHandler) {
+      console.error('[Scheduler] Cannot start: missing dependencies');
+      return;
+    }
     const ms = this.config.checkIntervalMinutes * 60 * 1000;
     console.log(`[Scheduler] Starting — interval: ${this.config.checkIntervalMinutes}min`);
     // Run first check immediately
@@ -206,6 +210,37 @@ export class SchedulerService {
     );
     if (!topics || topics.length === 0) return [];
 
+    // Batch query: Get all last report timestamps for all topic-schedule combinations
+    const topicSchedulePairs: Array<{ topicId: string; schedule: string }> = [];
+    for (const topic of topics) {
+      const schedules: string[] = [];
+      if (topic.schedule && topic.schedule !== 'disabled') schedules.push(topic.schedule);
+      if (topic.daily_enabled && !schedules.includes('daily')) schedules.push('daily');
+      if (topic.monthly_enabled && !schedules.includes('monthly')) schedules.push('monthly');
+      if (topic.quarterly_enabled && !schedules.includes('quarterly')) schedules.push('quarterly');
+
+      for (const schedule of schedules) {
+        topicSchedulePairs.push({ topicId: topic.id, schedule });
+      }
+    }
+
+    // Build batch query with UNION ALL
+    if (topicSchedulePairs.length === 0) return [];
+
+    const unionQueries = topicSchedulePairs.map(
+      (_, i) => `SELECT ? as topic_id, ? as schedule_type, MAX(generated_at) as lastAt FROM reports WHERE topic_id = ? AND type = ?`
+    ).join(' UNION ALL ');
+
+    const batchParams = topicSchedulePairs.flatMap(pair => [pair.topicId, pair.schedule, pair.topicId, pair.schedule]);
+    const lastReports = await this.db.all(unionQueries, batchParams);
+
+    // Create lookup map: "topicId:schedule" -> lastAt timestamp
+    const lastReportMap = new Map<string, string | null>();
+    for (const row of lastReports) {
+      const key = `${row.topic_id}:${row.schedule_type}`;
+      lastReportMap.set(key, row.lastAt);
+    }
+
     const now = Date.now();
     const results: PendingTopic[] = [];
 
@@ -218,12 +253,8 @@ export class SchedulerService {
       if (topic.quarterly_enabled && !schedules.includes('quarterly')) schedules.push('quarterly');
 
       for (const schedule of schedules) {
-        const lastReport = await this.db.get(
-          `SELECT MAX(generated_at) as lastAt FROM reports WHERE topic_id = ? AND type = ?`,
-          [topic.id, schedule]
-        );
-
-        const lastAt = lastReport?.lastAt ? new Date(lastReport.lastAt).getTime() : 0;
+        const key = `${topic.id}:${schedule}`;
+        const lastAt = lastReportMap.get(key) ? new Date(lastReportMap.get(key)!).getTime() : 0;
         const intervalDays = SCHEDULE_DAYS[schedule] ?? 7;
         const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
         const dueAt = lastAt + intervalMs;
@@ -233,7 +264,7 @@ export class SchedulerService {
             topicId: topic.id,
             topicName: topic.name,
             schedule,
-            lastReportAt: lastReport?.lastAt ?? null,
+            lastReportAt: lastReportMap.get(key) ?? null,
             dueInMinutes: 0,
           });
         }

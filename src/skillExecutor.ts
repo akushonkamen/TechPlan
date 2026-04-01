@@ -117,13 +117,22 @@ export class SkillExecutor {
     this.runningCount++;
     this.progressLines.set(execution.id, []);
 
-    // Record in DB
-    this.db.run(
+    // Record in DB - if this fails, execution should reflect the failure
+    const dbInsertPromise = this.db.run(
       `INSERT INTO skill_executions (id, skill_name, params, status, started_at) VALUES (?, ?, ?, 'running', ?)`,
       [execution.id, execution.skillName, JSON.stringify(params), execution.startedAt],
-    ).catch((err: Error) => console.error('[SkillExecutor] DB insert error:', err));
+    );
 
-    return new Promise<SkillExecution>((resolve) => {
+    return new Promise<SkillExecution>((resolve, reject) => {
+      // Handle DB insert failure - reject the promise immediately
+      dbInsertPromise.catch((err: Error) => {
+        console.error('[SkillExecutor] DB insert error:', err);
+        execution.status = 'failed';
+        execution.error = `Database error: ${err.message}`;
+        this.runningCount--;
+        reject(new Error(`Failed to record execution in database: ${err.message}`));
+      });
+
       const appendProgress = (line: string) => {
         const arr = this.progressLines.get(execution.id);
         if (arr) {
