@@ -44,7 +44,7 @@ const SKILL_TIMEOUTS: Record<string, number> = {
   'report-quarterly': 600, // 10 min
   'report-tech-topic': 600, // 10 min
   'report-competitor': 600, // 10 min
-  'report-alert': 120,     // 2 min — alert is time-critical
+  'report-alert': 300,     // 5 min
 };
 
 interface FrontmatterData {

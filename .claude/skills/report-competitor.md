@@ -1,6 +1,6 @@
 ---
 version: "1.0.0"
-display_name: "友商深度分析报告"
+display_name: "友商分析报告"
 description: |
   竞争者深度画像，包括 SWOT 分析、技术能力评估和威胁评估。
   六阶段流程：数据收集→信号识别→分析框架→内容生成→质量检查→图谱关联。
@@ -515,6 +515,80 @@ SWOT 分析矩阵：
 5. 使用中文输出所有内容
 6. `swotAnalysis` 四个象限必须非空
 7. 威胁评估必须基于客观数据，避免主观臆断
+
+---
+
+## McKinsey 方法论指引
+
+### 波特五力分析（竞争格局结构）
+
+在 `competitiveAssessment` 和 `swotAnalysis` 中应用波特五力模型，分析竞争者所处的行业结构：
+- **供应商议价力**：竞争者的上游依赖
+  - 从 `techCapabilities.technologyStack` 推断其对特定供应商/技术的依赖度
+  - 依赖度高 → 供应商议价力强 → 竞争者利润空间受限
+- **买方议价力**：竞争者客户的选择权
+  - 从 `marketPerformance.marketShare.bySegment` 推断客户集中度
+  - 客户集中 → 议价力强 → 竞争者定价能力弱
+- **新进入者威胁**：竞争者所在市场的壁垒
+  - 从 `companyProfile.financialOverview` 和 `techCapabilities` 推断壁垒高度
+  - 壁垒低 → 新进入者多 → 竞争者护城河浅
+- **替代品威胁**：其他技术/模式替代竞争者的风险
+  - 从 `strategyAnalysis.businessModel.valueProposition` 评估可替代性
+- **行业竞争强度**：竞争者与同行的竞争激烈程度
+  - 从 `partnershipInvestment` 和 `marketPerformance.growthMetrics` 推断
+在 `threatAreas` 中标注五力中哪几力对竞争者最不利。
+
+### 5Cs 价值捕获分析
+
+在 `strategyAnalysis` 中分析竞争者的价值捕获模式：
+- **Competitor（竞争维度）**：竞争者如何与同行竞争
+  - 从 `competitiveStrategy.type` 和 `differentiation` 提取
+  - 判断：成本领先 vs 差异化 vs 聚焦
+- **Company（自身能力）**：竞争者有哪些不可复制的核心能力
+  - 从 `techCapabilities.technologyRoadmap` 和 `swotAnalysis.strengths` 提取
+  - 评估：技术/数据/网络效应/品牌哪个是核心壁垒
+- **Customer（客户价值）**：竞争者如何为客户创造独特价值
+  - 从 `productServices.productPortfolio` 的 `marketPosition` 和 `businessModel.valueProposition` 提取
+- **Collaborator（合作生态）**：竞争者的合作伙伴网络如何增强竞争力
+  - 从 `partnershipInvestment.partnerships` 提取
+  - 评估：合作网络是增强还是限制了竞争者的灵活性
+- **Context（环境适应）**：竞争者如何适应外部环境变化
+  - 从 `forecast.keyAssumptions` 和事件 timeline 推断适应能力
+
+### 战略意图分析（长期目标推断）
+
+在 `strategyAnalysis` 中从竞争者的行动推断其长期战略意图：
+1. **资源分配信号**：资金/人才流向哪里 → 战略重点在哪里
+   - 从 `partnershipInvestment.investments` 的 `strategicRationale` 推断
+   - 从 `companyProfile.leadership` 的 `keyDecisions` 推断
+2. **行动模式识别**：竞争者是进攻型还是防御型
+   - 进攻型信号：频繁发布新产品、激进扩张、大量招聘
+   - 防御型信号：收购竞争对手、加固专利墙、锁定客户
+3. **时间节奏推断**：竞争者的行动是响应式还是主动式
+   - 主动式：有预判性的技术布局（提前 2-3 年开始研发）
+   - 响应式：跟随市场趋势的快速跟进
+4. **战略目标推断**：综合以上信号推断 3-5 年战略目标
+   - 在 `strategyAnalysis.vision` 和 `forecast.mediumTerm` 中体现推断结论
+   - 标注置信度：多源佐证 → 高；单一信号 → 中；推测 → 低
+
+### VRIO 竞争优势可持续性评估
+
+在 `swotAnalysis.strengths` 和 `competitiveAssessment` 中应用 VRIO 评估：
+- **V (Value)**：竞争者的优势是否真正为客户创造价值？
+  - 从 `productServices` 和 `claims` 中交叉验证
+- **R (Rarity)**：这些优势在行业中是否稀缺？
+  - 从 `competitiveLandscape` 的竞争者对比中判断
+- **I (Inimitability)**：这些优势是否难以模仿？
+  - 技术壁垒：专利数量、研发深度、算法复杂度
+  - 网络效应：用户规模、生态锁定、数据飞轮
+  - 品牌壁垒：市场认知、客户忠诚度
+- **O (Organization)**：竞争者的组织能力是否能持续支撑这些优势？
+  - 从 `companyProfile.leadership` 和人才事件推断组织稳定性
+- **综合评估**：
+  - V+R+I+O → 竞争者具有持久优势，威胁长期存在
+  - V+R 但非 I → 优势可被追赶，存在时间窗口
+  - 非R → 优势可复制，竞争威胁可控
+在 `recommendedResponse` 中根据 VRIO 结果调整响应策略的紧迫程度。
 
 ---
 

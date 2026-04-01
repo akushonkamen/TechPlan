@@ -577,6 +577,102 @@ console.log(JSON.stringify({
 
 ---
 
+## McKinsey 方法论指引
+
+### 三轴模型（战略定位）
+
+在评估战略执行和市场环境时，融入三轴模型思维：
+- **Where to Play（在哪里竞争）**：从 `technologyAssessment.technologyMaturity` 中识别高价值赛道
+  - 技术情报应用：将技术按成熟度（emerging/growth/mature/declining）映射到竞争赛道
+  - 在 `strategicAdjustments` 中明确建议进入/退出/维持哪些技术赛道
+- **How to Win（如何取胜）**：从 `marketEnvironment.competitiveDynamics` 中推导竞争策略
+  - 技术情报应用：识别差异化技术路线、成本优势来源、生态锁定策略
+  - 在 `nextQuarterOutlook.strategicPriorities` 中提出具体的竞争策略
+- **When to Act（何时行动）**：从 `timeline` 事件中判断行动窗口
+  - 技术情报应用：基于技术成熟度拐点、竞争者节奏、监管时间表判断时机
+  - 在 `strategicAdjustments` 中标注行动的时间紧迫性
+
+### 5Cs 价值捕获分析
+
+在 `nextQuarterOutlook.strategicPriorities` 中体现 5Cs 视角：
+- **Competitor**：竞争对手动向如何影响我们的策略
+- **Company**：自身核心能力能抓住哪些机会
+- **Customer**：客户需求变化带来什么新机会
+- **Collaborator**：合作伙伴生态如何增强竞争力
+- **Context**：宏观环境变化带来的机会与风险
+
+### PEST 环境扫描
+
+在 `marketEnvironment` 分析中融入 PEST 框架：
+- **P (Political)**：从 `regulatoryChanges` 中提取政策影响
+- **E (Economic)**：从 `investmentReview` 中分析经济趋势
+- **S (Social)**：从 `claims` 中洞察社会认知变化
+- **T (Technological)**：从 `technologyAssessment` 中评估技术演进
+
+### 波特五力分析（行业结构评估）
+
+在 `marketEnvironment.competitiveDynamics` 中应用波特五力模型：
+- **供应商议价力**：技术供应链集中度（如芯片/云服务/数据源）
+  - 评估维度：供应商数量、替代品可用性、切换成本
+- **买方议价力**：下游客户对技术的选择权和议价能力
+  - 评估维度：客户集中度、标准化程度、替代方案
+- **新进入者威胁**：技术壁垒降低带来的新玩家进入风险
+  - 从 `newEntrants` 字段中提取，评估进入壁垒（技术/资本/人才/生态）
+- **替代品威胁**：其他技术路线替代当前主流技术的风险
+  - 从 `technologyAssessment.technologyMaturity` 中识别替代性技术
+- **行业竞争强度**：现有竞争者之间的竞争激烈程度
+  - 从 `marketShareChanges` 中推导竞争白热化程度
+
+### 7S 框架（组织能力评估）
+
+在 `strategicExecution` 中融入 McKinsey 7S 框架评估组织准备度：
+- **硬要素**（可直接观察）：
+  - **Strategy**：`strategicGoals` 中的战略目标是否清晰可执行
+  - **Structure**：组织架构是否支撑战略执行（从 `executionBarriers.internal` 推断）
+  - **Systems**：是否有配套的流程和工具（从 `keyInitiatives` 的执行障碍推断）
+- **软要素**（需间接推断）：
+  - **Skills**：技术能力是否匹配战略目标（从技术人才事件推断）
+  - **Staff**：人才储备是否充足（从人事变动事件推断）
+  - **Style**：管理风格是否适配（从决策模式推断）
+  - **Shared Values**：组织文化是否支撑（从公开声明和行动一致性推断）
+在 `executionBarriers` 分析中标注哪些 7S 要素可能成为执行障碍。
+
+### 价值驱动树（战略目标分解）
+
+在 `strategicAdjustments` 中使用价值驱动树分解战略目标：
+```
+战略目标（如：保持技术领先地位）
+├── 技术创新驱动
+│   ├── 研发投入水平
+│   ├── 技术突破数量
+│   └── 专利/标准影响力
+├── 生态优势构建
+│   ├── 开源社区活跃度
+│   ├── 合作伙伴网络
+│   └── 开发者吸引力
+└── 市场落地速度
+    ├── 应用场景覆盖
+    ├── 客户采用率
+    └── 商业化收入
+```
+在 `strategicAdjustments[].rationale` 中体现驱动因子分析逻辑。
+
+### 三地平线模型（技术成熟度展望）
+
+在 `technologyAssessment` 和 `nextQuarterOutlook` 中应用三地平线模型：
+- **H1（核心业务 Horizon）**：当前已成熟并产生价值的技术
+  - 对应 `technologyMaturity` 中 maturityLevel = "mature" 的技术
+  - 关注点：优化效率、防御竞争、延长生命周期
+- **H2（增长业务 Horizon）**：正在快速发展的新兴技术
+  - 对应 maturityLevel = "growth" 的技术
+  - 关注点：加速投入、建立先发优势、控制关键资源
+- **H3（探索业务 Horizon）**：前沿探索性技术
+  - 对应 maturityLevel = "emerging" 的技术
+  - 关注点：保持监测、小规模试水、评估颠覆潜力
+在 `nextQuarterOutlook.keyThemes` 中标注每个主题属于哪个 Horizon。
+
+---
+
 ## 数据不足时的处理
 
 如果季度数据不足：

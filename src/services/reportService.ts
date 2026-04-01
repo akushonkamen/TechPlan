@@ -273,7 +273,7 @@ export async function migrateReportTables(db: Database): Promise<void> {
     {
       id: 'rtc_daily',
       type: 'daily',
-      name: '日报',
+      name: '技术情报日报',
       description: '快速感知每日变化，浅层扫描新增文档、事件和实体',
       schedule: 'daily',
       review_config: JSON.stringify({ autoReview: true, humanReview: false }),
@@ -283,7 +283,7 @@ export async function migrateReportTables(db: Database): Promise<void> {
     {
       id: 'rtc_weekly',
       type: 'weekly',
-      name: '周报',
+      name: '技术情报周报',
       description: '深度分析一周动态，中层挖掘技术、竞争、投资信号',
       schedule: 'weekly',
       review_config: JSON.stringify({ autoReview: true, humanReview: 'optional' }),
@@ -293,7 +293,7 @@ export async function migrateReportTables(db: Database): Promise<void> {
     {
       id: 'rtc_monthly',
       type: 'monthly',
-      name: '月报',
+      name: '技术情报月报',
       description: '趋势研判与目标达成分析，战略层决策支持',
       schedule: 'monthly',
       review_config: JSON.stringify({ autoReview: true, humanReview: true }),
@@ -303,7 +303,7 @@ export async function migrateReportTables(db: Database): Promise<void> {
     {
       id: 'rtc_quarterly',
       type: 'quarterly',
-      name: '季报',
+      name: '技术情报季报',
       description: '战略评估与全景分析，高管层战略决策',
       schedule: 'quarterly',
       review_config: JSON.stringify({ autoReview: true, expertReview: true }),
@@ -333,7 +333,7 @@ export async function migrateReportTables(db: Database): Promise<void> {
     {
       id: 'rtc_alert',
       type: 'alert',
-      name: '预警报告',
+      name: '技术情报预警',
       description: '风险预警和快速响应报告，即时触发',
       schedule: null,
       review_config: JSON.stringify({ autoReview: true, humanReview: false }),
@@ -353,6 +353,25 @@ export async function migrateReportTables(db: Database): Promise<void> {
     }
   }
   console.log('[Migration] Seeded report_type_configs');
+
+  // ── Migrate existing report_type_configs names to unified full names ──
+  const nameUpdates: Record<string, string> = {
+    daily: '技术情报日报',
+    weekly: '技术情报周报',
+    monthly: '技术情报月报',
+    quarterly: '技术情报季报',
+    tech_topic: '技术专题报告',
+    competitor: '友商分析报告',
+    alert: '技术情报预警',
+  };
+  for (const [type, name] of Object.entries(nameUpdates)) {
+    await db.run("UPDATE report_type_configs SET name = ? WHERE type = ? AND name != ?", [name, type, name]);
+  }
+  console.log('[Migration] Unified report_type_configs names');
+
+  // ── Remove deprecated report types (strategic, market_entry) ──
+  await db.run("DELETE FROM report_type_configs WHERE type IN ('strategic', 'market_entry')");
+  console.log('[Migration] Removed deprecated report types (strategic, market_entry)');
 
   const defaultTemplate = {
     id: 'tpl_weekly_v2',
@@ -403,7 +422,7 @@ export async function migrateReportTables(db: Database): Promise<void> {
   console.log('[Migration] Report tables migration completed');
 }
 
-export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'tech_topic' | 'competitor' | 'trend' | 'alert' | 'flash';
+export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'tech_topic' | 'competitor' | 'alert';
 
 export interface ReportTypeConfig {
   id: string;

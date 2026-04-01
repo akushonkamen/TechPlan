@@ -1,6 +1,6 @@
 ---
 version: "1.0.0"
-display_name: "技术专题深度分析"
+display_name: "技术专题报告"
 description: |
   针对特定技术的深度分析报告，包括成熟度评估、竞争格局和应用前景。
   六阶段流程：数据收集→信号识别→分析框架→内容生成→质量检查→图谱关联。
@@ -475,6 +475,89 @@ TRL 1-9 评估框架：
 5. 使用中文输出所有内容
 6. `technologyOverview` 和 `competitiveLandscape` 必须非空
 7. TRL 评估必须提供明确依据
+
+---
+
+## McKinsey 方法论指引
+
+### VRIO 框架（竞争优势评估）
+
+在 `competitiveLandscape` 和 `strategicRecommendations` 中应用 VRIO 框架，评估技术的竞争优势可持续性：
+- **V (Value/价值)**：该技术是否为客户创造显著价值？
+  - 评估：从 `claims` 中识别正面主张，判断技术解决了什么痛点
+  - 高价值信号：多源佐证的性能提升、成本下降、效率提高
+- **R (Rarity/稀缺性)**：该技术是否只有少数竞争者掌握？
+  - 评估：从 `competitiveMatrix` 中统计拥有同类技术的竞争者数量
+  - 稀缺判断：≤3 家具备 → 稀缺；>3 家具备 → 不稀缺
+- **I (Inimitability/不可模仿性)**：竞争者模仿该技术的难度有多高？
+  - 评估维度：专利壁垒、技术复杂度、人才壁垒、数据壁垒、生态锁定
+  - 从 `developmentStatus.keyPlayers` 的 activities 中推断壁垒类型
+- **O (Organization/组织支撑)**：组织是否有能力将技术优势转化为商业价值？
+  - 评估：从 `keyPlayers` 的 strength 字段推断组织的商业化能力
+  - 关键信号：有产品化历史、有销售渠道、有客户基础的优先
+
+**综合判断**：
+- V+R+I+O 全满足 → 持久竞争优势（Sustained Competitive Advantage）
+- V+R+O 但非 I → 临时竞争优势（Temporary Competitive Advantage）
+- V+O 但非 R → 竞争平价（Competitive Parity）
+- 非V → 竞争劣势（Competitive Disadvantage）
+
+在 `strategicRecommendations` 中，根据 VRIO 评估结果提出差异化建议。
+
+### 三地平线模型（创新组合分析）
+
+在 `forecast` 和 `strategicRecommendations` 中应用三地平线模型，评估技术在创新组合中的定位：
+- **H1（核心/现有技术）**：该技术是否已经在成熟市场中应用？
+  - 对应 TRL 7-9，`marketPosition` 为领导者或挑战者
+  - 策略建议：优化效率、降低成本、扩大市场份额
+- **H2（增长/新兴技术）**：该技术是否正在进入增长期？
+  - 对应 TRL 4-6，有初步商业化案例
+  - 策略建议：加速投入、建立生态、抢占标准制定权
+- **H3（探索/前沿技术）**：该技术是否处于早期探索阶段？
+  - 对应 TRL 1-3，仍在实验室或概念验证阶段
+  - 策略建议：小规模试水、保持监测、评估颠覆潜力
+
+在 `forecast.keyAssumptions` 中标注该技术属于哪个 Horizon 的核心假设。
+
+### 议题树（技术挑战分解）
+
+当 `deepAnalysis.challenges` 中识别出关键技术挑战时，用议题树进行结构化分解：
+```
+技术挑战：[具体挑战名称]
+├── 技术可行性问题
+│   ├── 核心算法/架构瓶颈
+│   ├── 工程实现难度
+│   └── 性能/可扩展性限制
+├── 资源与生态问题
+│   ├── 人才供给不足
+│   ├── 产业链不成熟
+│   └── 标准化缺失
+├── 市场与商业化问题
+│   ├── 客户接受度低
+│   ├── 成本效益不明确
+│   └── 替代方案竞争
+└── 政策与合规问题
+    ├── 监管不确定性
+    ├── 安全/隐私风险
+    └── 知识产权争议
+```
+在 `challenges[].potentialSolutions` 中，针对议题树的不同分支提出针对性解决方案。
+
+### 技术采用曲线（市场渗透评估）
+
+在 `developmentStatus.maturityAssessment` 和 `forecast` 中评估技术所处的采用阶段：
+- **创新者阶段（Innovators, 2.5%）**：仅实验室/极少数先锋使用
+  - 特征：技术不稳定、文档缺乏、社区极小
+- **早期采用者阶段（Early Adopters, 13.5%）**：前沿公司开始试用
+  - 特征：有 PoC 案例、技术博客增多、风险投资关注
+- **早期大众阶段（Early Majority, 34%）**：主流公司开始采用
+  - 特征：有成熟产品、行业报告提及、培训/认证出现
+- **晚期大众阶段（Late Majority, 34%）**：保守企业跟随采用
+  - 特征：标准已确立、供应链成熟、竞争激烈
+- **落后者阶段（Laggards, 16%）**：被淘汰或边缘化
+  - 特征：市场份额萎缩、投资减少、社区迁移
+
+在 `investmentDynamics.investmentSummary` 中，将投资热度与采用曲线阶段关联分析。
 
 ---
 
