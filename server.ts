@@ -171,6 +171,7 @@ async function startServer() {
       period_start TEXT,
       period_end TEXT,
       metadata TEXT,
+      review_status TEXT DEFAULT 'pending',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE
     );
@@ -299,6 +300,15 @@ async function startServer() {
     // Column might already exist - ignore duplicate column error
     if (!err.message.includes('duplicate column')) {
       console.warn('[Server] Warning adding skill_version column:', err.message);
+    }
+  }
+
+  // Migrate: add review_status column to reports if missing
+  try {
+    await db.exec(`ALTER TABLE reports ADD COLUMN review_status TEXT DEFAULT 'pending'`);
+  } catch (e: any) {
+    if (!e.message?.includes('duplicate column')) {
+      console.warn('[Migration] Warning adding reports.review_status:', e.message);
     }
   }
 
@@ -1107,26 +1117,6 @@ async function startServer() {
 
   // ===== Reports Read API =====
 
-  // 创建 reports 表（补充索引）
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS reports (
-      id TEXT PRIMARY KEY,
-      topic_id TEXT NOT NULL,
-      topic_name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      summary TEXT,
-      content TEXT,
-      status TEXT DEFAULT 'completed',
-      generated_at TEXT NOT NULL,
-      metadata TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_reports_topic_id ON reports(topic_id);
-    CREATE INDEX IF NOT EXISTS idx_reports_generated_at ON reports(generated_at DESC);
-  `);
 
   /**
    * GET /api/reports
@@ -1287,6 +1277,18 @@ async function startServer() {
         const qEnd = new Date(now.getFullYear(), q * 3 + 3, 0);
         return { start: fmt(qStart), end: fmt(qEnd) };
       }
+      case 'tech_topic': {
+        const start = fmt(new Date(now.getTime() - 30 * 86400000));
+        return { start, end: fmt(now) };
+      }
+      case 'competitor': {
+        const start = fmt(new Date(now.getTime() - 90 * 86400000));
+        return { start, end: fmt(now) };
+      }
+      case 'alert': {
+        const start = fmt(new Date(now.getTime() - 2 * 86400000));
+        return { start, end: fmt(now) };
+      }
       default: {
         const weekAgo = new Date(now.getTime() - 7 * 86400000);
         return { start: fmt(weekAgo), end: fmt(now) };
@@ -1333,16 +1335,18 @@ async function startServer() {
           params.competitorName = "Pinecone";
         }
       }
+      if (reportType === 'tech_topic' && !params.technologyName) {
+        params.technologyName = topic.name;
+      }
+      if (reportType === 'alert' && !params.alertType) {
+        params.alertType = 'risk';
+      }
       const { executionId, promise } = skillExecutor.startExecution(skillName, params);
 
       // Route report results through handleReportResult
       promise.then(async (execution) => {
-        if (reportType === 'alert') {
-          // Alerts skip review — direct insert
-          await handleReportResult(execution, params);
-        } else {
-          await handleReportResult(execution, params);
-        }
+        // All report types go through result handling (alerts included)
+        await handleReportResult(execution, params);
         ws.send(execution.id, 'result', JSON.stringify(execution.result ?? { error: execution.error }));
       }).catch((err) => {
         console.error(`[ReportGenerate] Error:`, err);

@@ -15,6 +15,11 @@ params:
     type: string
     required: true
     description: "主题名称"
+  - name: reportType
+    type: string
+    required: false
+    default: "tech_topic"
+    description: "报告类型"
   - name: technologyName
     type: string
     required: true

@@ -17,8 +17,9 @@ params:
     description: "主题名称"
   - name: reportType
     type: string
-    required: true
-    description: "报告类型（weekly/special/alert）"
+    required: false
+    default: "weekly"
+    description: "报告类型"
   - name: timeRangeStart
     type: string
     required: false

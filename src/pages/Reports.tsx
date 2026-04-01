@@ -233,9 +233,13 @@ export default function Reports() {
   const [skillStatus, setSkillStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
   const [isLoading, setIsLoading] = useState(true);
   const mountedRef = useRef(true);
+  const pollTimeoutRef = useRef<NodeJS.Timeout>();
 
   useEffect(() => {
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
+    };
   }, []);
 
   useEffect(() => { loadData(); }, []);
@@ -317,9 +321,9 @@ export default function Reports() {
               }
             }
           } catch { /* ignore */ }
-          setTimeout(doPoll, 3000);
+          pollTimeoutRef.current = setTimeout(doPoll, 3000);
         };
-        setTimeout(doPoll, 2000);
+        pollTimeoutRef.current = setTimeout(doPoll, 2000);
       };
       poll();
     } catch (error: unknown) {
@@ -341,7 +345,6 @@ export default function Reports() {
     const map: Record<string, string> = {
       daily: '日报', weekly: '周报', monthly: '月报', quarterly: '季报',
       tech_topic: '技术专题', competitor: '友商分析', alert: '预警',
-      special: '专题', executive_summary: '摘要',
     };
     return map[type] || type;
   };

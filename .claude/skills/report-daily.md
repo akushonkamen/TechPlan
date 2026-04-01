@@ -15,6 +15,11 @@ params:
     type: string
     required: true
     description: "主题名称"
+  - name: reportType
+    type: string
+    required: false
+    default: "daily"
+    description: "报告类型"
   - name: timeRangeStart
     type: string
     required: false
