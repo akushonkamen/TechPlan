@@ -12,6 +12,17 @@ export interface Topic {
   schedule: 'daily' | 'weekly' | 'monthly' | 'disabled';
 }
 
+// Urgency levels for documents
+export type UrgencyLevel = 'breaking' | 'developing' | 'ongoing' | 'archival';
+
+// Timeliness metrics for documents
+export interface TimelinessMetrics {
+  urgency: UrgencyLevel;
+  relevanceScore: number;
+  freshnessHours: number;
+  lastUpdated: string;
+}
+
 export interface Document {
   id: string;
   type: 'paper' | 'news' | 'internal' | 'standard';
@@ -22,6 +33,9 @@ export interface Document {
   language: string;
   abstractOrSummary: string;
   trustScore: number;
+  urgency?: UrgencyLevel;
+  relevanceScore?: number;
+  freshnessHours?: number;
 }
 
 // Database Document type for persistence
@@ -36,6 +50,15 @@ export interface DbDocument {
   topic_id: string | null;
   metadata: Record<string, any> | null;
   created_at: string;
+  urgency: UrgencyLevel;
+  relevance_score: number;
+  freshness_hours: number;
+  // Source tracking and deduplication fields
+  original_source?: string | null;
+  dedup_hash?: string | null;
+  collection_count?: number;
+  first_collected_at?: string | null;
+  last_collected_at?: string | null;
 }
 
 // Input type for creating a document
@@ -49,6 +72,8 @@ export interface CreateDocumentInput {
   content?: string;
   topic_id?: string;
   metadata?: Record<string, any>;
+  urgency?: UrgencyLevel;
+  relevance_score?: number;
 }
 
 export interface Event {
