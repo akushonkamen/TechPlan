@@ -7,6 +7,7 @@ import path from "path";
 import fs from "fs";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
+import * as crypto from "crypto";
 import { SkillRegistry } from "./src/skillRegistry.js";
 import { SkillExecutor } from "./src/skillExecutor.js";
 import type { SkillExecution } from "./src/skillExecutor.js";
@@ -28,6 +29,46 @@ const PORT = parseInt(process.env.PORT || '3000');
 function safeJsonParse(val: string | null | undefined, fallback: any = null): any {
   if (!val) return fallback;
   try { return JSON.parse(val); } catch { return val; }
+}
+
+/**
+ * Calculate time decay score based on published date vs now
+ * @param publishedDate ISO date string
+ * @param urgency Urgency level: 'breaking' | 'developing' | 'ongoing' | 'archival'
+ * @returns Relevance score 0-1
+ */
+function calculateTimeDecay(publishedDate: string | null, urgency: string = 'ongoing'): number {
+  if (!publishedDate) return 0.5;
+
+  const now = new Date();
+  const published = new Date(publishedDate);
+  const hoursSince = (now.getTime() - published.getTime()) / (1000 * 60 * 60);
+
+  // Urgency multipliers for decay rate
+  const urgencyMultiplier: Record<string, number> = {
+    'breaking': 0.1,    // Decay 10% per hour
+    'developing': 0.05, // Decay 5% per hour
+    'ongoing': 0.01,    // Decay 1% per hour
+    'archival': 0.001   // Decay 0.1% per hour
+  };
+
+  const decay = urgencyMultiplier[urgency] || 0.01;
+  const relevance = Math.max(0, Math.exp(-decay * hoursSince));
+
+  return relevance;
+}
+
+/**
+ * Calculate freshness hours since published date
+ * @param publishedDate ISO date string
+ * @returns Hours since publication
+ */
+function calculateFreshnessHours(publishedDate: string | null): number {
+  if (!publishedDate) return 0;
+
+  const now = new Date();
+  const published = new Date(publishedDate);
+  return (now.getTime() - published.getTime()) / (1000 * 60 * 60);
 }
 
 async function startServer() {
@@ -102,6 +143,9 @@ async function startServer() {
       topic_id TEXT,
       metadata TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      urgency TEXT DEFAULT 'ongoing',
+      relevance_score REAL DEFAULT 0.5,
+      freshness_hours REAL DEFAULT 0,
       FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE SET NULL
     );
 
@@ -200,6 +244,11 @@ async function startServer() {
     CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
     CREATE INDEX IF NOT EXISTS idx_reviews_type ON reviews(type);
 
+    -- Create indexes for timeliness queries
+    CREATE INDEX IF NOT EXISTS idx_documents_urgency ON documents(urgency);
+    CREATE INDEX IF NOT EXISTS idx_documents_relevance ON documents(relevance_score);
+    CREATE INDEX IF NOT EXISTS idx_documents_published_date ON documents(published_date);
+
     -- Skill execution tracking
     CREATE TABLE IF NOT EXISTS skill_executions (
       id TEXT PRIMARY KEY,
@@ -283,13 +332,88 @@ async function startServer() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Source tracking table for deduplication and rate limiting
+    CREATE TABLE IF NOT EXISTS sources (
+      id TEXT PRIMARY KEY,
+      url TEXT NOT NULL UNIQUE,
+      domain TEXT NOT NULL,
+      title TEXT,
+      first_seen TEXT NOT NULL,
+      last_collected TEXT,
+      fingerprint TEXT NOT NULL,
+      content_hash TEXT,
+      collect_count INTEGER DEFAULT 1,
+      last_checked TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Report time periods table for linking reports to their declared time ranges
+    CREATE TABLE IF NOT EXISTS report_time_periods (
+      id TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      preset_type TEXT,  -- '24h', '7d', '30d', 'custom', etc.
+      documents_count INTEGER DEFAULT 0,
+      sources_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_skill_executions_name ON skill_executions(skill_name);
     CREATE INDEX IF NOT EXISTS idx_skill_executions_status ON skill_executions(status);
     CREATE INDEX IF NOT EXISTS idx_bilevel_lessons_skill ON bilevel_lessons(skill_name);
     CREATE INDEX IF NOT EXISTS idx_bilevel_skills_skill ON bilevel_skills(skill_name);
     CREATE INDEX IF NOT EXISTS idx_skill_versions_skill ON skill_versions(skill_name);
     CREATE INDEX IF NOT EXISTS idx_optimization_history_skill ON optimization_history(skill_name);
+    CREATE INDEX IF NOT EXISTS idx_sources_url ON sources(url);
+    CREATE INDEX IF NOT EXISTS idx_sources_domain ON sources(domain);
+    CREATE INDEX IF NOT EXISTS idx_sources_fingerprint ON sources(fingerprint);
+    CREATE INDEX IF NOT EXISTS idx_sources_last_collected ON sources(last_collected);
+    CREATE INDEX IF NOT EXISTS idx_report_time_periods_report_id ON report_time_periods(report_id);
+    CREATE INDEX IF NOT EXISTS idx_report_time_periods_period_start ON report_time_periods(period_start);
+    CREATE INDEX IF NOT EXISTS idx_report_time_periods_period_end ON report_time_periods(period_end);
   `);
+
+  // Migration: Add timeliness columns to documents table
+  try {
+    await db.exec(`ALTER TABLE documents ADD COLUMN urgency TEXT DEFAULT 'ongoing'`);
+  } catch (e: any) {
+    if (!e.message?.includes('duplicate column')) {
+      console.warn('[Migration] Warning adding documents.urgency:', e.message);
+    }
+  }
+  try {
+    await db.exec(`ALTER TABLE documents ADD COLUMN relevance_score REAL DEFAULT 0.5`);
+  } catch (e: any) {
+    if (!e.message?.includes('duplicate column')) {
+      console.warn('[Migration] Warning adding documents.relevance_score:', e.message);
+    }
+  }
+  try {
+    await db.exec(`ALTER TABLE documents ADD COLUMN freshness_hours REAL DEFAULT 0`);
+  } catch (e: any) {
+    if (!e.message?.includes('duplicate column')) {
+      console.warn('[Migration] Warning adding documents.freshness_hours:', e.message);
+    }
+  }
+
+  // Create indexes for timeliness queries (if not exists)
+  try {
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_documents_urgency ON documents(urgency)`);
+  } catch (e: any) {
+    console.warn('[Migration] Warning creating idx_documents_urgency:', e.message);
+  }
+  try {
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_documents_relevance ON documents(relevance_score)`);
+  } catch (e: any) {
+    console.warn('[Migration] Warning creating idx_documents_relevance:', e.message);
+  }
+  try {
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_documents_published_date ON documents(published_date)`);
+  } catch (e: any) {
+    console.warn('[Migration] Warning creating idx_documents_published_date:', e.message);
+  }
 
   // Add skill_version column to skill_executions if not exists
   try {
@@ -310,6 +434,117 @@ async function startServer() {
     if (!e.message?.includes('duplicate column')) {
       console.warn('[Migration] Warning adding reports.review_status:', e.message);
     }
+  }
+
+  // Migration: Add source tracking and deduplication columns to documents
+  const sourceTrackingColumns = [
+    'original_source TEXT',      // First source where document was found
+    'dedup_hash TEXT',           // Hash for duplicate detection (URL + title normalized)
+    'collection_count INTEGER DEFAULT 1',  // Number of times collected
+    'first_collected_at TEXT',   // First collection timestamp
+    'last_collected_at TEXT'     // Most recent collection timestamp
+  ];
+
+  for (const columnDef of sourceTrackingColumns) {
+    const columnName = columnDef.split(' ')[0];
+    try {
+      await db.exec(`ALTER TABLE documents ADD COLUMN ${columnDef}`);
+    } catch (e: any) {
+      if (!e.message?.includes('duplicate column')) {
+        console.warn(`[Migration] Warning adding documents.${columnName}:`, e.message);
+      }
+    }
+  }
+
+  // Create index for deduplication lookups
+  try {
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_documents_dedup_hash ON documents(dedup_hash)`);
+  } catch (e: any) {
+    console.warn('[Migration] Warning creating idx_documents_dedup_hash:', e.message);
+  }
+
+  // Create index for source tracking queries
+  try {
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_documents_original_source ON documents(original_source)`);
+  } catch (e: any) {
+    console.warn('[Migration] Warning creating idx_documents_original_source:', e.message);
+  }
+
+  /**
+   * Generate content fingerprint using crypto.createHash
+   * Creates a SHA-256 hash of normalized content for deduplication
+   * @param content - The content to fingerprint (title, url, or full content)
+   * @returns Hex string hash
+   */
+  function generateFingerprint(content: string): string {
+    const normalized = content
+      .toLowerCase()
+      .trim()
+      // Normalize whitespace
+      .replace(/\s+/g, ' ')
+      // Remove common tracking parameters
+      .replace(/[?&](utm_[^&]*|ref=[^&]*|source=[^&]*|fbclid=[^&]*|gclid=[^&]*)/gi, '')
+      // Remove trailing slashes
+      .replace(/\/+$/, '');
+
+    return crypto.createHash('sha256').update(normalized, 'utf8').digest('hex');
+  }
+
+  /**
+   * Extract domain from URL for rate limiting and grouping
+   * @param url - The URL to extract domain from
+   * @returns Domain name or null
+   */
+  function extractDomain(url: string): string | null {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace(/^www\./, '');
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Compute deduplication hash for a document (legacy, uses generateFingerprint now)
+   * Hash is based on normalized URL + title to identify duplicates
+   */
+  function computeDedupHash(sourceUrl: string | null, title: string): string {
+    const normalizedUrl = sourceUrl
+      ? sourceUrl.toLowerCase()
+          .replace(/^https?:\/\//, '')
+          .replace(/^www\./, '')
+          .replace(/\/$/, '')
+          .split('?')[0]
+          .split('#')[0]
+      : '';
+    const normalizedTitle = title.toLowerCase().trim().replace(/\s+/g, ' ');
+    const combined = `${normalizedUrl}|||${normalizedTitle}`;
+    // Use crypto.createHash for better fingerprinting
+    const hash = crypto.createHash('sha256').update(combined, 'utf8').digest('hex').substring(0, 16);
+    return `dedup_${hash}`;
+  }
+
+  /**
+   * Find existing document by dedup hash
+   */
+  async function findDuplicateByHash(dedupHash: string): Promise<any | null> {
+    return await db.get(
+      `SELECT id, title, source_url, collected_date, collection_count FROM documents WHERE dedup_hash = ? LIMIT 1`,
+      [dedupHash]
+    );
+  }
+
+  /**
+   * Update document when it's collected again (increment count, update last_collected_at)
+   */
+  async function updateOnRecollect(documentId: string): Promise<void> {
+    await db.run(
+      `UPDATE documents SET
+        collection_count = collection_count + 1,
+        last_collected_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [documentId]
+    );
   }
 
   // Seed data if empty
@@ -587,32 +822,76 @@ async function startServer() {
 
   /**
    * GET /api/dashboard/alerts
-   * 获取最新预警列表
+   * 获取最新预警列表 - 按发布时间排序，显示"发布于X小时前"
+   * 优先级: breaking news → developing stories → trending topics
    */
   app.get("/api/dashboard/alerts", async (req, res) => {
     try {
+      // 获取所有高优先级主题的文档，按 published_date 排序
       const alerts = await db.all(`
         SELECT
+          d.id,
           d.title,
           t.name as topic,
-          d.collected_date as time,
+          d.published_date,
           d.source,
-          d.source_url as url
+          d.source_url as url,
+          d.urgency,
+          d.relevance_score,
+          d.freshness_hours
         FROM documents d
         LEFT JOIN topics t ON d.topic_id = t.id
-        WHERE t.priority = 'high'
-        ORDER BY d.collected_date DESC
-        LIMIT 5
+        WHERE t.priority = 'high' OR d.urgency IN ('breaking', 'developing')
+        ORDER BY
+          CASE d.urgency
+            WHEN 'breaking' THEN 1
+            WHEN 'developing' THEN 2
+            WHEN 'ongoing' THEN 3
+            ELSE 4
+          END ASC,
+          d.relevance_score DESC,
+          d.published_date DESC
+        LIMIT 20
       `);
 
-      const formattedAlerts = alerts.map((alert, i) => ({
-        id: i,
+      // 分类为不同层级
+      const breakingNews: typeof alerts = [];
+      const developingStories: typeof alerts = [];
+      const trendingTopics: typeof alerts = [];
+
+      for (const alert of alerts) {
+        // 动态计算相关性分数（结合时效性，基于 published_date）
+        const dynamicScore = alert.relevance_score ?? calculateTimeDecay(alert.published_date, alert.urgency || 'ongoing');
+        const isVeryFresh = alert.freshness_hours < 6;
+        const isRecent = alert.freshness_hours < 24;
+
+        if (alert.urgency === 'breaking' || (isVeryFresh && dynamicScore > 0.8)) {
+          breakingNews.push(alert);
+        } else if (alert.urgency === 'developing' || (isRecent && dynamicScore > 0.6)) {
+          developingStories.push(alert);
+        } else if (dynamicScore > 0.3) {
+          trendingTopics.push(alert);
+        }
+      }
+
+      // 格式化输出，使用 published_date 显示"发布于X小时前"
+      const formatAlert = (alert: any, category: string) => ({
+        id: alert.id,
         title: alert.title,
         topic: alert.topic || '未分类',
-        time: formatTimeAgo(alert.time),
+        time: formatTimeAgoPublished(alert.published_date),
         type: getAlertType(alert.source),
         url: alert.url,
-      }));
+        category, // 'breaking', 'developing', 'trending'
+        relevanceScore: alert.relevance_score ?? 0.5,
+        urgency: alert.urgency || 'ongoing',
+      });
+
+      const formattedAlerts = [
+        ...breakingNews.slice(0, 3).map(a => formatAlert(a, 'breaking')),
+        ...developingStories.slice(0, 5).map(a => formatAlert(a, 'developing')),
+        ...trendingTopics.slice(0, 7).map(a => formatAlert(a, 'trending')),
+      ].slice(0, 15); // 最多返回15条
 
       res.json(formattedAlerts);
     } catch (error) {
@@ -634,6 +913,25 @@ async function startServer() {
     if (diffHours < 24) return `${diffHours}小时前`;
     if (diffDays < 7) return `${diffDays}天前`;
     return date.toLocaleDateString('zh-CN');
+  }
+
+  /**
+   * Format time ago as "发布于X小时前" (Published X hours ago)
+   * Used for activity feed to show published date instead of collected date
+   */
+  function formatTimeAgoPublished(dateStr: string | null): string {
+    if (!dateStr) return '发布时间未知';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 60) return `发布于${diffMins}分钟前`;
+    if (diffHours < 24) return `发布于${diffHours}小时前`;
+    if (diffDays < 7) return `发布于${diffDays}天前`;
+    return `发布于${date.toLocaleDateString('zh-CN')}`;
   }
 
   function getAlertType(source: string): string {
@@ -705,15 +1003,207 @@ async function startServer() {
     }
   });
 
+  /**
+   * Get documents filtered by time period (for report generation)
+   * Ensures only documents with published_date within the period are included
+   * Query params:
+   *   - topic_id: required, topic to filter by
+   *   - period_start: required, start date (ISO format or YYYY-MM-DD)
+   *   - period_end: required, end date (ISO format or YYYY-MM-DD)
+   *   - use_published_date: if true, filter by published_date (default: true)
+   *   - include_metadata: if true, include full metadata (default: false)
+   */
+  app.get("/api/documents/by-period", async (req, res) => {
+    try {
+      const { topic_id, period_start, period_end, use_published_date = 'true', include_metadata = 'false' } = req.query;
+
+      if (!topic_id || !period_start || !period_end) {
+        return res.status(400).json({
+          error: "Missing required parameters: topic_id, period_start, period_end"
+        });
+      }
+
+      // Normalize dates to ISO format for consistent comparison
+      const normalizeDate = (dateStr: string): string => {
+        // If already ISO format with time, return as-is
+        if (dateStr.includes('T') || dateStr.includes(' ')) {
+          return dateStr;
+        }
+        // Convert YYYY-MM-DD to YYYY-MM-DDT00:00:00.000Z
+        return `${dateStr}T00:00:00.000Z`;
+      };
+
+      const startDate = normalizeDate(period_start as string);
+      const endDate = period_end.includes('T') || period_end.includes(' ')
+        ? period_end as string
+        : `${period_end}T23:59:59.999Z`;
+
+      const usePublished = use_published_date === 'true';
+      const dateColumn = usePublished ? 'published_date' : 'collected_date';
+
+      // Build query with strict time filtering
+      const query = `
+        SELECT id, title, source, source_url, ${dateColumn} as date,
+               published_date, collected_date, substr(content, 1, 500) as excerpt,
+               urgency, relevance_score, freshness_hours
+        FROM documents
+        WHERE topic_id = ?
+          AND ${dateColumn} IS NOT NULL
+          AND ${dateColumn} >= ?
+          AND ${dateColumn} <= ?
+        ORDER BY ${dateColumn} DESC
+        LIMIT 200
+      `;
+
+      const rows = await db.all(query, [topic_id, startDate, endDate]);
+
+      // Get counts for verification
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM documents
+        WHERE topic_id = ?
+          AND ${dateColumn} IS NOT NULL
+          AND ${dateColumn} >= ?
+          AND ${dateColumn} <= ?
+      `;
+      const countResult = await db.get(countQuery, [topic_id, startDate, endDate]);
+
+      res.json({
+        documents: rows.map(row => ({
+          ...row,
+          metadata: include_metadata === 'true' ? safeJsonParse(row.metadata) : undefined
+        })),
+        period: { start: startDate, end: endDate },
+        date_column: dateColumn,
+        total_in_period: countResult?.total || 0,
+        returned: rows.length
+      });
+    } catch (error) {
+      console.error("Failed to fetch documents by period:", error);
+      res.status(500).json({ error: "Failed to fetch documents by period" });
+    }
+  });
+
+  /**
+   * Check for duplicate sources before collection
+   * Returns existing documents that would be duplicates based on URL or content fingerprint
+   */
+  app.post("/api/documents/check-duplicates", async (req, res) => {
+    try {
+      const { sources } = req.body; // Array of { url, title, content? }
+
+      if (!Array.isArray(sources) || sources.length === 0) {
+        return res.status(400).json({ error: "sources must be a non-empty array" });
+      }
+
+      const duplicates: any[] = [];
+
+      for (const source of sources) {
+        const url = source.url?.trim();
+        const title = source.title?.trim();
+
+        if (!url && !title) continue;
+
+        // Check by URL first
+        if (url) {
+          const existingByUrl = await db.get(
+            "SELECT id, title, source_url, published_date, collected_date FROM documents WHERE source_url = ? LIMIT 1",
+            [url]
+          );
+          if (existingByUrl) {
+            duplicates.push({
+              ...existingByUrl,
+              match_type: 'url',
+              fingerprint: generateFingerprint(url)
+            });
+            continue;
+          }
+        }
+
+        // Check by fingerprint (URL + title hash)
+        if (title) {
+          const fingerprint = generateFingerprint(url ? `${url}|||${title}` : title);
+          const existingByFingerprint = await db.get(
+            "SELECT id, title, source_url, published_date, collected_date FROM documents WHERE dedup_hash = ? LIMIT 1",
+            [`dedup_${fingerprint.substring(0, 16)}`]
+          );
+          if (existingByFingerprint) {
+            duplicates.push({
+              ...existingByFingerprint,
+              match_type: 'fingerprint',
+              fingerprint
+            });
+          }
+        }
+
+        // Check sources table for rate limiting
+        if (url) {
+          const domain = extractDomain(url);
+          if (domain) {
+            const sourceRecord = await db.get(
+              "SELECT * FROM sources WHERE url = ? OR domain = ? ORDER BY last_collected DESC LIMIT 1",
+              [url, domain]
+            );
+            if (sourceRecord) {
+              duplicates.push({
+                ...sourceRecord,
+                match_type: 'source_record',
+                note: 'Source was previously collected'
+              });
+            }
+          }
+        }
+      }
+
+      res.json({
+        duplicates,
+        total_sources: sources.length,
+        duplicate_count: duplicates.length,
+        new_sources: sources.length - duplicates.length
+      });
+    } catch (error) {
+      console.error("Failed to check duplicates:", error);
+      res.status(500).json({ error: "Failed to check duplicates" });
+    }
+  });
+
   app.post("/api/documents", async (req, res) => {
     try {
       const doc = req.body;
-      const id = doc.id || `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const collectedDate = doc.collected_date || new Date().toISOString();
 
+      // Calculate timeliness metrics
+      const urgency = doc.urgency || 'ongoing';
+      const freshnessHours = calculateFreshnessHours(doc.published_date || null);
+      const relevanceScore = doc.relevance_score ?? calculateTimeDecay(doc.published_date || null, urgency);
+
+      // Calculate deduplication hash
+      const dedupHash = computeDedupHash(doc.source_url || null, doc.title);
+
+      // Check for duplicate
+      const existing = await findDuplicateByHash(dedupHash);
+      if (existing) {
+        // Update existing document instead of creating duplicate
+        await updateOnRecollect(existing.id);
+        const updated = await db.get("SELECT * FROM documents WHERE id = ?", [existing.id]);
+        const document = {
+          ...updated,
+          metadata: safeJsonParse(updated.metadata)
+        };
+        res.status(200).json({
+          ...document,
+          _action: 'updated',
+          _message: 'Document already exists, updated collection metadata'
+        });
+        return;
+      }
+
+      const id = doc.id || `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const now = new Date().toISOString();
+
       await db.run(
-        `INSERT INTO documents (id, title, source, source_url, published_date, collected_date, content, topic_id, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO documents (id, title, source, source_url, published_date, collected_date, content, topic_id, metadata, urgency, relevance_score, freshness_hours, original_source, dedup_hash, collection_count, first_collected_at, last_collected_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           doc.title,
@@ -723,7 +1213,15 @@ async function startServer() {
           collectedDate,
           doc.content || null,
           doc.topic_id || null,
-          doc.metadata ? JSON.stringify(doc.metadata) : null
+          doc.metadata ? JSON.stringify(doc.metadata) : null,
+          urgency,
+          relevanceScore,
+          freshnessHours,
+          doc.source || null,  // original_source
+          dedupHash,            // dedup_hash
+          1,                    // collection_count
+          now,                  // first_collected_at
+          now                   // last_collected_at
         ]
       );
 
@@ -747,6 +1245,42 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to delete document:", error);
       res.status(500).json({ error: "Failed to delete document" });
+    }
+  });
+
+  // Refresh timeliness metrics for all documents or a specific topic
+  app.post("/api/documents/refresh-timeliness", async (req, res) => {
+    try {
+      const { topic_id } = req.body;
+
+      let query = "SELECT * FROM documents";
+      const params: string[] = [];
+
+      if (topic_id) {
+        query += " WHERE topic_id = ?";
+        params.push(topic_id);
+      }
+
+      const documents = await db.all(query, params);
+
+      for (const doc of documents) {
+        const freshnessHours = calculateFreshnessHours(doc.published_date);
+        const relevanceScore = calculateTimeDecay(doc.published_date, doc.urgency || 'ongoing');
+
+        await db.run(
+          `UPDATE documents SET freshness_hours = ?, relevance_score = ? WHERE id = ?`,
+          [freshnessHours, relevanceScore, doc.id]
+        );
+      }
+
+      res.json({
+        success: true,
+        updated: documents.length,
+        message: `Refreshed timeliness metrics for ${documents.length} documents`
+      });
+    } catch (error) {
+      console.error("Failed to refresh timeliness:", error);
+      res.status(500).json({ error: "Failed to refresh timeliness metrics" });
     }
   });
 
@@ -781,15 +1315,34 @@ async function startServer() {
       // 保存到数据库
       const documentId = uuidv4();
       const now = new Date().toISOString();
+      const sourceUrl = `file://${result.file.id}`;
+      const source = '内部文档';
+
+      // Calculate deduplication hash for uploaded file
+      const dedupHash = computeDedupHash(sourceUrl, result.file.title);
+
+      // Check for duplicate (same file uploaded again)
+      const existing = await findDuplicateByHash(dedupHash);
+      if (existing) {
+        // Update existing document
+        await updateOnRecollect(existing.id);
+        return res.json({
+          id: existing.id,
+          title: result.file.title,
+          source: source,
+          _action: 'updated',
+          _message: 'File already exists, updated collection metadata'
+        });
+      }
 
       await db.run(
-        `INSERT INTO documents (id, title, source, source_url, published_date, collected_date, content, topic_id, metadata, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO documents (id, title, source, source_url, published_date, collected_date, content, topic_id, metadata, created_at, original_source, dedup_hash, collection_count, first_collected_at, last_collected_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           documentId,
           result.file.title,
-          '内部文档',
-          `file://${result.file.id}`,
+          source,
+          sourceUrl,
           now.split('T')[0],
           now,
           result.file.content,
@@ -802,6 +1355,11 @@ async function startServer() {
             fileId: result.file.id,
           }),
           now,
+          source,               // original_source
+          dedupHash,            // dedup_hash
+          1,                    // collection_count
+          now,                  // first_collected_at
+          now                   // last_collected_at
         ]
       );
 
@@ -1115,6 +1673,237 @@ async function startServer() {
     }
   });
 
+  /**
+   * GET /api/graph/recent/:topicId
+   * 获取主题的最近发展（时间感知）
+   */
+  app.get("/api/graph/recent/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const hours = Math.max(1, Math.min(720, parseInt(req.query.hours as string) || 24)); // 默认24小时，最多30天
+
+      const cutoffDate = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+      // 获取最近的高相关性文档和实体
+      const recentDocuments = await db.all(`
+        SELECT
+          d.id,
+          d.title,
+          d.source,
+          d.source_url as url,
+          d.published_date,
+          d.collected_date,
+          d.relevance_score,
+          d.urgency,
+          d.freshness_hours
+        FROM documents d
+        WHERE d.topic_id = ?
+          AND d.collected_date > ?
+          AND d.relevance_score > 0.3
+        ORDER BY d.relevance_score DESC, d.collected_date DESC
+        LIMIT 20
+      `, [topicId, cutoffDate]);
+
+      // 获取最近相关的实体
+      const recentEntities = await db.all(`
+        SELECT
+          e.id,
+          e.name,
+          e.type,
+          e.created_at,
+          e.first_seen_date,
+          COUNT(DISTINCT d.id) as document_count
+        FROM entities e
+        JOIN document_entities de ON e.id = de.entity_id
+        JOIN documents d ON de.document_id = d.id
+        WHERE d.topic_id = ?
+          AND d.collected_date > ?
+        GROUP BY e.id
+        ORDER BY document_count DESC, e.first_seen_date DESC
+        LIMIT 15
+      `, [topicId, cutoffDate]);
+
+      // 获取最近的关系（新兴连接）
+      const emergingRelations = await db.all(`
+        SELECT
+          r.source_entity_id,
+          r.target_entity_id,
+          r.relation_type,
+          r.confidence,
+          e1.name as source_name,
+          e2.name as target_name,
+          r.first_seen_date
+        FROM relations r
+        JOIN entities e1 ON r.source_entity_id = e1.id
+        JOIN entities e2 ON r.target_entity_id = e2.id
+        JOIN document_entities de1 ON e1.id = de1.entity_id
+        JOIN documents d1 ON de1.document_id = d1.id
+        WHERE d1.topic_id = ?
+          AND r.first_seen_date > ?
+          AND r.confidence > 0.5
+        ORDER BY r.first_seen_date DESC, r.confidence DESC
+        LIMIT 10
+      `, [topicId, cutoffDate]);
+
+      res.json({
+        documents: recentDocuments.map(d => ({
+          id: d.id,
+          title: d.title,
+          source: d.source,
+          url: d.url,
+          publishedDate: d.published_date,
+          collectedDate: d.collected_date,
+          relevanceScore: d.relevance_score,
+          urgency: d.urgency,
+          freshnessHours: d.freshness_hours,
+        })),
+        entities: recentEntities.map(e => ({
+          id: e.id,
+          name: e.name,
+          type: e.type,
+          documentCount: e.document_count,
+          firstSeenDate: e.first_seen_date,
+        })),
+        emergingRelations: emergingRelations.map(r => ({
+          sourceId: r.source_entity_id,
+          targetId: r.target_entity_id,
+          relationType: r.relation_type,
+          confidence: r.confidence,
+          sourceName: r.source_name,
+          targetName: r.target_name,
+          firstSeenDate: r.first_seen_date,
+        })),
+        timeRange: {
+          hours,
+          cutoffDate,
+        },
+        counts: {
+          documents: recentDocuments.length,
+          entities: recentEntities.length,
+          emergingRelations: emergingRelations.length,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to fetch recent developments:", error);
+      res.status(500).json({ error: "Failed to fetch recent developments" });
+    }
+  });
+
+  /**
+   * GET /api/graph/timeline/:entityId
+   * 获取实体演化时间线
+   */
+  app.get("/api/graph/timeline/:entityId", async (req, res) => {
+    try {
+      const { entityId } = req.params;
+      const days = Math.max(7, Math.min(365, parseInt(req.query.days as string) || 30)); // 默认30天
+
+      const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+      // 获取实体基本信息
+      const entity = await db.get("SELECT * FROM entities WHERE id = ?", [entityId]);
+      if (!entity) {
+        return res.status(404).json({ error: "Entity not found" });
+      }
+
+      // 获取相关的文档时间线
+      const documentTimeline = await db.all(`
+        SELECT
+          d.id,
+          d.title,
+          d.collected_date,
+          d.published_date,
+          d.relevance_score,
+          d.source
+        FROM documents d
+        JOIN document_entities de ON d.id = de.document_id
+        WHERE de.entity_id = ?
+          AND d.collected_date > ?
+        ORDER BY d.collected_date DESC
+        LIMIT 50
+      `, [entityId, cutoffDate]);
+
+      // 获取关系演化（新出现的关系）
+      const relationEvolution = await db.all(`
+        SELECT
+          r.relation_type,
+          r.first_seen_date,
+          r.confidence,
+          e2.name as related_entity_name,
+          e2.type as related_entity_type,
+          CASE
+            WHEN r.source_entity_id = ? THEN 'source'
+            ELSE 'target'
+          END as direction
+        FROM relations r
+        JOIN entities e2 ON
+          (r.source_entity_id = ? AND r.target_entity_id = e2.id) OR
+          (r.target_entity_id = ? AND r.source_entity_id = e2.id)
+        WHERE (r.source_entity_id = ? OR r.target_entity_id = ?)
+          AND r.first_seen_date > ?
+        ORDER BY r.first_seen_date DESC
+        LIMIT 30
+      `, [entityId, entityId, entityId, entityId, entityId, cutoffDate]);
+
+      // 按日期聚合数据
+      const timelineByDate: Record<string, {
+        date: string;
+        documentCount: number;
+        avgRelevance: number;
+        newRelations: number;
+      }> = {};
+
+      documentTimeline.forEach(d => {
+        const dateKey = d.collected_date.split('T')[0];
+        if (!timelineByDate[dateKey]) {
+          timelineByDate[dateKey] = {
+            date: dateKey,
+            documentCount: 0,
+            avgRelevance: 0,
+            newRelations: 0,
+          };
+        }
+        timelineByDate[dateKey].documentCount++;
+        timelineByDate[dateKey].avgRelevance += d.relevance_score || 0.5;
+      });
+
+      relationEvolution.forEach(r => {
+        const dateKey = r.first_seen_date.split('T')[0];
+        if (timelineByDate[dateKey]) {
+          timelineByDate[dateKey].newRelations++;
+        }
+      });
+
+      // 计算平均相关性并转换为数组
+      const timeline = Object.values(timelineByDate)
+        .map(t => ({
+          ...t,
+          avgRelevance: t.documentCount > 0 ? t.avgRelevance / t.documentCount : 0,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      res.json({
+        entity: {
+          id: entity.id,
+          name: entity.name,
+          type: entity.type,
+          firstSeenDate: entity.first_seen_date,
+        },
+        timeline,
+        documents: documentTimeline,
+        relationEvolution,
+        stats: {
+          totalDocuments: documentTimeline.length,
+          totalNewRelations: relationEvolution.length,
+          dateRange: days,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to fetch entity timeline:", error);
+      res.status(500).json({ error: "Failed to fetch entity timeline" });
+    }
+  });
+
   // ===== Reports Read API =====
 
 
@@ -1252,48 +2041,200 @@ async function startServer() {
     alert: 'report-alert',
   };
 
-  function computePeriod(reportType: string, period?: { start?: string; end?: string }) {
+  /**
+   * Enhanced period computation supporting:
+   * - Custom period with start/end dates
+   * - Preset time ranges: "24h", "7d", "30d", "90d", "1y"
+   * - Report type defaults
+   */
+  function computePeriod(
+    reportType: string,
+    period?: { start?: string; end?: string; preset?: string }
+  ): { start: string; end: string; preset?: string } {
     const now = new Date();
-    if (period?.start && period?.end) return period;
     const pad = (n: number) => String(n).padStart(2, '0');
-    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const fmtDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const fmtDateTime = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}Z`;
+
+    // If custom start/end provided, use them
+    if (period?.start && period?.end) {
+      return { start: period.start, end: period.end, preset: period.preset };
+    }
+
+    // Handle preset time ranges
+    if (period?.preset) {
+      const preset = period.preset.toLowerCase();
+      switch (preset) {
+        case '24h':
+        case '1d': {
+          const start = fmtDateTime(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+          return { start, end: fmtDateTime(now), preset: period.preset };
+        }
+        case '7d': {
+          const start = fmtDate(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+          return { start, end: fmtDate(now), preset: period.preset };
+        }
+        case '30d': {
+          const start = fmtDate(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000));
+          return { start, end: fmtDate(now), preset: period.preset };
+        }
+        case '90d': {
+          const start = fmtDate(new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000));
+          return { start, end: fmtDate(now), preset: period.preset };
+        }
+        case '1y':
+        case '365d': {
+          const start = fmtDate(new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000));
+          return { start, end: fmtDate(now), preset: period.preset };
+        }
+        default:
+          console.warn(`[computePeriod] Unknown preset: ${period.preset}, falling back to reportType default`);
+          break;
+      }
+    }
+
+    // Report type defaults
     switch (reportType) {
       case 'daily': {
-        const today = fmt(now);
-        return { start: today, end: today };
+        const today = fmtDate(now);
+        return { start: today, end: today, preset: 'daily' };
       }
       case 'weekly': {
-        const weekAgo = new Date(now.getTime() - 7 * 86400000);
-        return { start: fmt(weekAgo), end: fmt(now) };
+        const weekAgo = fmtDate(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+        return { start: weekAgo, end: fmtDate(now), preset: 'weekly' };
       }
       case 'monthly': {
         const monthStart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
-        const monthEnd = fmt(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-        return { start: monthStart, end: monthEnd };
+        const monthEnd = fmtDate(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+        return { start: monthStart, end: monthEnd, preset: 'monthly' };
       }
       case 'quarterly': {
         const q = Math.floor(now.getMonth() / 3);
-        const qStart = new Date(now.getFullYear(), q * 3, 1);
-        const qEnd = new Date(now.getFullYear(), q * 3 + 3, 0);
-        return { start: fmt(qStart), end: fmt(qEnd) };
+        const qStart = fmtDate(new Date(now.getFullYear(), q * 3, 1));
+        const qEnd = fmtDate(new Date(now.getFullYear(), q * 3 + 3, 0));
+        return { start: qStart, end: qEnd, preset: 'quarterly' };
       }
       case 'tech_topic': {
-        const start = fmt(new Date(now.getTime() - 30 * 86400000));
-        return { start, end: fmt(now) };
+        const start = fmtDate(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000));
+        return { start, end: fmtDate(now), preset: '30d' };
       }
       case 'competitor': {
-        const start = fmt(new Date(now.getTime() - 90 * 86400000));
-        return { start, end: fmt(now) };
+        const start = fmtDate(new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000));
+        return { start, end: fmtDate(now), preset: '90d' };
       }
       case 'alert': {
-        const start = fmt(new Date(now.getTime() - 2 * 86400000));
-        return { start, end: fmt(now) };
+        const start = fmtDateTime(new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000));
+        return { start, end: fmtDateTime(now), preset: '24h' };
       }
       default: {
-        const weekAgo = new Date(now.getTime() - 7 * 86400000);
-        return { start: fmt(weekAgo), end: fmt(now) };
+        const weekAgo = fmtDate(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+        return { start: weekAgo, end: fmtDate(now), preset: 'weekly' };
       }
     }
+  }
+
+  /**
+   * Trigger automatic data collection for a time period
+   * This runs the research skill with deduplication and time-range filtering
+   */
+  async function triggerCollectionForPeriod(
+    topicId: string,
+    topicName: string,
+    periodStart: string,
+    periodEnd: string,
+    keywords: string[] = [],
+    organizations: string[] = []
+  ): Promise<{ executionId: string; collected: number; duplicatesSkipped: number }> {
+    // Get topic details for collection
+    const topic = await db.get(
+      "SELECT keywords, organizations FROM topics WHERE id = ?",
+      [topicId]
+    );
+
+    const topicKeywords = keywords.length > 0
+      ? keywords
+      : (topic?.keywords ? JSON.parse(topic.keywords) : []);
+
+    const topicOrgs = organizations.length > 0
+      ? organizations
+      : (topic?.organizations ? JSON.parse(topic.organizations) : []);
+
+    // Check for existing documents in the period to assess coverage
+    const existingDocs = await db.get(
+      `SELECT COUNT(*) as count FROM documents
+       WHERE topic_id = ? AND published_date >= ? AND published_date <= ?`,
+      [topicId, periodStart, periodEnd]
+    );
+    const existingCount = existingDocs?.count || 0;
+
+    // Skip collection if we already have sufficient coverage (configurable threshold)
+    const MIN_DOCS_THRESHOLD = 5;
+    if (existingCount >= MIN_DOCS_THRESHOLD) {
+      console.log(`[Collection] Skipping collection for topic ${topicId}: ${existingCount} docs already exist in period`);
+      return { executionId: 'skip', collected: 0, duplicatesSkipped: 0 };
+    }
+
+    // Execute research skill with time range
+    const researchParams = {
+      topicId,
+      topicName,
+      keywords: JSON.stringify(topicKeywords),
+      organizations: JSON.stringify(topicOrgs),
+      timeRangeStart: periodStart,
+      timeRangeEnd: periodEnd,
+      maxResults: 20, // Limit for automatic collection
+    };
+
+    const { executionId, promise } = skillExecutor.startExecution('research', researchParams);
+
+    // Wait for completion (with timeout)
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Collection timeout')), 120000)
+    );
+
+    try {
+      await Promise.race([promise, timeout]) as any;
+      console.log(`[Collection] Completed collection for topic ${topicId}, execution ${executionId}`);
+    } catch (err: any) {
+      console.error(`[Collection] Failed or timeout:`, err?.message || err);
+    }
+
+    // Count new documents collected
+    const newDocs = await db.get(
+      `SELECT COUNT(*) as count FROM documents
+       WHERE topic_id = ? AND published_date >= ? AND published_date <= ?`,
+      [topicId, periodStart, periodEnd]
+    );
+
+    return {
+      executionId,
+      collected: (newDocs?.count || 0) - existingCount,
+      duplicatesSkipped: 0 // Would be calculated from research skill output
+    };
+  }
+
+  /**
+   * Get documents count within a time period for reporting
+   */
+  async function getDocumentsCountInPeriod(topicId: string, periodStart: string, periodEnd: string): Promise<number> {
+    const result = await db.get(
+      `SELECT COUNT(*) as count FROM documents
+       WHERE topic_id = ? AND published_date >= ? AND published_date <= ?`,
+      [topicId, periodStart, periodEnd]
+    );
+    return result?.count || 0;
+  }
+
+  /**
+   * Get unique sources count within a time period
+   */
+  async function getUniqueSourcesCountInPeriod(topicId: string, periodStart: string, periodEnd: string): Promise<number> {
+    const result = await db.get(
+      `SELECT COUNT(DISTINCT source) as count FROM documents
+       WHERE topic_id = ? AND published_date >= ? AND published_date <= ? AND source IS NOT NULL`,
+      [topicId, periodStart, periodEnd]
+    );
+    return result?.count || 0;
   }
 
   app.post("/api/reports/generate", requireAdmin, async (req, res) => {
@@ -1343,18 +2284,53 @@ async function startServer() {
       if (reportType === 'alert' && !params.alertType) {
         params.alertType = 'risk';
       }
+
+      // Automatic collection before report generation (if enabled)
+      const autoCollect = options?.autoCollect !== false; // Default true
+      let collectionResult = { executionId: '', collected: 0, duplicatesSkipped: 0 };
+
+      if (autoCollect) {
+        console.log(`[ReportGenerate] Auto-collection enabled for topic ${topicId}, period ${computedPeriod.start} - ${computedPeriod.end}`);
+        try {
+          collectionResult = await triggerCollectionForPeriod(
+            topicId,
+            topic.name,
+            computedPeriod.start,
+            computedPeriod.end,
+            options?.keywords || [],
+            options?.organizations || []
+          );
+          console.log(`[ReportGenerate] Collection result:`, collectionResult);
+        } catch (collectErr: any) {
+          console.error(`[ReportGenerate] Collection failed:`, collectErr?.message || collectErr);
+          // Continue with report generation even if collection fails
+        }
+      }
+
+      // Add collection metadata to params
+      params.collectionResult = collectionResult;
+      params.periodPreset = computedPeriod.preset;
+
       const { executionId, promise } = skillExecutor.startExecution(skillName, params);
 
       // Route report results through handleReportResult
       promise.then(async (execution) => {
         // All report types go through result handling (alerts included)
-        await handleReportResult(execution, params);
+        await handleReportResult(execution, params, computedPeriod);
         ws.send(execution.id, 'result', JSON.stringify(execution.result ?? { error: execution.error }));
       }).catch((err) => {
         console.error(`[ReportGenerate] Error:`, err);
       });
 
-      res.json({ executionId, skillName, reportType, period: computedPeriod, status: 'started' });
+      res.json({
+        executionId,
+        skillName,
+        reportType,
+        period: computedPeriod,
+        status: 'started',
+        autoCollect,
+        collectionResult
+      });
     } catch (error) {
       console.error("Failed to generate report:", error);
       res.status(500).json({ error: "Failed to generate report" });
@@ -2070,7 +3046,11 @@ async function startServer() {
   }
 
   // ── Extracted report persistence handler (shared by HTTP endpoint & scheduler) ──
-  async function handleReportResult(execution: SkillExecution, params: Record<string, any>) {
+  async function handleReportResult(
+    execution: SkillExecution,
+    params: Record<string, any>,
+    computedPeriod?: { start: string; end: string; preset?: string }
+  ) {
     try {
       const envelope = execution.result ?? {};
       let rawOutput = envelope.result ?? envelope.raw ?? envelope;
@@ -2360,6 +3340,35 @@ async function startServer() {
       );
       console.log(`[Report] Saved report ${rptId} for topic ${params.topicId}`);
 
+      // Create report_time_periods entry for tracking
+      try {
+        const periodStart = computedPeriod?.start || period.start;
+        const periodEnd = computedPeriod?.end || period.end;
+        const presetType = computedPeriod?.preset || params.periodPreset;
+
+        // Count documents and sources within the period
+        const docsInPeriod = await getDocumentsCountInPeriod(params.topicId, periodStart, periodEnd);
+        const sourcesInPeriod = await getUniqueSourcesCountInPeriod(params.topicId, periodStart, periodEnd);
+
+        await db.run(
+          `INSERT INTO report_time_periods (id, report_id, period_start, period_end, preset_type, documents_count, sources_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            `rtp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            rptId,
+            periodStart,
+            periodEnd,
+            presetType || null,
+            docsInPeriod,
+            sourcesInPeriod
+          ]
+        );
+        console.log(`[Report] Created time period entry: ${periodStart} - ${periodEnd}, ${docsInPeriod} docs, ${sourcesInPeriod} sources`);
+      } catch (periodErr) {
+        console.error('[Report] Failed to create report_time_periods entry:', periodErr);
+        // Non-critical error, continue with report processing
+      }
+
       try {
         const autoReview = await reviewService.createAutoReview(rptId, normalizedContent, {
           documentCount: docCount?.count || 0,
@@ -2403,6 +3412,14 @@ async function startServer() {
   app.post("/api/skill/:name", requireAdmin, async (req, res) => {
     const { name } = req.params;
     const params = req.body ?? {};
+
+    // Deprecation notice for standalone research collection
+    if (name === 'research') {
+      console.warn('[API] DEPRECATED: Standalone research collection via /api/skill/research is deprecated.');
+      console.warn('[API] Use /api/reports/generate with autoCollect option instead.');
+      // Add deprecation header to response
+      res.setHeader('X-API-Deprecation', 'Standalone research is deprecated. Use /api/reports/generate with autoCollect=true');
+    }
 
     if (!skillRegistry.get(name)) {
       res.status(404).json({ error: `Skill not found: ${name}` });
@@ -2465,7 +3482,119 @@ async function startServer() {
       console.error(`[SkillExecutor] Error executing ${name}:`, err);
     });
 
-    res.json({ executionId, skillName: name, status: 'started' });
+    res.json({
+      executionId,
+      skillName: name,
+      status: 'started',
+      deprecated: name === 'research' ? 'Use /api/reports/generate with autoCollect=true' : undefined
+    });
+  });
+
+  // ── Time Period Document Query API ──
+
+  /**
+   * GET /api/documents/by-period
+   * Get documents within a time period with optional filtering
+   */
+  app.get("/api/documents/by-period", async (req, res) => {
+    try {
+      const { topicId, start, end, preset } = req.query;
+
+      if (!start || !end) {
+        if (!preset) {
+          return res.status(400).json({ error: "Either 'start' and 'end' dates, or 'preset' (24h, 7d, 30d, 90d, 1y) is required" });
+        }
+        // Compute period from preset
+        const period = computePeriod('weekly', { preset: preset as string });
+        req.query.start = period.start;
+        req.query.end = period.end;
+      }
+
+      let query = `
+        SELECT d.*,
+               COUNT(DISTINCT e.id) as entity_count,
+               COUNT(DISTINCT ev.id) as event_count
+        FROM documents d
+        LEFT JOIN entities e ON e.document_id = d.id
+        LEFT JOIN events ev ON ev.document_id = d.id
+        WHERE d.published_date >= ? AND d.published_date <= ?
+      `;
+      const params: any[] = [req.query.start, req.query.end];
+
+      if (topicId) {
+        query += ` AND d.topic_id = ?`;
+        params.push(topicId);
+      }
+
+      query += ` GROUP BY d.id ORDER BY d.published_date DESC LIMIT 100`;
+
+      const rows = await db.all(query, params);
+      res.json(rows);
+    } catch (error) {
+      console.error("Failed to query documents by period:", error);
+      res.status(500).json({ error: "Failed to query documents" });
+    }
+  });
+
+  /**
+   * GET /api/reports/:id/time-period
+   * Get the time period info for a specific report
+   */
+  app.get("/api/reports/:id/time-period", async (req, res) => {
+    try {
+      const periodInfo = await db.get(
+        `SELECT rtp.*, r.type as report_type, r.title as report_title
+         FROM report_time_periods rtp
+         JOIN reports r ON r.id = rtp.report_id
+         WHERE rtp.report_id = ?`,
+        [req.params.id]
+      );
+
+      if (!periodInfo) {
+        return res.status(404).json({ error: "Time period info not found for this report" });
+      }
+
+      res.json(periodInfo);
+    } catch (error) {
+      console.error("Failed to get report time period:", error);
+      res.status(500).json({ error: "Failed to get time period info" });
+    }
+  });
+
+  /**
+   * GET /api/sources/stats
+   * Get source collection statistics with rate limiting info
+   */
+  app.get("/api/sources/stats", async (req, res) => {
+    try {
+      const { domain, hours } = req.query;
+      const hoursAgo = hours
+        ? new Date(Date.now() - (parseInt(hours as string) * 60 * 60 * 1000)).toISOString()
+        : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      let query = `
+        SELECT domain,
+               COUNT(*) as collection_count,
+               MAX(last_collected) as last_collection,
+               SUM(CASE WHEN last_collected > ? THEN 1 ELSE 0 END) as recent_count
+        FROM sources
+        WHERE last_collected > ?
+      `;
+      const params: any[] = [hoursAgo, hoursAgo];
+
+      if (domain) {
+        query += ` AND domain = ?`;
+        params.push(domain);
+      }
+
+      query += ` GROUP BY domain ORDER BY collection_count DESC LIMIT 50`;
+
+      const rows = await db.all(query, params);
+      res.json(rows);
+    } catch (error) {
+      console.error("Failed to get source stats:", error);
+      res.status(500).json({ error: "Failed to get source stats" });
+    }
   });
 
   // Get progress lines for an execution (poll-based, reliable)
