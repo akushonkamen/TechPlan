@@ -1,4 +1,5 @@
 import type { Database } from 'sqlite';
+import { randomUUID as crypto } from 'crypto';
 
 export async function migrateReportTables(db: Database): Promise<void> {
   await db.exec(`
@@ -511,4 +512,258 @@ export interface ReportGraphLink {
   link_type: 'entity_ref' | 'evidence' | 'impact' | 'path';
   metadata?: Record<string, any>;
   created_at: string;
+}
+
+// ── Report Version History ──
+
+export interface ReportVersion {
+  id: string;
+  report_id: string;
+  version: string;
+  content: string;
+  change_summary?: string;
+  changed_by?: string;
+  created_at: string;
+}
+
+/**
+ * Get version history for a report
+ */
+export async function getReportVersions(
+  db: Database,
+  reportId: string
+): Promise<ReportVersion[]> {
+  const rows = await db.all(
+    `SELECT * FROM report_versions WHERE report_id = ? ORDER BY created_at DESC`,
+    [reportId]
+  );
+  return rows.map((row: any) => ({
+    id: row.id,
+    report_id: row.report_id,
+    version: row.version,
+    content: row.content,
+    change_summary: row.change_summary,
+    changed_by: row.changed_by,
+    created_at: row.created_at,
+  }));
+}
+
+/**
+ * Create a new version snapshot before updating a report
+ */
+export async function createReportVersion(
+  db: Database,
+  reportId: string,
+  content: any,
+  changeSummary?: string,
+  changedBy?: string
+): Promise<void> {
+  // Get current version count
+  const existing = await db.get(
+    `SELECT version FROM report_versions WHERE report_id = ? ORDER BY created_at DESC LIMIT 1`,
+    [reportId]
+  );
+
+  // Increment version (semantic versioning: major.minor.patch)
+  let newVersion = '1.0.0';
+  if (existing) {
+    const parts = existing.version.split('.').map(Number);
+    newVersion = `${parts[0]}.${parts[1]}.${(parts[2] || 0) + 1}`;
+  }
+
+  await db.run(
+    `INSERT INTO report_versions (id, report_id, version, content, change_summary, changed_by)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      crypto(),
+      reportId,
+      newVersion,
+      JSON.stringify(content),
+      changeSummary,
+      changedBy,
+    ]
+  );
+}
+
+/**
+ * Restore a report from a specific version
+ */
+export async function restoreReportVersion(
+  db: Database,
+  reportId: string,
+  version: string
+): Promise<boolean> {
+  const versionRecord = await db.get(
+    `SELECT * FROM report_versions WHERE report_id = ? AND version = ?`,
+    [reportId, version]
+  );
+
+  if (!versionRecord) return false;
+
+  await db.run(
+    `UPDATE reports SET content = ? WHERE id = ?`,
+    [versionRecord.content, reportId]
+  );
+
+  return true;
+}
+
+/**
+ * Compare two versions of a report
+ */
+export async function compareReportVersions(
+  db: Database,
+  reportId: string,
+  version1: string,
+  version2: string
+): Promise<{ v1: ReportVersion; v2: ReportVersion; diff: string[] } | null> {
+  const [v1Record, v2Record] = await Promise.all([
+    db.get(`SELECT * FROM report_versions WHERE report_id = ? AND version = ?`, [reportId, version1]),
+    db.get(`SELECT * FROM report_versions WHERE report_id = ? AND version = ?`, [reportId, version2]),
+  ]);
+
+  if (!v1Record || !v2Record) return null;
+
+  // Simple diff implementation
+  const content1 = JSON.parse(v1Record.content);
+  const content2 = JSON.parse(v2Record.content);
+  const diff: string[] = [];
+
+  // Compare executive summaries
+  if (content1.executiveSummary?.overview !== content2.executiveSummary?.overview) {
+    diff.push('执行摘要已更改');
+  }
+  if (content1.sections?.length !== content2.sections?.length) {
+    diff.push(`章节数量: ${content1.sections?.length ?? 0} → ${content2.sections?.length ?? 0}`);
+  }
+
+  return {
+    v1: {
+      id: v1Record.id,
+      report_id: v1Record.report_id,
+      version: v1Record.version,
+      content: v1Record.content,
+      change_summary: v1Record.change_summary,
+      changed_by: v1Record.changed_by,
+      created_at: v1Record.created_at,
+    },
+    v2: {
+      id: v2Record.id,
+      report_id: v2Record.report_id,
+      version: v2Record.version,
+      content: v2Record.content,
+      change_summary: v2Record.change_summary,
+      changed_by: v2Record.changed_by,
+      created_at: v2Record.created_at,
+    },
+    diff,
+  };
+}
+
+// ── Report Template Rendering ──
+
+/**
+ * Render a report using a template
+ */
+export async function renderReportWithTemplate(
+  db: Database,
+  templateId: string,
+  data: Record<string, any>
+): Promise<string> {
+  const template = await db.get(
+    `SELECT * FROM report_templates WHERE id = ? AND is_active = 1`,
+    [templateId]
+  );
+
+  if (!template) {
+    throw new Error(`Template not found: ${templateId}`);
+  }
+
+  const structure = JSON.parse(template.structure);
+  let rendered = '';
+
+  for (const section of structure.sections) {
+    rendered += `## ${section.title}\n\n`;
+    rendered += `{{section:${section.id}}}\n\n`;
+  }
+
+  // Replace placeholders with actual data
+  for (const [key, value] of Object.entries(data)) {
+    const placeholder = new RegExp(`{{${key}}}`, 'g');
+    rendered = rendered.replace(placeholder, String(value));
+  }
+
+  return rendered;
+}
+
+/**
+ * Get active template for a report type
+ */
+export async function getTemplateForType(
+  db: Database,
+  reportType: string
+): Promise<ReportTemplate | null> {
+  const row = await db.get(
+    `SELECT t.* FROM report_templates t
+     INNER JOIN report_type_configs c ON c.template_id = t.id
+     WHERE c.type = ? AND t.is_active = 1 AND c.is_active = 1
+     LIMIT 1`,
+    [reportType]
+  );
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    version: row.version,
+    structure: JSON.parse(row.structure),
+    validation_rules: JSON.parse(row.validation_rules ?? '{}'),
+    is_active: Boolean(row.is_active),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+/**
+ * Validate report content against template rules
+ */
+export function validateReportContent(
+  content: any,
+  validationRules: ReportTemplate['validation_rules']
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (validationRules.minDocuments) {
+    const docCount = content.metrics?.documentsAnalyzed ?? 0;
+    if (docCount < validationRules.minDocuments) {
+      errors.push(`文档数量不足: ${docCount} < ${validationRules.minDocuments}`);
+    }
+  }
+
+  if (validationRules.minEntities) {
+    const entityCount = content.metrics?.entitiesCovered ?? 0;
+    if (entityCount < validationRules.minEntities) {
+      errors.push(`实体数量不足: ${entityCount} < ${validationRules.minEntities}`);
+    }
+  }
+
+  if (validationRules.minTimelineEvents) {
+    const eventCount = content.timeline?.length ?? 0;
+    if (eventCount < validationRules.minTimelineEvents) {
+      errors.push(`时间事件不足: ${eventCount} < ${validationRules.minTimelineEvents}`);
+    }
+  }
+
+  if (validationRules.requiredSections) {
+    const sectionIds = new Set(content.sections?.map((s: any) => s.id) ?? []);
+    for (const required of validationRules.requiredSections) {
+      if (!sectionIds.has(required)) {
+        errors.push(`缺少必需章节: ${required}`);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
 }
