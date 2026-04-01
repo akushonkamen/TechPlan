@@ -288,4 +288,71 @@ export class SkillRegistry {
     }
     return prompt;
   }
+
+  /**
+   * Validate parameters against skill parameter definitions.
+   * Returns { valid: true } if valid, or { valid: false, errors: [...] } with validation errors.
+   */
+  validateParams(name: string, params: Record<string, any>): { valid: boolean; errors?: string[] } {
+    const config = this.skills.get(name);
+    if (!config) {
+      return { valid: false, errors: [`Skill not found: ${name}`] };
+    }
+
+    const errors: string[] = [];
+    const providedParams = new Set(Object.keys(params));
+
+    // Check required parameters
+    for (const paramDef of config.params) {
+      if (paramDef.required && !(paramDef.name in params)) {
+        errors.push(`Missing required parameter: ${paramDef.name}`);
+      }
+      if (paramDef.name in params) {
+        providedParams.delete(paramDef.name);
+
+        // Type validation
+        const value = params[paramDef.name];
+        if (value === null || value === undefined) {
+          if (paramDef.required) {
+            errors.push(`Parameter ${paramDef.name} cannot be null or undefined`);
+          }
+        } else {
+          switch (paramDef.type) {
+            case 'string':
+              if (typeof value !== 'string') {
+                errors.push(`Parameter ${paramDef.name} must be a string, got ${typeof value}`);
+              }
+              break;
+            case 'number':
+              if (typeof value !== 'number' || isNaN(value)) {
+                errors.push(`Parameter ${paramDef.name} must be a number, got ${typeof value}`);
+              }
+              break;
+            case 'boolean':
+              if (typeof value !== 'boolean') {
+                errors.push(`Parameter ${paramDef.name} must be a boolean, got ${typeof value}`);
+              }
+              break;
+          }
+        }
+      }
+    }
+
+    // Warn about unknown parameters (optional - could be ignored for flexibility)
+    const unknownParams = Array.from(providedParams);
+    if (unknownParams.length > 0) {
+      // Only warn, don't fail
+      console.warn(`[SkillRegistry] Unknown parameters for skill ${name}: ${unknownParams.join(', ')}`);
+    }
+
+    return { valid: errors.length === 0, errors: errors.length > 0 ? errors : undefined };
+  }
+
+  /**
+   * Get parameter definitions for a skill.
+   */
+  getParams(name: string): SkillParamDef[] {
+    const config = this.skills.get(name);
+    return config?.params ?? [];
+  }
 }
