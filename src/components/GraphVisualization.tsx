@@ -12,11 +12,26 @@ import ReactFlow, {
   Connection,
   NodeTypes,
   Position,
+  getRectOfNodes,
+  getTransformForBounds,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
 // Node Types
 export type GraphNodeType = 'topic' | 'entity' | 'event' | 'claim' | 'document';
+
+// Export format types
+export type GraphExportFormat = 'json' | 'png';
+
+export interface GraphExportData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  metadata?: {
+    exportedAt: string;
+    nodeCount: number;
+    edgeCount: number;
+  };
+}
 
 export interface GraphNodeData {
   label: string;
@@ -104,7 +119,7 @@ const nodeTypes: NodeTypes = {
 const applyLayout = (
   nodes: GraphNode[],
   edges: GraphEdge[],
-  layoutType: 'force' | 'hierarchical' | 'circular' | 'grid'
+  layoutType: 'force' | 'hierarchical' | 'circular' | 'grid' | 'concentric' | 'radial'
 ): { nodes: GraphNode[]; edges: GraphEdge[] } => {
   const layoutedNodes = [...nodes];
 
@@ -160,6 +175,55 @@ const applyLayout = (
       });
       break;
 
+    case 'concentric':
+      // Organize nodes by type in concentric circles
+      const typeOrder: GraphNodeType[] = ['topic', 'entity', 'event', 'claim', 'document'];
+      const radii = [0, 120, 200, 280, 360];
+      const nodesByType: Record<GraphNodeType, GraphNode[]> = {
+        topic: [],
+        entity: [],
+        event: [],
+        claim: [],
+        document: [],
+      };
+
+      nodes.forEach(n => {
+        if (n.data.type && nodesByType[n.data.type]) {
+          nodesByType[n.data.type].push(n);
+        } else {
+          nodesByType.entity.push(n);
+        }
+      });
+
+      typeOrder.forEach((type, typeIdx) => {
+        const typeNodes = nodesByType[type];
+        const radius = radii[typeIdx] || 200;
+        typeNodes.forEach((node, i) => {
+          const angle = (2 * Math.PI * i) / typeNodes.length;
+          node.position = {
+            x: centerX + radius * Math.cos(angle),
+            y: centerY + radius * Math.sin(angle),
+          };
+        });
+      });
+      break;
+
+    case 'radial':
+      // Star layout: first node at center, others in a circle
+      layoutedNodes.forEach((node, i) => {
+        if (i === 0) {
+          node.position = { x: centerX, y: centerY };
+        } else {
+          const angle = (2 * Math.PI * (i - 1)) / (nodes.length - 1);
+          const radius = 150 + nodes.length * 10;
+          node.position = {
+            x: centerX + radius * Math.cos(angle),
+            y: centerY + radius * Math.sin(angle),
+          };
+        }
+      });
+      break;
+
     case 'grid':
       const cols = Math.ceil(Math.sqrt(nodes.length));
       layoutedNodes.forEach((node, i) => {
@@ -186,6 +250,125 @@ const applyLayout = (
   return { nodes: layoutedNodes, edges };
 };
 
+/**
+ * Export graph data as JSON string
+ */
+export function exportGraphAsJSON(nodes: GraphNode[], edges: GraphEdge[]): string {
+  const exportData: GraphExportData = {
+    nodes,
+    edges,
+    metadata: {
+      exportedAt: new Date().toISOString(),
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
+    },
+  };
+  return JSON.stringify(exportData, null, 2);
+}
+
+/**
+ * Export graph as PNG image
+ */
+export async function exportGraphAsPNG(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  filename = 'knowledge-graph.png'
+): Promise<void> {
+  // Create a canvas and draw the graph
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not create canvas context');
+
+  // Calculate bounds
+  const padding = 50;
+  const nodesRect = getRectOfNodes(nodes);
+  const bounds = {
+    x: nodesRect.x - padding,
+    y: nodesRect.y - padding,
+    width: nodesRect.width + padding * 2,
+    height: nodesRect.height + padding * 2,
+  };
+
+  // Set canvas size (min 800x600 for better visibility)
+  canvas.width = Math.max(800, bounds.width);
+  canvas.height = Math.max(600, bounds.height);
+
+  // Draw white background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Calculate scale and offset to center the graph
+  const scaleX = canvas.width / bounds.width;
+  const scaleY = canvas.height / bounds.height;
+  const scale = Math.min(scaleX, scaleY, 1); // Don't scale up
+  const offsetX = (canvas.width - bounds.width * scale) / 2 - bounds.x * scale;
+  const offsetY = (canvas.height - bounds.height * scale) / 2 - bounds.y * scale;
+
+  // Draw edges first
+  ctx.strokeStyle = '#86868b';
+  ctx.lineWidth = 2;
+  edges.forEach(edge => {
+    const source = nodes.find(n => n.id === edge.source);
+    const target = nodes.find(n => n.id === edge.target);
+    if (source && target) {
+      ctx.beginPath();
+      ctx.moveTo(source.position.x * scale + offsetX, source.position.y * scale + offsetY);
+      ctx.lineTo(target.position.x * scale + offsetX, target.position.y * scale + offsetY);
+      ctx.stroke();
+    }
+  });
+
+  // Draw nodes
+  nodes.forEach(node => {
+    const x = node.position.x * scale + offsetX;
+    const y = node.position.y * scale + offsetY;
+
+    // Node circle
+    const nodeColor = getNodeColor(node.data.type);
+    ctx.fillStyle = nodeColor;
+    ctx.beginPath();
+    ctx.arc(x, y, 20, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Node border
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Node label
+    ctx.fillStyle = '#1d1d1f';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = node.data.label || node.id;
+    const truncatedLabel = label.length > 15 ? label.substring(0, 15) + '...' : label;
+    ctx.fillText(truncatedLabel, x, y + 35);
+  });
+
+  // Download
+  canvas.toBlob(blob => {
+    if (blob) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  });
+}
+
+function getNodeColor(type: GraphNodeType): string {
+  const colors: Record<GraphNodeType, string> = {
+    topic: '#0071e3',
+    entity: '#3b82f6',
+    event: '#a855f7',
+    claim: '#f59e0b',
+    document: '#10b981',
+  };
+  return colors[type] || '#86868b';
+}
+
 export const GraphVisualization: FC<GraphVisualizationProps> = ({
   nodes: initialNodes,
   edges: initialEdges,
@@ -193,10 +376,34 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
   onNodeDoubleClick,
   focusNodeIds,
 }) => {
-  const [layout, setLayout] = useState<'force' | 'hierarchical' | 'circular' | 'grid'>('force');
+  const [layout, setLayout] = useState<'force' | 'hierarchical' | 'circular' | 'grid' | 'concentric' | 'radial'>('force');
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const rfInstance = useRef<any>(null);
   const autoFitTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Export handlers
+  const handleExportJSON = useCallback(() => {
+    const json = exportGraphAsJSON(initialNodes, initialEdges);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `knowledge-graph-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  }, [initialNodes, initialEdges]);
+
+  const handleExportPNG = useCallback(async () => {
+    try {
+      await exportGraphAsPNG(initialNodes, initialEdges, `knowledge-graph-${new Date().toISOString().slice(0, 10)}.png`);
+    } catch (err) {
+      console.error('Failed to export PNG:', err);
+      alert('导出 PNG 失败，请使用现代浏览器');
+    }
+    setShowExportMenu(false);
+  }, [initialNodes, initialEdges]);
 
   // Auto-focus on highlighted nodes when focusNodeIds changes
   useEffect(() => {
@@ -326,20 +533,22 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
         />
       </ReactFlow>
 
-      {/* Layout Controls */}
+      {/* Layout & Export Controls */}
       <div className="absolute top-4 right-4 bg-white rounded-xl shadow-md border border-[#d2d2d7] p-2 z-10">
         <div className="text-xs font-medium text-[#86868b] mb-2 px-1">布局</div>
-        <div className="flex flex-col gap-1">
+        <div className="grid grid-cols-3 gap-1 mb-2">
           {[
             { value: 'force', label: '力导向' },
             { value: 'hierarchical', label: '层级' },
             { value: 'circular', label: '环形' },
             { value: 'grid', label: '网格' },
+            { value: 'concentric', label: '同心圆' },
+            { value: 'radial', label: '辐射' },
           ].map(({ value, label }) => (
             <button
               key={value}
               onClick={() => setLayout(value as any)}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+              className={`px-2 py-1 text-xs rounded-lg transition-colors ${
                 layout === value
                   ? 'bg-[#0071e3]/10 text-[#0071e3] font-medium'
                   : 'text-[#86868b] hover:bg-[#f5f5f7]'
@@ -348,6 +557,23 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
               {label}
             </button>
           ))}
+        </div>
+        <div className="border-t border-[#d2d2d7] pt-2 mt-2">
+          <div className="text-xs font-medium text-[#86868b] mb-1 px-1">导出</div>
+          <div className="flex gap-1">
+            <button
+              onClick={handleExportJSON}
+              className="flex-1 px-2 py-1 text-xs rounded-lg bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] transition-colors"
+            >
+              JSON
+            </button>
+            <button
+              onClick={handleExportPNG}
+              className="flex-1 px-2 py-1 text-xs rounded-lg bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] transition-colors"
+            >
+              PNG
+            </button>
+          </div>
         </div>
       </div>
 
