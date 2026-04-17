@@ -1,4 +1,5 @@
 import express from "express";
+import { execSync } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { createServer as createHttpServer } from "http";
 import sqlite3 from "sqlite3";
@@ -73,7 +74,25 @@ function calculateFreshnessHours(publishedDate: string | null): number {
   return (now.getTime() - published.getTime()) / (1000 * 60 * 60);
 }
 
+function ensureClaudeCli() {
+  try {
+    execSync("claude --version", { stdio: "pipe" });
+    console.log("[cli] Claude Code CLI found");
+  } catch {
+    console.log("[cli] Claude Code CLI not found, installing...");
+    try {
+      execSync("npm install -g @anthropic-ai/claude-code", { stdio: "inherit" });
+      console.log("[cli] Claude Code CLI installed successfully");
+    } catch (installErr) {
+      console.error("[cli] Failed to install Claude Code CLI:", installErr);
+      console.error("[cli] Please install manually: npm install -g @anthropic-ai/claude-code");
+      process.exit(1);
+    }
+  }
+}
+
 async function startServer() {
+  ensureClaudeCli();
   const app = express();
   app.use(express.json());
   const adminToken = process.env.ADMIN_TOKEN;
