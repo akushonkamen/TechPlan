@@ -2914,8 +2914,8 @@ async function startServer() {
           obj.swotAnalysis ||
           obj.monthlyOverview ||
           obj.strategicExecution ||
-          obj.title ||
-          obj.summary ||
+          (obj.title && (obj.sections || obj.content || obj.summary)) ||
+          (obj.summary && (obj.sections || obj.content)) ||
           (obj.content && (obj.content.keyUpdates || obj.content.alertSummary || obj.content.swotAnalysis))
         );
       if (!hasReportStructure(parsed)) {

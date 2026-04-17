@@ -411,7 +411,7 @@ export default function Reports() {
   const [refreshInterval, setRefreshInterval] = useState<number>(60); // seconds
   const refreshTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
-  const { status: skillExecStatus, progress: skillProgress, connectOnly: connectToExecution, reset: resetExec } = useSkillExecutor();
+  const { status: skillExecStatus, progress: skillProgress, error: skillError, connectOnly: connectToExecution, reset: resetExec } = useSkillExecutor();
 
   // Auto-refresh effect
   useEffect(() => {
@@ -438,7 +438,7 @@ export default function Reports() {
   useEffect(() => {
     if (skillExecStatus === 'completed') {
       loadData();
-      setTimeout(() => resetExec(), 3000);
+      setTimeout(() => resetExec(), 5000);
     }
   }, [skillExecStatus]);
 
@@ -662,19 +662,32 @@ export default function Reports() {
       </div>
 
       {/* Progress panel during collection + report generation */}
-      {(isCollecting || skillExecStatus === 'running') && (
+      {(isCollecting || skillExecStatus === 'running' || skillExecStatus === 'completed' || skillExecStatus === 'failed') && (
         <div className={CARD}>
           <div className="flex items-center gap-3 mb-3">
-            <div className={SPINNER} />
-            <span className="text-sm font-medium text-[#1d1d1f]">
-              {isCollecting ? '正在采集数据...' : '正在生成报告...'}
-            </span>
+            {(isCollecting || skillExecStatus === 'running') && <div className={SPINNER} />}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-[#1d1d1f]">
+                {isCollecting ? 'Step 1/2 · 采集数据'
+                  : skillExecStatus === 'running' ? 'Step 2/2 · 生成报告'
+                  : skillExecStatus === 'completed' ? '生成完成'
+                  : '生成失败'}
+              </span>
+              {skillExecStatus === 'completed' && <CheckCircle className="w-4 h-4 text-[#5B7553]" />}
+              {skillExecStatus === 'failed' && <AlertCircle className="w-4 h-4 text-[#A0453A]" />}
+            </div>
           </div>
-          {!isCollecting && skillProgress.length > 0 && (
-            <div className="space-y-1 max-h-40 overflow-y-auto">
-              {skillProgress.slice(-10).map((msg, i) => (
-                <p key={i} className="text-xs text-[#888] animate-fade-in">{msg}</p>
+          {skillProgress.length > 0 && !isCollecting && (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {skillProgress.slice(-50).map((msg, i) => (
+                <p key={`${i}-${msg.slice(0, 20)}`} className="text-xs text-[#888] animate-fade-in">{msg}</p>
               ))}
+            </div>
+          )}
+          {skillExecStatus === 'failed' && skillError && (
+            <div className="mt-3 flex items-start gap-2 px-4 py-3 bg-[#A0453A]/5 border border-[#A0453A]/20 rounded-2xl">
+              <AlertCircle className="w-4 h-4 text-[#A0453A] shrink-0 mt-0.5" />
+              <span className="text-sm text-[#A0453A]">{skillError}</span>
             </div>
           )}
         </div>
