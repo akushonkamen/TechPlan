@@ -116,10 +116,10 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="px-3 py-3 border-t border-[#1d1d1f]/20">
           <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#1d1d1f]/5 transition-colors duration-200 cursor-pointer group">
             <div className="w-9 h-9 rounded-full bg-[#1d1d1f] flex items-center justify-center text-[#F7F7F7] font-bold text-sm">
-              T
+              YP
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-[#1d1d1f] truncate">TechPlan User</div>
+              <div className="text-sm font-semibold text-[#1d1d1f] truncate">Yalun Peng</div>
               <div className="text-[10px] font-mono text-[#888]">ADMIN</div>
             </div>
             <ChevronRight className="w-4 h-4 text-[#aaa] group-hover:text-[#1d1d1f] transition-colors duration-200" />
