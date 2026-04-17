@@ -250,6 +250,61 @@ function jsonToMarkdown(obj: any, depth = 0): string {
 const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ section, topicId }) => {
   const [open, setOpen] = useState(false);
 
+  // Detect raw_report sections with nested JSON content
+  const rawContent = section.content;
+  let displayContent: string | null = null;
+  let nestedSections: ReportSection[] | null = null;
+
+  if (section.id === 'raw_report' && typeof rawContent === 'string') {
+    // Try to extract JSON from the content (may have prefix text before the JSON)
+    const jsonStart = rawContent.indexOf('{');
+    if (jsonStart !== -1) {
+      const jsonCandidate = rawContent.slice(jsonStart);
+      try {
+        const parsed = JSON.parse(jsonCandidate);
+        if (parsed && typeof parsed === 'object') {
+          const inner = parsed.content ?? parsed;
+          // If it has sections, render them as nested sections
+          if (Array.isArray(inner.sections) && inner.sections.length > 0) {
+            nestedSections = inner.sections.map((s: any, i: number) => ({
+              id: s.id ?? `nested_${i}`,
+              title: s.title ?? '',
+              thesis: s.thesis ?? '',
+              content: typeof s.content === 'string' ? s.content : jsonToMarkdown(s.content),
+              highlights: s.highlights ?? [],
+              signals: s.signals ?? [],
+              entityRefs: s.entityRefs ?? [],
+            }));
+          }
+          // Use summary/overview as display content
+          displayContent = inner.executiveSummary?.overview ?? parsed.summary ?? inner.summary ?? null;
+        }
+      } catch {
+        // JSON is malformed (common: LLM outputs unescaped quotes in strings)
+        // Strip JSON structure and extract readable text
+        let text = rawContent;
+        if (jsonStart > 0) text = text.slice(jsonStart);
+        text = text
+          .replace(/\\"/g, '"')
+          .replace(/\\n/g, '\n')
+          .replace(/^\s*[{,]\s*"/gm, '')
+          .replace(/"\s*:\s*"/g, ': ')
+          .replace(/"[,\s]*$/gm, '')
+          .replace(/^\s*}\s*$/gm, '')
+          .replace(/^\s*"title"\s*:\s*"/gm, '# ')
+          .replace(/^\s*"(summary|content|overview|keyPoints|sections|timeline|metrics|confidence|period|highlights|signals|entityRefs|thesis|id)"\s*:\s*"?/gm, '');
+        if (text.trim().length < 50) text = rawContent;
+        displayContent = text;
+      }
+    }
+    // If no JSON found, render as markdown
+    if (!nestedSections && !displayContent) {
+      displayContent = rawContent;
+    }
+  } else if (rawContent) {
+    displayContent = typeof rawContent === 'string' ? rawContent : jsonToMarkdown(rawContent);
+  }
+
   return (
     <div className="border border-[#1d1d1f]/20 rounded-3xl overflow-hidden transition-all">
       <button
@@ -271,11 +326,20 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
       {open && (
         <div className="px-5 pb-5 space-y-4 animate-fade-in border-t border-[#1d1d1f]/20 pt-4">
           {/* Markdown content */}
-          {section.content && (
+          {displayContent && (
             <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f]">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {typeof section.content === 'string' ? section.content : jsonToMarkdown(section.content)}
+                {displayContent}
               </ReactMarkdown>
+            </div>
+          )}
+
+          {/* Nested sections from raw_report unwrap */}
+          {nestedSections && nestedSections.length > 0 && (
+            <div className="space-y-3 mt-4">
+              {nestedSections.map(ns => (
+                <SectionBlock key={ns.id} section={ns} topicId={topicId} />
+              ))}
             </div>
           )}
 

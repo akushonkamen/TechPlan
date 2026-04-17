@@ -2962,21 +2962,40 @@ async function startServer() {
         || (normalizedContent.executiveSummary.overview?.length ?? 0) > 50;
       const rawStr = typeof rawOutput === 'string' ? rawOutput : String(rawOutput ?? '');
       if (!hasSubstantialContent && rawStr.length > 100) {
-        const lastFenceEnd = rawStr.lastIndexOf('```');
-        const markdownBody = lastFenceEnd > 0 ? rawStr.slice(lastFenceEnd + 3).trim() : rawStr;
-        const overviewLine = rawStr.split('\n').find((l: string) =>
-          l.trim().length > 20 && !l.startsWith('#') && !l.startsWith('```') && !l.startsWith('{')
-        );
-        normalizedContent.executiveSummary.overview = overviewLine ?? '';
-        normalizedContent.sections = [{
-          id: 'raw_report',
-          title: '完整报告',
-          thesis: '',
-          content: markdownBody,
-          highlights: [],
-          signals: [],
-          entityRefs: [],
-        }];
+        // Try to extract a nested JSON report from the raw string
+        const nestedReport = tryParseReportJson(rawStr);
+        if (nestedReport && hasReportStructure(nestedReport)) {
+          const nestedContent = nestedReport.content ?? nestedReport;
+          const nestedExecSummary = nestedContent.executiveSummary ?? {};
+          normalizedContent.executiveSummary.overview = nestedExecSummary.overview ?? nestedReport.summary ?? '';
+          normalizedContent.executiveSummary.keyPoints = nestedExecSummary.keyPoints ?? [];
+          normalizedContent.executiveSummary.confidence = nestedExecSummary.confidence ?? 'medium';
+          normalizedContent.sections = (nestedContent.sections ?? []).map((sec: any) => {
+            if (sec.content && typeof sec.content !== 'string') {
+              sec.content = jsonToMarkdown(sec.content);
+            }
+            return sec;
+          });
+          normalizedContent.timeline = nestedContent.timeline ?? [];
+          normalizedContent.metrics = nestedContent.metrics ?? {};
+        } else {
+          // Last resort: store as raw markdown
+          const lastFenceEnd = rawStr.lastIndexOf('```');
+          const markdownBody = lastFenceEnd > 0 ? rawStr.slice(lastFenceEnd + 3).trim() : rawStr;
+          const overviewLine = rawStr.split('\n').find((l: string) =>
+            l.trim().length > 20 && !l.startsWith('#') && !l.startsWith('```') && !l.startsWith('{')
+          );
+          normalizedContent.executiveSummary.overview = overviewLine ?? '';
+          normalizedContent.sections = [{
+            id: 'raw_report',
+            title: '完整报告',
+            thesis: '',
+            content: markdownBody,
+            highlights: [],
+            signals: [],
+            entityRefs: [],
+          }];
+        }
       }
 
       const TYPE_LABELS: Record<string, string> = {
