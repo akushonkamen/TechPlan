@@ -2729,6 +2729,82 @@ async function startServer() {
   });
 
   // ===== Skill Execution System (must be before Vite middleware) =====
+  /**
+   * POST /api/config/test
+   * Test AI provider connectivity
+   */
+  app.post("/api/config/test", requireAdmin, async (req, res) => {
+    try {
+      const { provider, apiKey, baseUrl, model } = req.body ?? {};
+
+      if (!provider || !apiKey) {
+        return res.status(400).json({ success: false, error: "Provider and API key are required" });
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      try {
+        if (provider === "openai" || provider === "custom") {
+          const url = baseUrl || "https://api.openai.com/v1";
+          const response = await fetch(`${url}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: model || (provider === "openai" ? "gpt-4o" : "gpt-4o"),
+              messages: [{ role: "user", content: "test" }],
+              max_tokens: 1,
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            return res.status(400).json({ success: false, error: `HTTP ${response.status}: ${errorText}` });
+          }
+
+          return res.json({ success: true });
+        } else if (provider === "gemini") {
+          const url = baseUrl || `https://generativelanguage.googleapis.com/v1beta/models/${model || "gemini-2.5-flash-preview"}:generateContent`;
+          const response = await fetch(`${url}?key=${apiKey}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: "test" }] }],
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            return res.status(400).json({ success: false, error: `HTTP ${response.status}: ${errorText}` });
+          }
+
+          return res.json({ success: true });
+        } else {
+          return res.status(400).json({ success: false, error: "Unknown provider" });
+        }
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === "AbortError") {
+          return res.status(400).json({ success: false, error: "Request timeout (10s)" });
+        }
+        return res.status(400).json({ success: false, error: fetchError.message || "Connection failed" });
+      }
+    } catch (error: any) {
+      console.error("Failed to test config:", error);
+      res.status(500).json({ success: false, error: "Test failed" });
+    }
+  });
   const skillRegistry = new SkillRegistry();
   skillRegistry.loadAll(path.resolve(process.cwd(), '.claude/skills'));
 

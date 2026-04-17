@@ -10,6 +10,7 @@ import {
   Target,
   ChevronRight,
   Activity,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -19,6 +20,7 @@ const navigation = [
   { name: '知识图谱', href: '/graph', icon: Network },
   { name: '分析报告', href: '/reports', icon: FileText },
   { name: '任务中心', href: '/tasks', icon: Activity },
+  { name: '审核中心', href: '/review', icon: ShieldCheck },
   { name: '决策分析', href: '/decision', icon: Target },
 ];
 
