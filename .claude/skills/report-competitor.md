@@ -6,6 +6,8 @@ description: |
   六阶段流程：数据收集→信号识别→分析框架→内容生成→质量检查→图谱关联。
 category: reporting
 timeout: 600
+allowedTools:
+  - Bash
 params:
   - name: topicId
     type: string
@@ -65,63 +67,49 @@ const db = new Database('database.sqlite');
 
 const topicId = '{{topicId}}';
 const compName = '{{competitorName}}';
+const startDate = '{{timeRangeStart}}';
+const endDate = '{{timeRangeEnd}}';
+const hasDate = startDate && endDate;
 
 // 1. 获取提及该友商的文档
-const docs = db.prepare(\`
-  SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt
-  FROM documents WHERE topic_id = ? AND content LIKE ? ORDER BY published_date DESC LIMIT 50
-\`).all(topicId, '%' + compName + '%');
+const docs = hasDate
+  ? db.prepare(\`SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt FROM documents WHERE topic_id = ? AND content LIKE ? AND published_date >= ? AND published_date <= ? ORDER BY published_date DESC LIMIT 50\`).all(topicId, '%' + compName + '%', startDate, endDate)
+  : db.prepare(\`SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt FROM documents WHERE topic_id = ? AND content LIKE ? ORDER BY published_date DESC LIMIT 50\`).all(topicId, '%' + compName + '%');
 
-// 2. 获取友商相关实体（包括关联实体）
-const entities = db.prepare(\`
-  SELECT e.text, e.type, e.confidence, COUNT(*) as mentions
-  FROM entities e JOIN documents d ON e.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? GROUP BY e.text ORDER BY mentions DESC LIMIT 50
-\`).all(topicId, '%' + compName + '%');
+// 2. 获取友商相关实体
+const entities = hasDate
+  ? db.prepare(\`SELECT e.text, e.type, e.confidence, COUNT(*) as mentions FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? GROUP BY e.text ORDER BY mentions DESC LIMIT 50\`).all(topicId, '%' + compName + '%', startDate, endDate)
+  : db.prepare(\`SELECT e.text, e.type, e.confidence, COUNT(*) as mentions FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? GROUP BY e.text ORDER BY mentions DESC LIMIT 50\`).all(topicId, '%' + compName + '%');
 
 // 3. 获取友商相关关系
-const relations = db.prepare(\`
-  SELECT r.source_text, r.relation, r.target_text, r.confidence
-  FROM relations r JOIN documents d ON r.document_id = d.id
-  WHERE d.topic_id = ? AND (r.source_text LIKE ? OR r.target_text LIKE ?) ORDER BY r.confidence DESC LIMIT 50
-\`).all(topicId, '%' + compName + '%', '%' + compName + '%');
+const relations = hasDate
+  ? db.prepare(\`SELECT r.source_text, r.relation, r.target_text, r.confidence FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = ? AND (r.source_text LIKE ? OR r.target_text LIKE ?) AND d.published_date >= ? AND d.published_date <= ? ORDER BY r.confidence DESC LIMIT 50\`).all(topicId, '%' + compName + '%', '%' + compName + '%', startDate, endDate)
+  : db.prepare(\`SELECT r.source_text, r.relation, r.target_text, r.confidence FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = ? AND (r.source_text LIKE ? OR r.target_text LIKE ?) ORDER BY r.confidence DESC LIMIT 50\`).all(topicId, '%' + compName + '%', '%' + compName + '%');
 
 // 4. 获取友商相关事件
-const events = db.prepare(\`
-  SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants
-  FROM events ev JOIN documents d ON ev.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY ev.event_time DESC LIMIT 40
-\`).all(topicId, '%' + compName + '%');
+const events = hasDate
+  ? db.prepare(\`SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? ORDER BY ev.event_time DESC LIMIT 40\`).all(topicId, '%' + compName + '%', startDate, endDate)
+  : db.prepare(\`SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY ev.event_time DESC LIMIT 40\`).all(topicId, '%' + compName + '%');
 
 // 5. 获取友商相关主张
-const claims = db.prepare(\`
-  SELECT c.text, c.polarity, c.confidence
-  FROM claims c JOIN documents d ON c.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY c.confidence DESC LIMIT 40
-\`).all(topicId, '%' + compName + '%');
+const claims = hasDate
+  ? db.prepare(\`SELECT c.text, c.polarity, c.confidence FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? ORDER BY c.confidence DESC LIMIT 40\`).all(topicId, '%' + compName + '%', startDate, endDate)
+  : db.prepare(\`SELECT c.text, c.polarity, c.confidence FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY c.confidence DESC LIMIT 40\`).all(topicId, '%' + compName + '%');
 
-// 6. 友商关联组织（合作伙伴、竞争对手、投资方等）
-const relatedOrgs = db.prepare(\`
-  SELECT e.text, e.type, COUNT(*) as cnt
-  FROM entities e JOIN documents d ON e.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? AND e.type IN ('Organization', 'Company', 'Institution', 'Person')
-  GROUP BY e.text ORDER BY cnt DESC LIMIT 30
-\`).all(topicId, '%' + compName + '%');
+// 6. 友商关联组织
+const relatedOrgs = hasDate
+  ? db.prepare(\`SELECT e.text, e.type, COUNT(*) as cnt FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? AND e.type IN ('Organization', 'Company', 'Institution', 'Person') GROUP BY e.text ORDER BY cnt DESC LIMIT 30\`).all(topicId, '%' + compName + '%', startDate, endDate)
+  : db.prepare(\`SELECT e.text, e.type, COUNT(*) as cnt FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND e.type IN ('Organization', 'Company', 'Institution', 'Person') GROUP BY e.text ORDER BY cnt DESC LIMIT 30\`).all(topicId, '%' + compName + '%');
 
-// 7. 时间分布（友商相关事件）
-const timeDist = db.prepare(\`
-  SELECT date(ev.event_time) as d, count(*) as cnt
-  FROM events ev JOIN documents d ON ev.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? AND ev.event_time >= date('now', '-180 days')
-  GROUP BY d ORDER BY d
-\`).all(topicId, '%' + compName + '%');
+// 7. 时间分布
+const timeDist = hasDate
+  ? db.prepare(\`SELECT date(ev.event_time) as d, count(*) as cnt FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? GROUP BY d ORDER BY d\`).all(topicId, '%' + compName + '%', startDate, endDate)
+  : db.prepare(\`SELECT date(ev.event_time) as d, count(*) as cnt FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND ev.event_time >= date('now', '-180 days') GROUP BY d ORDER BY d\`).all(topicId, '%' + compName + '%');
 
 // 8. 事件类型分布
-const eventTypeDist = db.prepare(\`
-  SELECT ev.type, count(*) as cnt
-  FROM events ev JOIN documents d ON ev.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? GROUP BY ev.type ORDER BY cnt DESC
-\`).all(topicId, '%' + compName + '%');
+const eventTypeDist = hasDate
+  ? db.prepare(\`SELECT ev.type, count(*) as cnt FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? GROUP BY ev.type ORDER BY cnt DESC\`).all(topicId, '%' + compName + '%', startDate, endDate)
+  : db.prepare(\`SELECT ev.type, count(*) as cnt FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? GROUP BY ev.type ORDER BY cnt DESC\`).all(topicId, '%' + compName + '%');
 
 // 9. 统计
 const docCount = docs.length;
@@ -140,15 +128,20 @@ const db = new sqlite3.Database('database.sqlite');
 
 const topicId = '{{topicId}}';
 const compName = '{{competitorName}}';
+const startDate = '{{timeRangeStart}}';
+const endDate = '{{timeRangeEnd}}';
+const hasDate = startDate && endDate;
 const results = {};
 
 db.serialize(() => {
   const likePattern = '%' + compName + '%';
-  db.all('SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt FROM documents WHERE topic_id = ? AND content LIKE ? ORDER BY published_date DESC LIMIT 50', [topicId, likePattern], (err, rows) => {
+  const docFilter = hasDate ? 'AND published_date >= ? AND published_date <= ?' : '';
+  const docParams = hasDate ? [topicId, likePattern, startDate, endDate] : [topicId, likePattern];
+  db.all('SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt FROM documents WHERE topic_id = ? AND content LIKE ? ' + docFilter + ' ORDER BY published_date DESC LIMIT 50', docParams, (err, rows) => {
     results.docs = rows || [];
-    db.all('SELECT e.text, e.type, e.confidence FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? LIMIT 50', [topicId, likePattern], (err, rows) => {
+    db.all('SELECT e.text, e.type, e.confidence FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? ' + (hasDate ? 'AND d.published_date >= ? AND d.published_date <= ?' : '') + ' LIMIT 50', docParams, (err, rows) => {
       results.entities = rows || [];
-      db.all('SELECT type, title, description, event_time FROM events WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ? AND content LIKE ?) ORDER BY event_time DESC LIMIT 40', [topicId, likePattern], (err, rows) => {
+      db.all('SELECT type, title, description, event_time FROM events WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ? AND content LIKE ? ' + docFilter + ') ORDER BY event_time DESC LIMIT 40', docParams, (err, rows) => {
         results.events = rows || [];
         db.close();
         console.log(JSON.stringify(results, null, 2));
@@ -275,10 +268,10 @@ SWOT 分析矩阵：
 
 ```json
 {
-  "title": "{{competitorName}} 友商分析报告",
+  "title": "{{competitorName}} 友商分析报告 · {{timeRangeStart}} ~ {{timeRangeEnd}}",
   "summary": "竞争态势概述（200-300字），包括友商基本情况、主要威胁和应对建议",
   "content": {
-    "version": "1.0",
+    "version": "2.0",
     "meta": {
       "reportId": "自动生成 UUID",
       "topicId": "{{topicId}}",
@@ -299,154 +292,119 @@ SWOT 分析矩阵：
       "confidence": "high|medium|low",
       "confidenceReason": "置信度评估理由"
     },
-    "companyProfile": {
-      "basicInfo": {
-        "name": "{{competitorName}}",
-        "headquarters": "总部地点",
-        "publicPrivate": "上市|非上市",
-        "founded": "成立年份（如有）",
-        "website": "官网（如有）"
-      },
-      "financialOverview": {
-        "revenue": "营收情况描述",
-        "funding": "融资情况描述",
-        "valuation": "估值情况描述"
-      },
-      "leadership": [
+    "executiveSummary": {
+      "overview": "竞争态势概述（200-300字）：友商基本情况、主要威胁和应对建议",
+      "keyPoints": [
         {
-          "name": "高管姓名",
-          "title": "职位",
-          "keyDecisions": ["关键决策1", "关键决策2"]
-        }
-      ]
-    },
-    "strategyAnalysis": {
-      "vision": "愿景描述",
-      "strategicFocus": [
-        {
-          "focus": "战略重点领域",
-          "priority": "高|中|低",
-          "progress": "进展情况"
+          "point": "友商核心发现",
+          "evidence": ["支撑证据"],
+          "impact": "威胁/影响描述"
         }
       ],
-      "businessModel": {
-        "type": "商业模式类型",
-        "revenueStreams": ["收入来源1", "收入来源2"],
-        "valueProposition": "价值主张"
+      "confidence": 0.85
+    },
+    "sections": [
+      {
+        "id": "company_profile",
+        "title": "公司概况",
+        "thesis": "公司基本情况一句话总结",
+        "content": "Markdown 格式的公司概况：基本信息（总部、上市状态、成立年份）、财务概览（营收、融资、估值）、领导团队（姓名、职位、关键决策）",
+        "highlights": ["核心业务", "财务状况", "关键领导人"],
+        "signals": [],
+        "entityRefs": ["{{competitorName}}"]
       },
-      "competitiveStrategy": {
-        "type": "竞争策略类型（如成本领先、差异化等）",
-        "differentiation": "差异化策略描述",
-        "competitiveAdvantages": ["竞争优势1", "竞争优势2"]
+      {
+        "id": "strategy_analysis",
+        "title": "战略分析",
+        "thesis": "战略方向一句话总结",
+        "content": "Markdown 格式的战略分析：愿景、战略重点领域（优先级、进展）、商业模式（类型、收入来源、价值主张）、竞争策略（差异化策略、竞争优势）",
+        "highlights": ["战略重点1", "商业模式特点", "竞争策略1"],
+        "signals": [
+          {
+            "type": "trend|threat|opportunity",
+            "title": "战略信号",
+            "description": "战略意图推断",
+            "confidence": 0.75
+          }
+        ],
+        "entityRefs": ["战略相关实体1"]
+      },
+      {
+        "id": "tech_capabilities",
+        "title": "技术能力",
+        "thesis": "技术实力一句话总结",
+        "content": "Markdown 格式的技术能力分析：技术栈（技术领域、能力描述、成熟度）、技术路线图（技术名称、状态、时间规划）",
+        "highlights": ["核心技术1", "技术路线1", "技术成熟度评估"],
+        "signals": [],
+        "entityRefs": ["技术实体1"]
+      },
+      {
+        "id": "product_services",
+        "title": "产品与服务",
+        "thesis": "产品布局一句话总结",
+        "content": "Markdown 格式的产品服务分析：产品组合（产品名、类别、市场地位）、近期发布（日期、意义）",
+        "highlights": ["核心产品1", "新产品1", "市场地位"],
+        "signals": [],
+        "entityRefs": ["产品相关实体1"]
+      },
+      {
+        "id": "market_performance",
+        "title": "市场表现",
+        "thesis": "市场地位一句话总结",
+        "content": "Markdown 格式的市场表现：市场份额（整体、细分市场）、增长指标（营收增长、用户增长）",
+        "highlights": ["市场份额", "增长趋势", "细分市场表现"],
+        "signals": [],
+        "entityRefs": ["市场相关实体1"]
+      },
+      {
+        "id": "partnership_investment",
+        "title": "合作与投资",
+        "thesis": "合作投资动态一句话总结",
+        "content": "Markdown 格式的合作投资分析：合作伙伴（名称、类型、意义）、投资项目（被投公司、金额、战略意图）",
+        "highlights": ["合作1", "投资1", "战略联盟1"],
+        "signals": [],
+        "entityRefs": ["合作伙伴1", "被投公司1"]
+      },
+      {
+        "id": "swot_analysis",
+        "title": "SWOT 分析",
+        "thesis": "SWOT 核心结论一句话总结",
+        "content": "Markdown 格式的 SWOT 分析：优势（描述+证据）、劣势（描述+证据）、机会（概率）、威胁（概率）。四个象限必须非空",
+        "highlights": ["核心优势1", "核心劣势1", "关键机会1", "关键威胁1"],
+        "signals": [],
+        "entityRefs": []
+      },
+      {
+        "id": "competitive_assessment",
+        "title": "竞争评估",
+        "thesis": "威胁等级一句话总结",
+        "content": "Markdown 格式的竞争评估：威胁等级（高/中/低）、威胁领域、建议响应行动（行动、优先级、时间框架）",
+        "highlights": ["威胁等级", "威胁领域1", "建议响应1"],
+        "signals": [],
+        "entityRefs": []
+      },
+      {
+        "id": "forecast",
+        "title": "前景预测",
+        "thesis": "前景预测一句话总结",
+        "content": "Markdown 格式的前景预测：短期预测（3-6月）、中期预测（1-2年）、关键假设",
+        "highlights": ["短期预测1", "中期预测1", "关键假设1"],
+        "signals": [],
+        "entityRefs": []
       }
-    },
-    "techCapabilities": {
-      "technologyStack": [
-        {
-          "area": "技术领域",
-          "capabilities": "技术能力描述",
-          "maturity": "高|中|低"
-        }
-      ],
-      "technologyRoadmap": [
-        {
-          "technology": "技术名称",
-          "status": "研发|测试|量产",
-          "timeline": "时间规划"
-        }
-      ]
-    },
-    "productServices": {
-      "productPortfolio": [
-        {
-          "product": "产品名称",
-          "category": "产品类别",
-          "marketPosition": "市场地位"
-        }
-      ],
-      "recentLaunches": [
-        {
-          "product": "产品名称",
-          "date": "YYYY-MM-DD",
-          "significance": "发布意义"
-        }
-      ]
-    },
-    "marketPerformance": {
-      "marketShare": {
-        "overall": "整体市场份额",
-        "bySegment": ["细分市场1", "细分市场2"]
-      },
-      "growthMetrics": {
-        "revenueGrowth": "营收增长",
-        "userGrowth": "用户增长"
-      }
-    },
-    "partnershipInvestment": {
-      "partnerships": [
-        {
-          "partner": "合作伙伴名称",
-          "type": "合作类型",
-          "significance": "合作意义"
-        }
-      ],
-      "investments": [
-        {
-          "company": "被投公司名称",
-          "amount": "投资金额",
-          "strategicRationale": "战略意图"
-        }
-      ]
-    },
-    "swotAnalysis": {
-      "strengths": [
-        {
-          "strength": "优势描述",
-          "evidence": "支撑证据"
-        }
-      ],
-      "weaknesses": [
-        {
-          "weakness": "劣势描述",
-          "evidence": "支撑证据"
-        }
-      ],
-      "opportunities": [
-        {
-          "opportunity": "机会描述",
-          "probability": "高|中|低"
-        }
-      ],
-      "threats": [
-        {
-          "threat": "威胁描述",
-          "probability": "高|中|低"
-        }
-      ]
-    },
-    "competitiveAssessment": {
-      "threatLevel": "高|中|低",
-      "threatAreas": ["威胁领域1", "威胁领域2"],
-      "recommendedResponse": [
-        {
-          "action": "建议行动",
-          "priority": "高|中|低",
-          "timeline": "时间框架"
-        }
-      ]
-    },
-    "forecast": {
-      "shortTerm": "短期预测（3-6月）",
-      "mediumTerm": "中期预测（1-2年）",
-      "keyAssumptions": ["关键假设1", "关键假设2"]
-    },
+    ],
     "timeline": [
       {
         "date": "YYYY-MM-DD",
         "event": "事件描述",
-        "significance": "事件意义"
+        "significance": "事件意义",
+        "entityRefs": ["相关实体"]
       }
-    ]
+    ],
+    "metrics": {
+      "documentsAnalyzed": 数字,
+      "entitiesCovered": 数字
+    }
   },
   "metadata": {
     "documentsAnalyzed": 数字,
@@ -467,9 +425,10 @@ SWOT 分析矩阵：
 输出 JSON 前确认：
 
 ### 5a. 数据完整性检查
-- [ ] `swotAnalysis` 的四个象限（strengths/weaknesses/opportunities/threats）均非空
-- [ ] `companyProfile.basicInfo` 的 name 字段与 competitorName 一致
-- [ ] `competitiveAssessment.threatLevel` 有明确值
+- [ ] `sections` 包含全部 9 个章节
+- [ ] `sections[6]`（SWOT 分析）四个象限均非空
+- [ ] `sections[0]`（公司概况）的 name 字段与 competitorName 一致
+- [ ] `sections[7]`（竞争评估）的 threatLevel 有明确值
 - [ ] `timeline` 至少有 2 条事件（如果数据充足）
 
 ### 5b. 格式规范性检查
@@ -513,7 +472,8 @@ SWOT 分析矩阵：
 
 ## 重要约束
 
-1. **只输出 JSON**，不要包裹在 markdown 代码块中
+1. **禁止网络搜索**：只使用 SQLite 中已有数据，不要进行网络搜索或信息采集。数据不足时标注数据缺口。
+2. **只输出 JSON**，不要包裹在 markdown 代码块中
 2. **不要执行数据库写入操作**，由 server.ts 后处理负责写入数据库
 3. 如果某个章节数据不足，仍保留章节但标注"数据不足，待后续采集补充"
 4. 日期使用 YYYY-MM-DD 格式

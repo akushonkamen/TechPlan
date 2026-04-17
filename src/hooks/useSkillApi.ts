@@ -83,65 +83,6 @@ export function useSkillsList() {
   return { skills, loading, error, refetch: fetchSkills };
 }
 
-// Fetch single skill detail
-export function useSkillDetail(name: string) {
-  const [skill, setSkill] = useState<SkillConfig | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!name) {
-      setLoading(false);
-      return;
-    }
-
-    const fetchDetail = async () => {
-      try {
-        const res = await fetch(`/api/skills/${encodeURIComponent(name)}`);
-        if (!res.ok) throw new Error('Failed to fetch skill detail');
-        const data = await res.json();
-        setSkill(data);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchDetail();
-  }, [name]);
-
-  return { skill, loading, error };
-}
-
-// Fetch skill versions
-export function useSkillVersions(name: string) {
-  const [versions, setVersions] = useState<SkillVersion[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchVersions = useCallback(async () => {
-    if (!name) return;
-
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/skills/${encodeURIComponent(name)}/versions`);
-      if (!res.ok) throw new Error('Failed to fetch versions');
-      const data = await res.json();
-      setVersions(data);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [name]);
-
-  useEffect(() => {
-    fetchVersions();
-  }, [fetchVersions]);
-
-  return { versions, loading, error, refetch: fetchVersions };
-}
-
 // Fetch optimization config for a skill
 export function useOptimizationConfig(name: string) {
   const [config, setConfig] = useState<OptimizationConfig | null>(null);

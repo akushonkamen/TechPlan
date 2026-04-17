@@ -61,8 +61,6 @@ handleCollect(topic):
 **Features**:
 - Report list by type (daily/weekly/monthly/quarterly)
 - Report detail view
-- Export to PDF/Word
-- Review workflow
 
 ### ReviewConsole (`ReviewConsole.tsx`)
 
@@ -82,6 +80,15 @@ handleCollect(topic):
 - Scenario modeling
 - Impact assessment
 - Recommendation generation
+
+### Tasks (`Tasks.tsx`)
+
+**Purpose**: Task execution center with real-time progress and history
+
+**Features**:
+- Real-time task execution monitoring
+- Task history and status tracking
+- Skill execution via unified interface
 
 ### Settings (`Settings.tsx`)
 
@@ -154,12 +161,12 @@ User Action → fetch() → Backend API → SQLite/Neo4j → Response → setSta
 
 ## WebSocket Integration
 
-Pages use `useSkillExecutor` hook for real-time updates:
+Pages use `useSkillExecutor` hook for real-time skill execution updates:
 
 ```typescript
 const { status, progress, result, execute } = useSkillExecutor();
 
 const handleExecute = () => {
-  execute('research', { topicId, topicName });
+  execute('skill-name', { params });
 };
 ```

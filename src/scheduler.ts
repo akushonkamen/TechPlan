@@ -57,6 +57,8 @@ export class SchedulerService {
   private db: any = null;
   private startExecution: ((skillName: string, params: Record<string, any>) => { executionId: string; promise: Promise<SkillExecution> }) | null = null;
   private reportHandler: ((execution: SkillExecution, params: Record<string, any>) => Promise<void>) | null = null;
+  private collectFn: ((topicId: string, topicName: string, start: string, end: string) => Promise<{ collected: number }>) | null = null;
+  private getDocumentsCountInPeriod: ((topicId: string, start: string, end: string) => Promise<number>) | null = null;
 
   constructor(config?: Partial<SchedulerConfig>) {
     this.config = {
@@ -73,6 +75,12 @@ export class SchedulerService {
 
   /** Inject the report persistence handler (extracted from server.ts). */
   setReportHandler(fn: (execution: SkillExecution, params: Record<string, any>) => Promise<void>) { this.reportHandler = fn; }
+
+  /** Inject the data collection function (triggerCollectionForPeriod). */
+  setCollectFunction(fn: (topicId: string, topicName: string, start: string, end: string) => Promise<{ collected: number }>) { this.collectFn = fn; }
+
+  /** Inject the document count checker function. */
+  setGetDocumentsCountInPeriod(fn: (topicId: string, start: string, end: string) => Promise<number>) { this.getDocumentsCountInPeriod = fn; }
 
   start() {
     if (this.timer) return;
@@ -179,6 +187,26 @@ export class SchedulerService {
         };
 
         try {
+          // Collect fresh data before generating report
+          if (this.collectFn) {
+            try {
+              console.log(`[Scheduler] Collecting data for "${topic.topicName}" (${timeRangeStart} - ${timeRangeEnd})`);
+              await this.collectFn(topic.topicId, topic.topicName, timeRangeStart, timeRangeEnd);
+            } catch (collectErr) {
+              console.warn(`[Scheduler] Collection failed for "${topic.topicName}":`, collectErr);
+              // Continue with existing data
+            }
+          }
+
+          // Check if we have enough data to generate a meaningful report
+          if (this.getDocumentsCountInPeriod) {
+            const docCount = await this.getDocumentsCountInPeriod(topic.topicId, timeRangeStart, timeRangeEnd);
+            if (docCount === 0) {
+              console.warn(`[Scheduler] Skipping report for "${topic.topicName}": no documents in period`);
+              continue;
+            }
+          }
+
           const { executionId, promise } = this.startExecution(skillName, params);
           this.addTrigger(topic, executionId, 'running');
 

@@ -30,7 +30,7 @@ function stripAnsi(s: string): string {
 }
 
 interface QueuedExecution {
-  config: { name: string; prompt: string; timeout: number };
+  config: { name: string; prompt: string; timeout: number; allowedTools?: string[] };
   params: Record<string, any>;
   executionId?: string;
   resolve: (execution: SkillExecution) => void;
@@ -81,21 +81,21 @@ export class SkillExecutor {
     const config = this.registry.get(skillName)!;
     const executionId = randomUUID();
 
-    const promise = this.runWithId(executionId, { name: skillName, prompt, timeout: config.timeout }, params);
+    const promise = this.runWithId(executionId, { name: skillName, prompt, timeout: config.timeout, allowedTools: config.allowedTools }, params);
 
     return { executionId, promise };
   }
 
   private runWithId(
     executionId: string,
-    config: { name: string; prompt: string; timeout: number },
+    config: { name: string; prompt: string; timeout: number; allowedTools?: string[] },
     params: Record<string, any>,
   ): Promise<SkillExecution> {
     return this.run(config, params, executionId);
   }
 
   private run(
-    config: { name: string; prompt: string; timeout: number },
+    config: { name: string; prompt: string; timeout: number; allowedTools?: string[] },
     params: Record<string, any>,
     preassignedId?: string,
   ): Promise<SkillExecution> {
@@ -142,17 +142,26 @@ export class SkillExecutor {
         this.ws?.send(execution.id, 'progress', line);
       };
 
-      // claude CLI requires a TTY to output data.
-      // Wrap with `script` to provide a pseudo-terminal.
-      const claudeCmd = `claude -p ${shellEscape(config.prompt)} --output-format stream-json --verbose --dangerously-skip-permissions`;
-
-      const proc = spawn('script', [
-        '-q', '-c', claudeCmd, '/dev/null',
+      // Spawn claude CLI directly in non-interactive print mode (-p).
+      // stream-json output works without a TTY.
+      const toolArgs = config.allowedTools
+        ? config.allowedTools.flatMap(t => ['--allowedTools', t])
+        : [];
+      const proc = spawn('claude', [
+        '-p', config.prompt,
+        '--output-format', 'stream-json',
+        '--verbose',
+        '--dangerously-skip-permissions',
+        ...toolArgs,
       ], {
         cwd: process.cwd(),
         env: { ...process.env, TERM: 'xterm-256color' },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+
+      // Close stdin immediately — we pass the prompt via -p flag, not stdin.
+      // Without this claude CLI may warn "no stdin data received" and exit non-zero.
+      proc.stdin?.end();
 
       this.activeProcesses.set(execution.id, proc);
 
@@ -217,34 +226,13 @@ export class SkillExecutor {
             } else if (parsed.type === 'result') {
               // Parse the actual result content from Claude CLI output
               // Claude CLI returns: { type: "result", result: "{...actual JSON...}" }
-              // The result field may contain extra text before the JSON
               console.log('[SkillExecutor] Received result type, parsing...');
-              
+
               const resultStr = parsed.result;
               let parsedResult: any = null;
-              
+
               if (typeof resultStr === 'string') {
-                // Find the outermost JSON object in the result string
-                // The result may have extra text before/after the JSON
-                const firstBrace = resultStr.indexOf('{');
-                const lastBrace = resultStr.lastIndexOf('}');
-                
-                if (firstBrace !== -1 && lastBrace > firstBrace) {
-                  const extracted = resultStr.slice(firstBrace, lastBrace + 1);
-                  console.log('[SkillExecutor] Extracted JSON from result, length:', extracted.length);
-                  
-                  try {
-                    parsedResult = JSON.parse(extracted);
-                    console.log('[SkillExecutor] Successfully parsed result JSON');
-                    console.log('[SkillExecutor] Result title:', parsedResult.title);
-                  } catch (parseErr) {
-                    console.error('[SkillExecutor] Failed to parse extracted JSON:', parseErr);
-                    parsedResult = { raw: resultStr, parseError: String(parseErr) };
-                  }
-                } else {
-                  console.log('[SkillExecutor] No JSON object found in result');
-                  parsedResult = { raw: resultStr };
-                }
+                parsedResult = this.extractJson(resultStr);
               } else if (resultStr && typeof resultStr === 'object') {
                 parsedResult = resultStr;
                 console.log('[SkillExecutor] Result is already an object');
@@ -252,7 +240,7 @@ export class SkillExecutor {
                 parsedResult = parsed;
                 console.log('[SkillExecutor] Using parsed as result');
               }
-              
+
               execution.result = parsedResult;
               const durationSec = parsed.duration_ms
                 ? Math.round(parsed.duration_ms / 1000)
@@ -340,9 +328,45 @@ export class SkillExecutor {
             }
           }
         } else if (execution.status !== 'timeout') {
-          execution.status = 'failed';
-          execution.error = stderr || `Process exited with code ${code}`;
-          appendProgress(`失败: ${execution.error.slice(0, 150)}`);
+          // If we already captured a result from stream parsing, treat as completed
+          // (non-zero exit can come from harmless stderr warnings like stdin notices)
+          if (execution.result && typeof execution.result === 'object' && !execution.result.raw) {
+            execution.status = 'completed';
+            console.log('[SkillExecutor] Non-zero exit but result already captured, marking completed');
+          } else {
+            // Try to extract result from stdout even on non-zero exit
+            const cleanStdout = stripAnsi(stdout);
+            const lines = cleanStdout.split('\n').map(l => l.trim()).filter(Boolean);
+            let foundResult = false;
+            for (let i = lines.length - 1; i >= 0; i--) {
+              if (lines[i].includes('"type":"result"')) {
+                try {
+                  const parsed = JSON.parse(lines[i]);
+                  if (parsed.type === 'result' && parsed.result !== undefined) {
+                    const resultStr = typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result);
+                    const firstBrace = resultStr.indexOf('{');
+                    const lastBrace = resultStr.lastIndexOf('}');
+                    if (firstBrace !== -1 && lastBrace > firstBrace) {
+                      try {
+                        execution.result = JSON.parse(resultStr.slice(firstBrace, lastBrace + 1));
+                        execution.status = 'completed';
+                        console.log('[SkillExecutor] Recovered result from non-zero exit');
+                        foundResult = true;
+                      } catch {
+                        // fall through to failed
+                      }
+                    }
+                    break;
+                  }
+                } catch { /* skip */ }
+              }
+            }
+            if (!foundResult) {
+              execution.status = 'failed';
+              execution.error = stderr || `Process exited with code ${code}`;
+              appendProgress(`失败: ${execution.error.slice(0, 150)}`);
+            }
+          }
         }
 
         this.finalize(execution, stdout, resolve);
@@ -401,11 +425,60 @@ export class SkillExecutor {
     }
   }
 
+  /**
+   * Extract a JSON object from a string that may contain markdown fences,
+   * extra text before/after, or nested structures.
+   */
+  private extractJson(input: string): any {
+    let cleaned = input.trim();
+
+    // Strip markdown code fences (```json ... ``` or ``` ... ```)
+    const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+    if (fenceMatch) {
+      cleaned = fenceMatch[1].trim();
+    }
+
+    // Try direct parse first
+    try {
+      return JSON.parse(cleaned);
+    } catch { /* continue */ }
+
+    // Find outermost { } pair and try parse
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const extracted = cleaned.slice(firstBrace, lastBrace + 1);
+      try {
+        return JSON.parse(extracted);
+      } catch { /* continue */ }
+    }
+
+    // If the result has nested "content" field as a JSON string, try to unwrap
+    try {
+      const outer = JSON.parse(cleaned);
+      if (outer.content && typeof outer.content === 'string') {
+        try { return { ...outer, content: JSON.parse(outer.content) }; } catch { /* */ }
+      }
+      return outer;
+    } catch { /* */ }
+
+    console.log('[SkillExecutor] Could not extract JSON from result, storing as raw');
+    return { raw: cleaned };
+  }
+
   cancel(executionId: string): boolean {
     const proc = this.activeProcesses.get(executionId);
     if (proc) {
       proc.kill('SIGTERM');
       this.activeProcesses.delete(executionId);
+      this.runningCount--;
+      // Process queue after cancel
+      if (this.queue.length > 0 && this.runningCount < MAX_CONCURRENT) {
+        const next = this.queue.shift()!;
+        this.run(next.config, next.params, next.executionId)
+          .then(next.resolve)
+          .catch(next.reject);
+      }
       return true;
     }
     return false;

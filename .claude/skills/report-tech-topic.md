@@ -6,6 +6,8 @@ description: |
   六阶段流程：数据收集→信号识别→分析框架→内容生成→质量检查→图谱关联。
 category: reporting
 timeout: 600
+allowedTools:
+  - Bash
 params:
   - name: topicId
     type: string
@@ -65,56 +67,44 @@ const db = new Database('database.sqlite');
 
 const topicId = '{{topicId}}';
 const techName = '{{technologyName}}';
+const startDate = '{{timeRangeStart}}';
+const endDate = '{{timeRangeEnd}}';
+const hasDate = startDate && endDate;
 
 // 1. 获取提及该技术的文档
-const docs = db.prepare(\`
-  SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt
-  FROM documents WHERE topic_id = ? AND content LIKE ? ORDER BY published_date DESC LIMIT 40
-\`).all(topicId, '%' + techName + '%');
+const docs = hasDate
+  ? db.prepare(\`SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt FROM documents WHERE topic_id = ? AND content LIKE ? AND published_date >= ? AND published_date <= ? ORDER BY published_date DESC LIMIT 40\`).all(topicId, '%' + techName + '%', startDate, endDate)
+  : db.prepare(\`SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt FROM documents WHERE topic_id = ? AND content LIKE ? ORDER BY published_date DESC LIMIT 40\`).all(topicId, '%' + techName + '%');
 
 // 2. 获取技术相关实体
-const entities = db.prepare(\`
-  SELECT e.text, e.type, e.confidence, COUNT(*) as mentions
-  FROM entities e JOIN documents d ON e.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? GROUP BY e.text ORDER BY mentions DESC LIMIT 40
-\`).all(topicId, '%' + techName + '%');
+const entities = hasDate
+  ? db.prepare(\`SELECT e.text, e.type, e.confidence, COUNT(*) as mentions FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? GROUP BY e.text ORDER BY mentions DESC LIMIT 40\`).all(topicId, '%' + techName + '%', startDate, endDate)
+  : db.prepare(\`SELECT e.text, e.type, e.confidence, COUNT(*) as mentions FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? GROUP BY e.text ORDER BY mentions DESC LIMIT 40\`).all(topicId, '%' + techName + '%');
 
 // 3. 获取技术相关关系
-const relations = db.prepare(\`
-  SELECT r.source_text, r.relation, r.target_text, r.confidence
-  FROM relations r JOIN documents d ON r.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY r.confidence DESC LIMIT 40
-\`).all(topicId, '%' + techName + '%');
+const relations = hasDate
+  ? db.prepare(\`SELECT r.source_text, r.relation, r.target_text, r.confidence FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? ORDER BY r.confidence DESC LIMIT 40\`).all(topicId, '%' + techName + '%', startDate, endDate)
+  : db.prepare(\`SELECT r.source_text, r.relation, r.target_text, r.confidence FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY r.confidence DESC LIMIT 40\`).all(topicId, '%' + techName + '%');
 
 // 4. 获取技术相关事件
-const events = db.prepare(\`
-  SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants
-  FROM events ev JOIN documents d ON ev.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY ev.event_time DESC LIMIT 30
-\`).all(topicId, '%' + techName + '%');
+const events = hasDate
+  ? db.prepare(\`SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? ORDER BY ev.event_time DESC LIMIT 30\`).all(topicId, '%' + techName + '%', startDate, endDate)
+  : db.prepare(\`SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY ev.event_time DESC LIMIT 30\`).all(topicId, '%' + techName + '%');
 
 // 5. 获取技术相关主张
-const claims = db.prepare(\`
-  SELECT c.text, c.polarity, c.confidence
-  FROM claims c JOIN documents d ON c.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY c.confidence DESC LIMIT 30
-\`).all(topicId, '%' + techName + '%');
+const claims = hasDate
+  ? db.prepare(\`SELECT c.text, c.polarity, c.confidence FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? ORDER BY c.confidence DESC LIMIT 30\`).all(topicId, '%' + techName + '%', startDate, endDate)
+  : db.prepare(\`SELECT c.text, c.polarity, c.confidence FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? ORDER BY c.confidence DESC LIMIT 30\`).all(topicId, '%' + techName + '%');
 
-// 6. 组织活跃度（涉及该技术的组织）
-const orgActivity = db.prepare(\`
-  SELECT e.text, e.type, COUNT(*) as cnt
-  FROM entities e JOIN documents d ON e.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? AND e.type IN ('Organization', 'Company', 'Institution')
-  GROUP BY e.text ORDER BY cnt DESC LIMIT 20
-\`).all(topicId, '%' + techName + '%');
+// 6. 组织活跃度
+const orgActivity = hasDate
+  ? db.prepare(\`SELECT e.text, e.type, COUNT(*) as cnt FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? AND e.type IN ('Organization', 'Company', 'Institution') GROUP BY e.text ORDER BY cnt DESC LIMIT 20\`).all(topicId, '%' + techName + '%', startDate, endDate)
+  : db.prepare(\`SELECT e.text, e.type, COUNT(*) as cnt FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND e.type IN ('Organization', 'Company', 'Institution') GROUP BY e.text ORDER BY cnt DESC LIMIT 20\`).all(topicId, '%' + techName + '%');
 
-// 7. 时间分布（技术相关事件）
-const timeDist = db.prepare(\`
-  SELECT date(ev.event_time) as d, count(*) as cnt
-  FROM events ev JOIN documents d ON ev.document_id = d.id
-  WHERE d.topic_id = ? AND d.content LIKE ? AND ev.event_time >= date('now', '-90 days')
-  GROUP BY d ORDER BY d
-\`).all(topicId, '%' + techName + '%');
+// 7. 时间分布
+const timeDist = hasDate
+  ? db.prepare(\`SELECT date(ev.event_time) as d, count(*) as cnt FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND d.published_date >= ? AND d.published_date <= ? GROUP BY d ORDER BY d\`).all(topicId, '%' + techName + '%', startDate, endDate)
+  : db.prepare(\`SELECT date(ev.event_time) as d, count(*) as cnt FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? AND ev.event_time >= date('now', '-90 days') GROUP BY d ORDER BY d\`).all(topicId, '%' + techName + '%');
 
 // 8. 统计
 const docCount = docs.length;
@@ -133,17 +123,22 @@ const db = new sqlite3.Database('database.sqlite');
 
 const topicId = '{{topicId}}';
 const techName = '{{technologyName}}';
+const startDate = '{{timeRangeStart}}';
+const endDate = '{{timeRangeEnd}}';
+const hasDate = startDate && endDate;
 const results = {};
 
 db.serialize(() => {
   const likePattern = '%' + techName + '%';
-  db.all('SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt FROM documents WHERE topic_id = ? AND content LIKE ? ORDER BY published_date DESC LIMIT 40', [topicId, likePattern], (err, rows) => {
+  const docFilter = hasDate ? 'AND published_date >= ? AND published_date <= ?' : '';
+  const docParams = hasDate ? [topicId, likePattern, startDate, endDate] : [topicId, likePattern];
+  db.all('SELECT id, title, source, published_date, substr(content, 1, 800) as excerpt FROM documents WHERE topic_id = ? AND content LIKE ? ' + docFilter + ' ORDER BY published_date DESC LIMIT 40', docParams, (err, rows) => {
     results.docs = rows || [];
-    db.all('SELECT e.text, e.type, e.confidence FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? LIMIT 40', [topicId, likePattern], (err, rows) => {
+    db.all('SELECT e.text, e.type, e.confidence FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? ' + (hasDate ? 'AND d.published_date >= ? AND d.published_date <= ?' : '') + ' LIMIT 40', docParams, (err, rows) => {
       results.entities = rows || [];
-      db.all('SELECT r.source_text, r.relation, r.target_text FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? LIMIT 40', [topicId, likePattern], (err, rows) => {
+      db.all('SELECT r.source_text, r.relation, r.target_text FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = ? AND d.content LIKE ? ' + (hasDate ? 'AND d.published_date >= ? AND d.published_date <= ?' : '') + ' LIMIT 40', docParams, (err, rows) => {
         results.relations = rows || [];
-        db.all('SELECT type, title, description, event_time FROM events WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ? AND content LIKE ?) ORDER BY event_time DESC LIMIT 30', [topicId, likePattern], (err, rows) => {
+        db.all('SELECT type, title, description, event_time FROM events WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ? AND content LIKE ? ' + docFilter + ') ORDER BY event_time DESC LIMIT 30', docParams, (err, rows) => {
           results.events = rows || [];
           db.close();
           console.log(JSON.stringify(results, null, 2));
@@ -257,10 +252,10 @@ TRL 1-9 评估框架：
 
 ```json
 {
-  "title": "{{technologyName}} 技术专题报告",
+  "title": "{{technologyName}} 技术专题报告 · {{timeRangeStart}} ~ {{timeRangeEnd}}",
   "summary": "技术概要（200-300字），包括技术定义、核心特点、发展现状和应用前景",
   "content": {
-    "version": "1.0",
+    "version": "2.0",
     "meta": {
       "reportId": "自动生成 UUID",
       "topicId": "{{topicId}}",
@@ -281,133 +276,110 @@ TRL 1-9 评估框架：
       "confidence": "high|medium|low",
       "confidenceReason": "置信度评估理由"
     },
-    "technologyOverview": {
-      "definition": "技术定义，清晰描述该技术是什么（100-200字）",
-      "corePrinciples": [
-        "核心原理1",
-        "核心原理2",
-        "核心原理3"
-      ],
-      "keyComponents": [
-        "关键组件1",
-        "关键组件2",
-        "关键组件3"
-      ],
-      "applicationDomains": [
-        "应用领域1",
-        "应用领域2",
-        "应用领域3"
-      ]
-    },
-    "developmentStatus": {
-      "maturityAssessment": {
-        "level": "1-9（TRL 等级）",
-        "criteria": "评估依据，说明为什么给出这个等级",
-        "comparison": "与同类技术对比分析"
-      },
-      "keyPlayers": [
+    "executiveSummary": {
+      "overview": "技术概要（200-300字）：技术定义、核心特点、发展现状和应用前景",
+      "keyPoints": [
         {
-          "entity": "组织名称",
-          "role": "研发者|应用者|投资者",
-          "activities": ["活动1", "活动2"],
-          "strength": "技术能力描述"
+          "point": "技术核心发现",
+          "evidence": ["支撑证据"],
+          "impact": "影响描述"
         }
       ],
-      "recentBreakthroughs": [
-        {
-          "breakthrough": "突破性进展描述",
-          "date": "YYYY-MM-DD",
-          "significance": "意义和影响分析"
-        }
-      ]
+      "confidence": 0.85
     },
-    "deepAnalysis": {
-      "technicalArchitecture": {
-        "layers": ["技术层级1", "技术层级2"],
-        "keyTechnologies": ["关键技术1", "关键技术2"],
-        "dependencies": ["依赖项1", "依赖项2"]
-      },
-      "performanceMetrics": [
-        {
-          "metric": "性能指标名称",
-          "currentValue": "当前值",
-          "benchmark": "基准值",
-          "trend": "↑|↓|→"
-        }
-      ],
-      "challenges": [
-        {
-          "challenge": "技术挑战描述",
-          "severity": "高|中|低",
-          "potentialSolutions": ["解决方案1", "解决方案2"]
-        }
-      ]
-    },
-    "competitiveLandscape": {
-      "competitiveMatrix": [
-        {
-          "player": "竞争者名称",
-          "technologyStack": "技术栈描述",
-          "strengths": ["优势1", "优势2"],
-          "weaknesses": ["劣势1", "劣势2"],
-          "marketPosition": "市场地位"
-        }
-      ]
-    },
-    "investmentDynamics": {
-      "investmentSummary": {
-        "totalInvestment": "总投资规模描述",
-        "recentDeals": ["近期交易1", "近期交易2"]
-      },
-      "investorLandscape": [
-        {
-          "investor": "投资机构名称",
-          "investmentFocus": "投资重点方向"
-        }
-      ]
-    },
-    "riskOpportunity": {
-      "risks": [
-        {
-          "risk": "风险描述",
-          "probability": "高|中|低",
-          "impact": "高|中|低",
-          "mitigation": "缓解措施"
-        }
-      ],
-      "opportunities": [
-        {
-          "opportunity": "机会描述",
-          "window": "时间窗口",
-          "expectedValue": "预期价值"
-        }
-      ]
-    },
-    "forecast": {
-      "shortTerm": "短期预测（3-6月），包括技术发展预期和市场变化",
-      "mediumTerm": "中期预测（1-2年），包括技术成熟度和应用场景扩展",
-      "longTerm": "长期预测（3-5年），包括技术演进方向和市场格局变化",
-      "keyAssumptions": [
-        "关键假设1",
-        "关键假设2",
-        "关键假设3"
-      ]
-    },
-    "strategicRecommendations": [
+    "sections": [
       {
-        "recommendation": "战略建议描述",
-        "priority": "高|中|低",
-        "rationale": "建议理由",
-        "timeline": "建议时间框架"
+        "id": "tech_overview",
+        "title": "技术概述",
+        "thesis": "技术定义与核心价值一句话总结",
+        "content": "Markdown 格式的技术概述：技术定义（100-200字清晰描述）、核心原理（3-5个）、关键组件、应用领域",
+        "highlights": ["核心原理1", "核心原理2", "关键组件1"],
+        "signals": [],
+        "entityRefs": ["技术实体1", "技术实体2"]
+      },
+      {
+        "id": "dev_status",
+        "title": "发展现状",
+        "thesis": "技术成熟度和关键进展一句话总结",
+        "content": "Markdown 格式的发展现状：成熟度评估（TRL 等级、评估依据、与同类技术对比）、关键参与者（角色、活动、技术能力）、近期突破（日期、描述、意义）",
+        "highlights": ["TRL 等级及依据", "关键参与者1", "近期突破1"],
+        "signals": [
+          {
+            "type": "breakthrough|milestone|trend",
+            "title": "技术进展信号",
+            "description": "信号描述",
+            "confidence": 0.85
+          }
+        ],
+        "entityRefs": ["参与组织1", "参与组织2"]
+      },
+      {
+        "id": "deep_analysis",
+        "title": "深度分析",
+        "thesis": "技术架构与挑战一句话总结",
+        "content": "Markdown 格式的深度分析：技术架构（层级、关键技术、依赖项）、性能指标（当前值、基准值、趋势）、技术挑战（严重程度、潜在解决方案）",
+        "highlights": ["架构层级1", "性能指标1", "关键挑战1"],
+        "signals": [],
+        "entityRefs": ["依赖技术1"]
+      },
+      {
+        "id": "competitive_landscape",
+        "title": "竞争格局",
+        "thesis": "技术竞争态势一句话总结",
+        "content": "Markdown 格式的竞争格局：竞争矩阵（每个竞争者的技术栈、优劣势、市场地位）、差异化定位分析",
+        "highlights": ["竞争者1定位", "竞争者2定位", "差异化分析"],
+        "signals": [],
+        "entityRefs": ["竞争组织1", "竞争组织2"]
+      },
+      {
+        "id": "investment_dynamics",
+        "title": "投资动态",
+        "thesis": "投资趋势一句话总结",
+        "content": "Markdown 格式的投资动态：总投资规模、近期交易、投资者图谱（投资机构及投资重点方向）",
+        "highlights": ["投资规模", "近期交易1", "投资机构1"],
+        "signals": [],
+        "entityRefs": ["投资方1"]
+      },
+      {
+        "id": "risk_opportunity",
+        "title": "风险与机遇",
+        "thesis": "风险机遇一句话总结",
+        "content": "Markdown 格式的风险机遇分析：风险（概率、影响、缓解措施）、机遇（时间窗口、预期价值）",
+        "highlights": ["关键风险1", "关键机遇1", "缓解措施1"],
+        "signals": [],
+        "entityRefs": []
+      },
+      {
+        "id": "forecast",
+        "title": "前景预测",
+        "thesis": "技术前景一句话预测",
+        "content": "Markdown 格式的前景预测：短期（3-6月）、中期（1-2年）、长期（3-5年）预测及关键假设",
+        "highlights": ["短期预测1", "中期预测1", "长期预测1"],
+        "signals": [],
+        "entityRefs": []
+      },
+      {
+        "id": "strategic_recommendations",
+        "title": "战略建议",
+        "thesis": "战略建议一句话总结",
+        "content": "Markdown 格式的战略建议：每条包含建议描述、优先级、理由、时间框架",
+        "highlights": ["建议1", "建议2", "建议3"],
+        "signals": [],
+        "entityRefs": []
       }
     ],
     "timeline": [
       {
         "date": "YYYY-MM-DD",
         "event": "事件描述",
-        "significance": "事件意义分析"
+        "significance": "事件意义分析",
+        "entityRefs": ["相关实体"]
       }
-    ]
+    ],
+    "metrics": {
+      "documentsAnalyzed": 数字,
+      "entitiesCovered": 数字
+    }
   },
   "metadata": {
     "documentsAnalyzed": 数字,
@@ -428,16 +400,16 @@ TRL 1-9 评估框架：
 输出 JSON 前确认：
 
 ### 5a. 数据完整性检查
-- [ ] `technologyOverview` 的 definition 非空且长度在 100-200 字
-- [ ] `competitiveLandscape.competitiveMatrix` 至少有 1 个竞争者
-- [ ] `developmentStatus.maturityAssessment` 包含 level 和 criteria
+- [ ] `sections` 包含全部 8 个章节
+- [ ] `sections[0]`（技术概述）的 content 长度在 100-200 字
+- [ ] `sections[3]`（竞争格局）至少有 1 个竞争者
+- [ ] `sections[1]`（发展现状）包含成熟度评估
 - [ ] `timeline` 至少有 2 条事件（如果数据充足）
 
 ### 5b. 格式规范性检查
 - [ ] TRL level 在 1-9 之间
 - [ ] severity 和 probability 使用"高|中|低"
 - [ ] 日期使用 YYYY-MM-DD 格式
-- [ ] 所有数组非空（除非数据严重不足）
 
 ### 5c. 逻辑一致性检查
 - [ ] 技术定义与实际内容一致
@@ -449,7 +421,6 @@ TRL 1-9 评估框架：
 - [ ] 技术术语使用准确
 - [ ] 竞争者名称统一规范
 - [ ] 评估标准前后一致
-- [ ] 无歧义表述
 
 ---
 
@@ -473,13 +444,15 @@ TRL 1-9 评估框架：
 
 ## 重要约束
 
-1. **只输出 JSON**，不要包裹在 markdown 代码块中
+1. **禁止网络搜索**：只使用 SQLite 中已有数据，不要进行网络搜索或信息采集。数据不足时标注数据缺口。
+2. **只输出 JSON**，不要包裹在 markdown 代码块中
 2. **不要执行数据库写入操作**，由 server.ts 后处理负责写入数据库
 3. 如果某个章节数据不足，仍保留章节但标注"数据不足，待后续采集补充"
 4. 日期使用 YYYY-MM-DD 格式
 5. 使用中文输出所有内容
 6. `technologyOverview` 和 `competitiveLandscape` 必须非空
 7. TRL 评估必须提供明确依据
+8. **所有 section 的 `content` 字段必须是纯 Markdown 文本字符串**，禁止使用嵌套 JSON 对象。如需结构化展示，使用 Markdown 列表（`-`）、粗体标题（`**标题**`）、表格等格式。
 
 ---
 

@@ -219,20 +219,20 @@ export default function Topics() {
   );
 
   const priorityColors: Record<string, string> = {
-    high: 'bg-[#ff3b30]/10 text-[#ff3b30]',
-    medium: 'bg-[#ff9f0a]/10 text-[#ff9f0a]',
-    low: 'bg-[#34c759]/10 text-[#34c759]',
+    high: 'bg-[#A0453A]/10 text-[#A0453A]',
+    medium: 'bg-[#9C7B3C]/10 text-[#9C7B3C]',
+    low: 'bg-[#5B7553]/10 text-[#5B7553]',
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader title="主题追踪" description="管理技术追踪主题，查看文档，设置优先级和关键词">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#aeaeb5]" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#888]" />
           <input
             type="text"
             placeholder="搜索主题..."
-            className="pl-9 pr-4 py-2 bg-[#f5f5f7] rounded-full text-sm w-56 focus:bg-white transition-all"
+            className="pl-9 pr-4 py-2 bg-[#F7F7F7] rounded-full text-sm w-56 focus:bg-white transition-all"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
@@ -256,7 +256,7 @@ export default function Topics() {
           title="暂无主题"
           description="创建一个技术追踪主题，开始文档管理和报告生成"
           action={
-            <button onClick={openCreateModal} className="flex items-center gap-2 px-5 py-2 bg-[#0071e3] text-white rounded-[980px] text-sm font-medium hover:bg-[#0062cc] transition-all">
+            <button onClick={openCreateModal} className="flex items-center gap-2 px-5 py-2 bg-[#1d1d1f] text-white rounded-[980px] text-sm font-medium hover:bg-[#1a1a1a] transition-all">
               <Plus className="w-4 h-4" />新建主题
             </button>
           }
@@ -267,12 +267,12 @@ export default function Topics() {
             const isExpanded = expandedTopicId === topic.id;
             const docCount = topicDocCounts[topic.id] ?? 0;
             return (
-              <div key={topic.id} className={`${CARD} overflow-hidden hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all group ${isExpanded ? 'md:col-span-2 lg:col-span-3' : ''}`}>
+              <div key={topic.id} className={`${CARD} overflow-hidden border border-[#1d1d1f]/30 transition-all group ${isExpanded ? 'md:col-span-2 lg:col-span-3' : ''}`}>
                 <div className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div className="min-w-0 flex-1">
                       <h3 className="text-sm font-semibold text-[#1d1d1f] truncate">{topic.name}</h3>
-                      <p className="text-xs text-[#86868b] mt-1 line-clamp-2">{topic.description}</p>
+                      <p className="text-xs text-[#888] mt-1 line-clamp-2">{topic.description}</p>
                     </div>
                     <span className={`shrink-0 ml-2 px-2 py-0.5 rounded-full text-xs font-medium ${priorityColors[topic.priority]}`}>
                       {topic.priority === 'high' ? '高' : topic.priority === 'medium' ? '中' : '低'}
@@ -283,10 +283,10 @@ export default function Topics() {
                   {topic.keywords.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-3">
                       {topic.keywords.slice(0, 3).map(kw => (
-                        <span key={kw} className="px-2 py-0.5 bg-[#f5f5f7] border border-[#f5f5f7] rounded-full text-[10px] text-[#86868b]">{kw}</span>
+                        <span key={kw} className="px-2 py-0.5 bg-[#F7F7F7] border border-[#1d1d1f]/20 rounded-full text-[10px] text-[#888]">{kw}</span>
                       ))}
                       {topic.keywords.length > 3 && (
-                        <span className="px-2 py-0.5 bg-[#f5f5f7] rounded-full text-[10px] text-[#aeaeb5]">+{topic.keywords.length - 3}</span>
+                        <span className="px-2 py-0.5 bg-[#F7F7F7] rounded-full text-[10px] text-[#888]">+{topic.keywords.length - 3}</span>
                       )}
                     </div>
                   )}
@@ -295,26 +295,26 @@ export default function Topics() {
                   {topic.organizations.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-3">
                       {topic.organizations.slice(0, 2).map(org => (
-                        <span key={org} className="px-2 py-0.5 bg-[#0071e3]/5 border border-[#f5f5f7] rounded-full text-[10px] text-[#0071e3]">{org}</span>
+                        <span key={org} className="px-2 py-0.5 bg-[#1d1d1f]/5 border border-[#1d1d1f]/20 rounded-full text-[10px] text-[#1d1d1f]">{org}</span>
                       ))}
                     </div>
                   )}
 
                   {/* Actions */}
-                  <div className="flex items-center justify-between pt-3 border-t border-[#f5f5f7]">
+                  <div className="flex items-center justify-between pt-3 border-t border-[#1d1d1f]/20">
                     <button
                       onClick={() => toggleExpand(topic.id)}
-                      className="flex items-center gap-1 px-3 py-2 text-xs text-[#86868b] hover:text-[#1d1d1f] transition-colors"
+                      className="flex items-center gap-1 px-3 py-2 text-xs text-[#888] hover:text-[#1d1d1f] transition-colors"
                     >
                       <FileText className="w-3.5 h-3.5" />
                       {docCount} 篇
                       {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                     </button>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => openEditModal(topic)} className="p-2 text-[#aeaeb5] hover:text-[#0071e3] rounded-full hover:bg-[#0071e3]/5 transition-all" title="编辑">
+                      <button onClick={() => openEditModal(topic)} className="p-2 text-[#888] hover:text-[#1d1d1f] rounded-full hover:bg-[#1d1d1f]/5 transition-all" title="编辑">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => handleDelete(topic.id)} className="p-2 text-[#aeaeb5] hover:text-[#ff3b30] rounded-full hover:bg-[#ff3b30]/5 transition-all" title="删除" aria-label="删除主题">
+                      <button onClick={() => handleDelete(topic.id)} className="p-2 text-[#888] hover:text-[#A0453A] rounded-full hover:bg-[#A0453A]/5 transition-all" title="删除" aria-label="删除主题">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -323,32 +323,32 @@ export default function Topics() {
 
                 {/* Expanded: Document list + Upload */}
                 {isExpanded && (
-                  <div className="border-t border-[#f5f5f7] px-5 pb-5 pt-4 animate-fade-in">
+                  <div className="border-t border-[#1d1d1f]/20 px-5 pb-5 pt-4 animate-fade-in">
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                       {/* Document list */}
                       <div>
                         <div className="flex items-center justify-between mb-3">
-                          <h4 className="text-xs font-medium text-[#86868b]">已采集文档</h4>
-                          <span className="text-xs text-[#aeaeb5]">{topicDocs.length} 篇</span>
+                          <h4 className="text-xs font-medium text-[#888]">已采集文档</h4>
+                          <span className="text-xs text-[#888]">{topicDocs.length} 篇</span>
                         </div>
                         {topicDocs.length === 0 ? (
-                          <p className="text-xs text-[#aeaeb5] py-4 text-center">暂无文档，请上传文件或生成报告</p>
+                          <p className="text-xs text-[#888] py-4 text-center">暂无文档，请上传文件或生成报告</p>
                         ) : (
                           <div className="space-y-1 max-h-64 overflow-y-auto">
                             {topicDocs.map((doc: any) => (
-                              <div key={doc.id} className="flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-[#f5f5f7] transition-colors">
-                                <FileText className="w-3.5 h-3.5 text-[#86868b] shrink-0" />
+                              <div key={doc.id} className="flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-[#F7F7F7] transition-colors">
+                                <FileText className="w-3.5 h-3.5 text-[#888] shrink-0" />
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs text-[#1d1d1f] truncate">{doc.title}</p>
-                                  <span className="text-[10px] text-[#aeaeb5]">{doc.published_date || doc.source || ''}</span>
+                                  <span className="text-[10px] text-[#888]">{doc.published_date || doc.source || ''}</span>
                                 </div>
                                 <div className="flex items-center gap-1 shrink-0">
                                   {doc.source_url && (
-                                    <a href={doc.source_url} target="_blank" rel="noopener noreferrer" className="p-1 text-[#aeaeb5] hover:text-[#0071e3] transition-colors">
+                                    <a href={doc.source_url} target="_blank" rel="noopener noreferrer" className="p-1 text-[#888] hover:text-[#1d1d1f] transition-colors">
                                       <ExternalLink className="w-3 h-3" />
                                     </a>
                                   )}
-                                  <button onClick={() => handleDeleteDocument(doc.id)} className="p-1 text-[#aeaeb5] hover:text-[#ff3b30] transition-colors" aria-label="删除文档">
+                                  <button onClick={() => handleDeleteDocument(doc.id)} className="p-1 text-[#888] hover:text-[#A0453A] transition-colors" aria-label="删除文档">
                                     <Trash2 className="w-3 h-3" />
                                   </button>
                                 </div>
@@ -360,36 +360,36 @@ export default function Topics() {
 
                       {/* Upload area */}
                       <div>
-                        <h4 className="text-xs font-medium text-[#86868b] mb-3">上传文档</h4>
+                        <h4 className="text-xs font-medium text-[#888] mb-3">上传文档</h4>
                         <div
-                          className="border-2 border-dashed border-[#aeaeb5] rounded-xl p-5 text-center hover:border-[#0071e3] transition-colors cursor-pointer"
+                          className="border-2 border-dashed border-[#1d1d1f]/30 rounded-xl p-5 text-center hover:border-[#1d1d1f] transition-colors cursor-pointer"
                           onClick={() => fileInputRef.current?.click()}
                         >
                           <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt,.md" onChange={handleFileSelect} className="hidden" />
-                          <Upload className="w-6 h-6 text-[#aeaeb5] mx-auto mb-2" />
-                          <p className="text-xs text-[#86868b]">PDF、Word、TXT、Markdown</p>
+                          <Upload className="w-6 h-6 text-[#888] mx-auto mb-2" />
+                          <p className="text-xs text-[#888]">PDF、Word、TXT、Markdown</p>
                         </div>
 
                         {uploadedFile && (
-                          <div className="mt-3 bg-[#f5f5f7] rounded-xl p-3">
+                          <div className="mt-3 bg-[#F7F7F7] rounded-xl p-3">
                             <div className="flex items-center justify-between">
                               <div className="min-w-0">
                                 <p className="text-xs font-medium text-[#1d1d1f] truncate">{uploadedFile.name}</p>
-                                <p className="text-[10px] text-[#86868b]">{formatSize(uploadedFile.size)}</p>
+                                <p className="text-[10px] text-[#888]">{formatSize(uploadedFile.size)}</p>
                               </div>
-                              <button onClick={() => { setUploadedFile(null); setUploadError(''); }} className="text-[#aeaeb5] hover:text-[#86868b]">
+                              <button onClick={() => { setUploadedFile(null); setUploadError(''); }} className="text-[#888] hover:text-[#888]">
                                 <X className="w-3.5 h-3.5" />
                               </button>
                             </div>
                             <div className="mt-2">
-                              <button onClick={() => handleFileUpload()} disabled={uploadingFile !== null} className="w-full py-1.5 text-xs font-medium bg-[#0071e3] text-white rounded-full hover:bg-[#0062cc] transition-all disabled:opacity-40">
+                              <button onClick={() => handleFileUpload()} disabled={uploadingFile !== null} className="w-full py-1.5 text-xs font-medium bg-[#1d1d1f] text-white rounded-full hover:bg-[#1a1a1a] transition-all disabled:opacity-40">
                                 {uploadingFile ? '上传中...' : '上传'}
                               </button>
                             </div>
                           </div>
                         )}
 
-                        {uploadError && <p className="mt-2 text-[10px] text-[#ff3b30]">{uploadError}</p>}
+                        {uploadError && <p className="mt-2 text-[10px] text-[#A0453A]">{uploadError}</p>}
                       </div>
                     </div>
                   </div>

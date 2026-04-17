@@ -40,7 +40,7 @@ export interface GraphNodeData {
   url?: string;
   metadata?: Record<string, any>;
   topicId?: string;
-  highlighted?: boolean; // true=emphasized, false=dimmed, undefined=normal
+  highlighted?: boolean;
 }
 
 export interface GraphEdgeData {
@@ -59,54 +59,52 @@ export interface GraphVisualizationProps {
   focusNodeIds?: string[];
 }
 
-// Custom Node Component
+// MNEMOSYNE-style node colors (warm tones for cream bg on black canvas)
+const NODE_ACCENT: Record<string, string> = {
+  topic: '#4A8B9E',
+  entity: '#9A7DA8',
+  event: '#C49A5C',
+  claim: '#C46B5C',
+  document: '#6B9E7A',
+};
+
+// Custom Node Component — MNEMOSYNE editorial style
 const CustomNode: FC<{ data: GraphNodeData }> = ({ data }) => {
-  // Highlight context: undefined=normal, true=emphasized, false=dimmed
   const hasHighlightContext = data.highlighted !== undefined;
   const isHighlighted = data.highlighted === true;
+  const accent = NODE_ACCENT[data.type] || '#86868b';
 
-  const getNodeStyle = () => {
-    if (hasHighlightContext && !isHighlighted) {
-      // Dimmed node: thin gray border, faded
-      return 'bg-[#e8e8ed] border-[#d2d2d7] border';
-    }
-    switch (data.type) {
-      case 'topic':
-        return isHighlighted ? 'bg-[#0071e3] border-[#0071e3] border-[3px]' : 'bg-[#0071e3] border-[#0071e3]/30 border-2';
-      case 'entity':
-        return isHighlighted ? 'bg-blue-500 border-[#0071e3] border-[3px]' : 'bg-blue-500 border-blue-200 border-2';
-      case 'event':
-        return isHighlighted ? 'bg-purple-500 border-[#0071e3] border-[3px]' : 'bg-purple-500 border-purple-200 border-2';
-      case 'claim':
-        return isHighlighted ? 'bg-amber-500 border-[#0071e3] border-[3px]' : 'bg-amber-500 border-amber-200 border-2';
-      case 'document':
-        return isHighlighted ? 'bg-emerald-500 border-[#0071e3] border-[3px]' : 'bg-emerald-500 border-emerald-200 border-2';
-      default:
-        return 'bg-[#86868b] border-[#d2d2d7] border-2';
-    }
+  // Type badge label
+  const typeLabel: Record<string, string> = {
+    topic: 'TOPIC', entity: 'ENTITY', event: 'EVENT',
+    claim: 'CLAIM', document: 'DOC',
   };
 
-  const getIcon = () => {
-    switch (data.type) {
-      case 'topic': return '🎯';
-      case 'entity': return '🏢';
-      case 'event': return '📅';
-      case 'claim': return '💡';
-      case 'document': return '📄';
-      default: return '📦';
-    }
-  };
-
-  const dimClasses = hasHighlightContext && !isHighlighted
-    ? 'opacity-40 scale-[0.7]'
-    : '';
+  if (hasHighlightContext && !isHighlighted) {
+    return (
+      <div className="px-3 py-1.5 rounded-full border border-white/20 bg-white/5 text-white/30 text-xs font-medium text-center min-w-[60px] transition-all duration-300 scale-75">
+        {data.label}
+      </div>
+    );
+  }
 
   return (
-    <div className={`px-4 py-2 rounded-full shadow-md ${getNodeStyle()} ${dimClasses} text-sm font-medium min-w-[80px] text-center transition-all duration-300 ${
-      hasHighlightContext && !isHighlighted ? 'text-[#86868b]' : 'text-white'
+    <div className={`group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all duration-300 min-w-[60px] ${
+      isHighlighted
+        ? 'bg-[#F7F7F7] border-[#1d1d1f] border-[2px] shadow-lg text-[#1d1d1f] scale-110'
+        : 'bg-[#F7F7F7]/95 border-[#1d1d1f]/60 text-[#1d1d1f] hover:border-[#1d1d1f]'
     }`}>
-      <span className="mr-1">{getIcon()}</span>
-      <span>{data.label}</span>
+      <span
+        className="w-2 h-2 rounded-full shrink-0"
+        style={{ background: accent }}
+      />
+      <span className="truncate max-w-[120px]">{data.label}</span>
+      <span
+        className="hidden group-hover:inline text-[8px] font-mono tracking-wider opacity-50 ml-1"
+        style={{ color: accent }}
+      >
+        {typeLabel[data.type] || 'NODE'}
+      </span>
     </div>
   );
 };
@@ -122,127 +120,83 @@ const applyLayout = (
   layoutType: 'force' | 'hierarchical' | 'circular' | 'grid' | 'concentric' | 'radial'
 ): { nodes: GraphNode[]; edges: GraphEdge[] } => {
   const layoutedNodes = [...nodes];
+  const centerX = 500;
+  const centerY = 350;
 
   switch (layoutType) {
-    case 'hierarchical':
+    case 'hierarchical': {
       const levels: Record<string, number> = {};
       const visited = new Set<string>();
-
-      const getLevel = (nodeId: string, currentLevel = 0): number => {
+      const getLevel = (nodeId: string): number => {
         if (visited.has(nodeId)) return levels[nodeId] ?? 0;
         visited.add(nodeId);
-
-        const incomingEdges = edges.filter(e => e.target === nodeId);
-        if (incomingEdges.length === 0) {
-          levels[nodeId] = 0;
-          return 0;
-        }
-
-        const parentLevels = incomingEdges.map(e => getLevel(e.source, currentLevel + 1));
+        const incoming = edges.filter(e => e.target === nodeId);
+        if (incoming.length === 0) { levels[nodeId] = 0; return 0; }
+        const parentLevels = incoming.map(e => getLevel(e.source));
         levels[nodeId] = Math.max(...parentLevels) + 1;
         return levels[nodeId];
       };
-
       nodes.forEach(n => getLevel(n.id));
-
-      const nodesByLevel: Record<number, GraphNode[]> = {};
-      Object.entries(levels).forEach(([nodeId, level]) => {
-        if (!nodesByLevel[level]) nodesByLevel[level] = [];
-        const node = layoutedNodes.find(n => n.id === nodeId);
-        if (node) nodesByLevel[level].push(node);
+      const byLevel: Record<number, GraphNode[]> = {};
+      Object.entries(levels).forEach(([nid, level]) => {
+        if (!byLevel[level]) byLevel[level] = [];
+        const node = layoutedNodes.find(n => n.id === nid);
+        if (node) byLevel[level].push(node);
       });
-
-      Object.entries(nodesByLevel).forEach(([level, levelNodes]) => {
+      Object.entries(byLevel).forEach(([level, lnodes]) => {
         const y = parseInt(level) * 150;
-        levelNodes.forEach((node, i) => {
-          const x = (i - (levelNodes.length - 1) / 2) * 200;
-          node.position = { x, y };
+        lnodes.forEach((node, i) => {
+          node.position = { x: (i - (lnodes.length - 1) / 2) * 200, y };
         });
       });
       break;
-
-    case 'circular':
-      const centerX = 400;
-      const centerY = 300;
-      const radius = Math.min(200, 50 + nodes.length * 15);
-
+    }
+    case 'circular': {
+      const radius = Math.min(250, 60 + nodes.length * 12);
       layoutedNodes.forEach((node, i) => {
         const angle = (2 * Math.PI * i) / nodes.length;
-        node.position = {
-          x: centerX + radius * Math.cos(angle),
-          y: centerY + radius * Math.sin(angle),
-        };
+        node.position = { x: centerX + radius * Math.cos(angle), y: centerY + radius * Math.sin(angle) };
       });
       break;
-
-    case 'concentric':
-      // Organize nodes by type in concentric circles
+    }
+    case 'concentric': {
       const typeOrder: GraphNodeType[] = ['topic', 'entity', 'event', 'claim', 'document'];
-      const radii = [0, 120, 200, 280, 360];
-      const nodesByType: Record<GraphNodeType, GraphNode[]> = {
-        topic: [],
-        entity: [],
-        event: [],
-        claim: [],
-        document: [],
-      };
-
-      nodes.forEach(n => {
-        if (n.data.type && nodesByType[n.data.type]) {
-          nodesByType[n.data.type].push(n);
-        } else {
-          nodesByType.entity.push(n);
-        }
-      });
-
-      typeOrder.forEach((type, typeIdx) => {
-        const typeNodes = nodesByType[type];
-        const radius = radii[typeIdx] || 200;
-        typeNodes.forEach((node, i) => {
-          const angle = (2 * Math.PI * i) / typeNodes.length;
-          node.position = {
-            x: centerX + radius * Math.cos(angle),
-            y: centerY + radius * Math.sin(angle),
-          };
+      const radii = [0, 140, 220, 300, 380];
+      const byType: Record<string, GraphNode[]> = { topic: [], entity: [], event: [], claim: [], document: [] };
+      nodes.forEach(n => { (byType[n.data.type] || byType.entity).push(n); });
+      typeOrder.forEach((type, idx) => {
+        const tnodes = byType[type];
+        const r = radii[idx] || 200;
+        tnodes.forEach((node, i) => {
+          const angle = (2 * Math.PI * i) / Math.max(tnodes.length, 1);
+          node.position = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
         });
       });
       break;
-
+    }
     case 'radial':
-      // Star layout: first node at center, others in a circle
       layoutedNodes.forEach((node, i) => {
-        if (i === 0) {
-          node.position = { x: centerX, y: centerY };
-        } else {
+        if (i === 0) { node.position = { x: centerX, y: centerY }; }
+        else {
           const angle = (2 * Math.PI * (i - 1)) / (nodes.length - 1);
-          const radius = 150 + nodes.length * 10;
-          node.position = {
-            x: centerX + radius * Math.cos(angle),
-            y: centerY + radius * Math.sin(angle),
-          };
+          const r = 180 + nodes.length * 8;
+          node.position = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
         }
       });
       break;
-
-    case 'grid':
+    case 'grid': {
       const cols = Math.ceil(Math.sqrt(nodes.length));
       layoutedNodes.forEach((node, i) => {
-        node.position = {
-          x: (i % cols) * 200,
-          y: Math.floor(i / cols) * 150,
-        };
+        node.position = { x: (i % cols) * 220, y: Math.floor(i / cols) * 160 };
       });
       break;
-
+    }
     case 'force':
     default:
-      layoutedNodes.forEach((node, i) => {
+      layoutedNodes.forEach((node) => {
         const angle = Math.random() * 2 * Math.PI;
-        const distance = 100 + Math.random() * 200;
-        node.position = {
-          x: 400 + distance * Math.cos(angle),
-          y: 300 + distance * Math.sin(angle),
-        };
+        const distance = 80 + Math.random() * 250;
+        node.position = { x: centerX + distance * Math.cos(angle), y: centerY + distance * Math.sin(angle) };
       });
       break;
   }
@@ -250,102 +204,49 @@ const applyLayout = (
   return { nodes: layoutedNodes, edges };
 };
 
-/**
- * Export graph data as JSON string
- */
 export function exportGraphAsJSON(nodes: GraphNode[], edges: GraphEdge[]): string {
-  const exportData: GraphExportData = {
-    nodes,
-    edges,
-    metadata: {
-      exportedAt: new Date().toISOString(),
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-    },
-  };
-  return JSON.stringify(exportData, null, 2);
+  return JSON.stringify({ nodes, edges, metadata: { exportedAt: new Date().toISOString(), nodeCount: nodes.length, edgeCount: edges.length } }, null, 2);
 }
 
-/**
- * Export graph as PNG image
- */
-export async function exportGraphAsPNG(
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  filename = 'knowledge-graph.png'
-): Promise<void> {
-  // Create a canvas and draw the graph
+export async function exportGraphAsPNG(nodes: GraphNode[], edges: GraphEdge[], filename = 'knowledge-graph.png'): Promise<void> {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Could not create canvas context');
-
-  // Calculate bounds
+  if (!ctx) throw new Error('Could not create canvas');
   const padding = 50;
-  const nodesRect = getRectOfNodes(nodes);
-  const bounds = {
-    x: nodesRect.x - padding,
-    y: nodesRect.y - padding,
-    width: nodesRect.width + padding * 2,
-    height: nodesRect.height + padding * 2,
-  };
-
-  // Set canvas size (min 800x600 for better visibility)
-  canvas.width = Math.max(800, bounds.width);
-  canvas.height = Math.max(600, bounds.height);
-
-  // Draw white background
-  ctx.fillStyle = '#ffffff';
+  const rect = getRectOfNodes(nodes);
+  canvas.width = Math.max(800, rect.width + padding * 2);
+  canvas.height = Math.max(600, rect.height + padding * 2);
+  ctx.fillStyle = '#1d1d1f';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Calculate scale and offset to center the graph
-  const scaleX = canvas.width / bounds.width;
-  const scaleY = canvas.height / bounds.height;
-  const scale = Math.min(scaleX, scaleY, 1); // Don't scale up
-  const offsetX = (canvas.width - bounds.width * scale) / 2 - bounds.x * scale;
-  const offsetY = (canvas.height - bounds.height * scale) / 2 - bounds.y * scale;
-
-  // Draw edges first
-  ctx.strokeStyle = '#86868b';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(243,238,231,0.3)';
+  ctx.lineWidth = 1.5;
   edges.forEach(edge => {
-    const source = nodes.find(n => n.id === edge.source);
-    const target = nodes.find(n => n.id === edge.target);
-    if (source && target) {
+    const s = nodes.find(n => n.id === edge.source);
+    const t = nodes.find(n => n.id === edge.target);
+    if (s && t) {
       ctx.beginPath();
-      ctx.moveTo(source.position.x * scale + offsetX, source.position.y * scale + offsetY);
-      ctx.lineTo(target.position.x * scale + offsetX, target.position.y * scale + offsetY);
+      ctx.moveTo(s.position.x - rect.x + padding, s.position.y - rect.y + padding);
+      ctx.lineTo(t.position.x - rect.x + padding, t.position.y - rect.y + padding);
       ctx.stroke();
     }
   });
-
-  // Draw nodes
   nodes.forEach(node => {
-    const x = node.position.x * scale + offsetX;
-    const y = node.position.y * scale + offsetY;
-
-    // Node circle
-    const nodeColor = getNodeColor(node.data.type);
-    ctx.fillStyle = nodeColor;
+    const x = node.position.x - rect.x + padding;
+    const y = node.position.y - rect.y + padding;
+    ctx.fillStyle = '#F7F7F7';
     ctx.beginPath();
-    ctx.arc(x, y, 20, 0, 2 * Math.PI);
+    ctx.roundRect(x - 40, y - 12, 80, 24, 12);
     ctx.fill();
-
-    // Node border
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#1d1d1f';
+    ctx.lineWidth = 1;
     ctx.stroke();
-
-    // Node label
     ctx.fillStyle = '#1d1d1f';
-    ctx.font = '12px sans-serif';
+    ctx.font = '600 11px Inter, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const label = node.data.label || node.id;
-    const truncatedLabel = label.length > 15 ? label.substring(0, 15) + '...' : label;
-    ctx.fillText(truncatedLabel, x, y + 35);
+    const label = (node.data.label || node.id).slice(0, 12);
+    ctx.fillText(label, x, y);
   });
-
-  // Download
   canvas.toBlob(blob => {
     if (blob) {
       const url = URL.createObjectURL(blob);
@@ -358,17 +259,6 @@ export async function exportGraphAsPNG(
   });
 }
 
-function getNodeColor(type: GraphNodeType): string {
-  const colors: Record<GraphNodeType, string> = {
-    topic: '#0071e3',
-    entity: '#3b82f6',
-    event: '#a855f7',
-    claim: '#f59e0b',
-    document: '#10b981',
-  };
-  return colors[type] || '#86868b';
-}
-
 export const GraphVisualization: FC<GraphVisualizationProps> = ({
   nodes: initialNodes,
   edges: initialEdges,
@@ -376,13 +266,11 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
   onNodeDoubleClick,
   focusNodeIds,
 }) => {
-  const [layout, setLayout] = useState<'force' | 'hierarchical' | 'circular' | 'grid' | 'concentric' | 'radial'>('force');
+  const [layout, setLayout] = useState<'force' | 'hierarchical' | 'circular' | 'grid' | 'concentric' | 'radial'>('concentric');
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [showExportMenu, setShowExportMenu] = useState(false);
   const rfInstance = useRef<any>(null);
   const autoFitTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Export handlers
   const handleExportJSON = useCallback(() => {
     const json = exportGraphAsJSON(initialNodes, initialEdges);
     const blob = new Blob([json], { type: 'application/json' });
@@ -392,114 +280,72 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
     a.download = `knowledge-graph-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    setShowExportMenu(false);
   }, [initialNodes, initialEdges]);
 
   const handleExportPNG = useCallback(async () => {
-    try {
-      await exportGraphAsPNG(initialNodes, initialEdges, `knowledge-graph-${new Date().toISOString().slice(0, 10)}.png`);
-    } catch (err) {
-      console.error('Failed to export PNG:', err);
-      alert('导出 PNG 失败，请使用现代浏览器');
-    }
-    setShowExportMenu(false);
+    try { await exportGraphAsPNG(initialNodes, initialEdges); } catch (err) { console.error('Export PNG failed:', err); }
   }, [initialNodes, initialEdges]);
 
-  // Auto-focus on highlighted nodes when focusNodeIds changes
   useEffect(() => {
     if (focusNodeIds?.length && rfInstance.current) {
       autoFitTimerRef.current = setTimeout(() => {
-        rfInstance.current?.fitView({
-          nodes: focusNodeIds.map(id => ({ id })),
-          padding: 0.3,
-          duration: 600,
-        });
+        rfInstance.current?.fitView({ nodes: focusNodeIds.map(id => ({ id })), padding: 0.3, duration: 600 });
       }, 400);
-      return () => {
-        if (autoFitTimerRef.current) {
-          clearTimeout(autoFitTimerRef.current);
-          autoFitTimerRef.current = null;
-        }
-      };
+      return () => { if (autoFitTimerRef.current) clearTimeout(autoFitTimerRef.current); };
     }
   }, [focusNodeIds]);
 
-  // Transform nodes to ReactFlow format
-  const transformedNodes = useMemo(() => {
-    return initialNodes.map(node => ({
-      ...node,
-      type: 'custom',
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
-      data: {
-        ...node.data,
-        label: node.data.label || node.id,
-      },
-    }));
-  }, [initialNodes]);
+  const transformedNodes = useMemo(() =>
+    initialNodes.map(node => ({ ...node, type: 'custom', sourcePosition: Position.Right, targetPosition: Position.Left, data: { ...node.data, label: node.data.label || node.id } })),
+    [initialNodes]
+  );
 
-  // Transform edges to ReactFlow format
-  const transformedEdges = useMemo(() => {
-    return initialEdges.map(edge => ({
+  const transformedEdges = useMemo(() =>
+    initialEdges.map(edge => ({
       ...edge,
-      type: 'smoothstep',
+      type: 'smoothstep' as const,
       animated: edge.data?.type === 'contradicts',
       style: {
-        stroke: edge.data?.type === 'contradicts' ? '#ff3b30' :
-               edge.data?.type === 'supports' ? '#34c759' : '#86868b',
-        strokeWidth: 2,
+        stroke: edge.data?.type === 'contradicts' ? '#C46B5C' :
+                edge.data?.type === 'supports' ? '#6B9E7A' : 'rgba(243,238,231,0.35)',
+        strokeWidth: 1.5,
       },
       label: edge.data?.label,
-      labelStyle: {
-        fontSize: 10,
-        fontWeight: 500,
-      },
-    }));
-  }, [initialEdges]);
+      labelStyle: { fontSize: 9, fontWeight: 600, fill: 'rgba(243,238,231,0.6)' },
+      labelBgStyle: { fill: 'rgba(15,15,15,0.7)', fillOpacity: 1 },
+      labelBgPadding: [4, 6] as [number, number],
+      labelBgBorderRadius: 4,
+    })),
+    [initialEdges]
+  );
 
-  // Apply layout
-  const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() => {
-    return applyLayout(transformedNodes, transformedEdges, layout);
-  }, [transformedNodes, transformedEdges, layout]);
+  const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() =>
+    applyLayout(transformedNodes, transformedEdges, layout),
+    [transformedNodes, transformedEdges, layout]
+  );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
 
   useEffect(() => {
-    // Only update if actually different to prevent potential loops
-    const currentJSON = JSON.stringify(nodes);
-    const newJSON = JSON.stringify(layoutedNodes);
-    if (currentJSON !== newJSON) {
-      setNodes(layoutedNodes);
-    }
+    const cur = JSON.stringify(nodes);
+    const nxt = JSON.stringify(layoutedNodes);
+    if (cur !== nxt) setNodes(layoutedNodes);
   }, [layoutedNodes, setNodes]);
 
-  useEffect(() => {
-    setEdges(layoutedEdges);
-  }, [layoutedEdges, setEdges]);
+  useEffect(() => { setEdges(layoutedEdges); }, [layoutedEdges, setEdges]);
 
-  const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
-  );
+  const onConnect = useCallback((params: Connection) => setEdges(eds => addEdge(params, eds)), [setEdges]);
 
-  const handleNodeClick = useCallback(
-    (_event: MouseEvent, node: GraphNode) => {
-      setSelectedNode(node);
-      onNodeClick?.(node);
-    },
-    [onNodeClick]
-  );
+  const handleNodeClick = useCallback((_e: MouseEvent, node: GraphNode) => {
+    setSelectedNode(node);
+    onNodeClick?.(node);
+  }, [onNodeClick]);
 
-  const handleNodeDoubleClick = useCallback(
-    (_event: MouseEvent, node: GraphNode) => {
-      onNodeDoubleClick?.(node);
-      if (node.data.url) {
-        window.open(node.data.url, '_blank');
-      }
-    },
-    [onNodeDoubleClick]
-  );
+  const handleNodeDoubleClick = useCallback((_e: MouseEvent, node: GraphNode) => {
+    onNodeDoubleClick?.(node);
+    if (node.data.url) window.open(node.data.url, '_blank');
+  }, [onNodeDoubleClick]);
 
   return (
     <div className="w-full h-full relative">
@@ -511,134 +357,93 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
         onConnect={onConnect}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
-        onInit={(instance) => { rfInstance.current = instance; }}
+        onInit={inst => { rfInstance.current = inst; }}
         nodeTypes={nodeTypes}
         fitView
         attributionPosition="bottom-left"
+        proOptions={{ hideAttribution: true }}
       >
-        <Background color="#d2d2d7" gap={20} />
-        <Controls />
+        <Background color="rgba(243,238,231,0.08)" gap={24} />
+        <Controls
+          className="!border-[#1d1d1f] !rounded-xl !shadow-none !bg-[#F7F7F7]"
+        />
         <MiniMap
-          nodeColor={(node) => {
-            switch (node.data.type) {
-              case 'topic': return '#0071e3';
-              case 'entity': return '#3b82f6';
-              case 'event': return '#a855f7';
-              case 'claim': return '#f59e0b';
-              case 'document': return '#10b981';
-              default: return '#86868b';
-            }
-          }}
-          className="!bg-white !border !border-[#d2d2d7]"
+          nodeColor={node => NODE_ACCENT[node.data?.type] || '#888'}
+          className="!bg-[#1a1a1a] !border !border-[#1d1d1f] !rounded-xl"
+          maskColor="rgba(15,15,15,0.85)"
         />
       </ReactFlow>
 
-      {/* Layout & Export Controls */}
-      <div className="absolute top-4 right-4 bg-white rounded-xl shadow-md border border-[#d2d2d7] p-2 z-10">
-        <div className="text-xs font-medium text-[#86868b] mb-2 px-1">布局</div>
-        <div className="grid grid-cols-3 gap-1 mb-2">
+      {/* Layout Controls — MNEMOSYNE pill style */}
+      <div className="absolute top-4 right-4 bg-[#F7F7F7] rounded-2xl border border-[#1d1d1f] p-2.5 z-10">
+        <div className="text-[9px] font-extrabold uppercase tracking-widest text-[#888] mb-1.5 px-1">Layout</div>
+        <div className="grid grid-cols-3 gap-1 mb-1.5">
           {[
-            { value: 'force', label: '力导向' },
-            { value: 'hierarchical', label: '层级' },
-            { value: 'circular', label: '环形' },
-            { value: 'grid', label: '网格' },
-            { value: 'concentric', label: '同心圆' },
-            { value: 'radial', label: '辐射' },
+            { value: 'force', label: 'Force' },
+            { value: 'hierarchical', label: 'Level' },
+            { value: 'concentric', label: 'Ring' },
+            { value: 'circular', label: 'Circle' },
+            { value: 'grid', label: 'Grid' },
+            { value: 'radial', label: 'Star' },
           ].map(({ value, label }) => (
             <button
               key={value}
               onClick={() => setLayout(value as any)}
-              className={`px-2 py-1 text-xs rounded-lg transition-colors ${
+              className={`px-2 py-1 text-[10px] font-semibold rounded-lg transition-all ${
                 layout === value
-                  ? 'bg-[#0071e3]/10 text-[#0071e3] font-medium'
-                  : 'text-[#86868b] hover:bg-[#f5f5f7]'
+                  ? 'bg-[#1d1d1f] text-[#F7F7F7]'
+                  : 'text-[#888] hover:bg-[#D1D1D1]'
               }`}
             >
               {label}
             </button>
           ))}
         </div>
-        <div className="border-t border-[#d2d2d7] pt-2 mt-2">
-          <div className="text-xs font-medium text-[#86868b] mb-1 px-1">导出</div>
+        <div className="border-t border-[#1d1d1f]/20 pt-1.5 mt-1">
           <div className="flex gap-1">
-            <button
-              onClick={handleExportJSON}
-              className="flex-1 px-2 py-1 text-xs rounded-lg bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] transition-colors"
-            >
-              JSON
-            </button>
-            <button
-              onClick={handleExportPNG}
-              className="flex-1 px-2 py-1 text-xs rounded-lg bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] transition-colors"
-            >
-              PNG
-            </button>
+            <button onClick={handleExportJSON} className="flex-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-[#D1D1D1] hover:bg-[#b8b8b8] transition-colors">JSON</button>
+            <button onClick={handleExportPNG} className="flex-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-[#D1D1D1] hover:bg-[#b8b8b8] transition-colors">PNG</button>
           </div>
         </div>
       </div>
 
-      {/* Node Details Panel */}
+      {/* Node Details — MNEMOSYNE module style */}
       {selectedNode && (
-        <div className="absolute bottom-4 right-4 bg-white rounded-xl shadow-md border border-[#d2d2d7] p-4 z-10 max-w-xs">
+        <div className="absolute bottom-4 right-4 bg-[#F7F7F7] rounded-2xl border border-[#1d1d1f] p-4 z-10 max-w-xs">
           <div className="flex justify-between items-start mb-2">
-            <h3 className="font-semibold text-[#1d1d1f]">{selectedNode.data.label}</h3>
-            <button
-              onClick={() => setSelectedNode(null)}
-              className="text-[#aeaeb5] hover:text-[#86868b]"
-            >
-              ✕
-            </button>
+            <h3 className="font-bold text-[#1d1d1f] text-sm">{selectedNode.data.label}</h3>
+            <button onClick={() => setSelectedNode(null)} className="text-[#888] hover:text-[#1d1d1f] text-xs font-mono">✕</button>
           </div>
-          <div className="space-y-1 text-sm">
+          <div className="space-y-1.5 text-xs">
             <div className="flex items-center gap-2">
-              <span className="text-[#86868b]">类型:</span>
-              <span className="capitalize text-[#1d1d1f]">{selectedNode.data.type}</span>
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NODE_ACCENT[selectedNode.data.type] || '#888' }} />
+              <span className="font-mono text-[#888] uppercase tracking-wider">{selectedNode.data.type}</span>
             </div>
             {selectedNode.data.description && (
-              <div className="flex items-start gap-2">
-                <span className="text-[#86868b]">描述:</span>
-                <span className="text-[#1d1d1f]">{selectedNode.data.description}</span>
-              </div>
+              <p className="text-[#1d1d1f]/70 leading-relaxed">{selectedNode.data.description}</p>
             )}
             {selectedNode.data.url && (
-              <div className="flex items-center gap-2">
-                <span className="text-[#86868b]">链接:</span>
-                <a
-                  href={selectedNode.data.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[#0071e3] hover:underline"
-                >
-                  打开
-                </a>
-              </div>
+              <a href={selectedNode.data.url} target="_blank" rel="noopener noreferrer" className="text-[#2A5A6B] hover:underline font-medium">Open link →</a>
             )}
           </div>
         </div>
       )}
 
-      {/* Legend */}
-      <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm p-3 rounded-xl shadow-sm border border-[#d2d2d7] text-xs space-y-2 z-10">
-        <div className="font-medium text-[#86868b] mb-1">图例</div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#0071e3]"></div>
-          <span className="text-[#1d1d1f]">主题 (Topic)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-          <span className="text-[#1d1d1f]">实体 (Entity)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-purple-500"></div>
-          <span className="text-[#1d1d1f]">事件 (Event)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-          <span className="text-[#1d1d1f]">主张 (Claim)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-          <span className="text-[#1d1d1f]">文献 (Document)</span>
+      {/* Legend — MNEMOSYNE tag style */}
+      <div className="absolute bottom-4 left-4 bg-[#F7F7F7]/90 backdrop-blur-sm rounded-2xl border border-[#1d1d1f] p-3 z-10">
+        <div className="text-[9px] font-extrabold uppercase tracking-widest text-[#888] mb-2">Legend</div>
+        <div className="space-y-1.5">
+          {[
+            { type: 'topic', label: 'TOPIC' },
+            { type: 'entity', label: 'ENTITY' },
+            { type: 'event', label: 'EVENT' },
+            { type: 'claim', label: 'CLAIM' },
+          ].map(({ type, label }) => (
+            <div key={type} className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: NODE_ACCENT[type] }} />
+              <span className="text-[10px] font-semibold text-[#1d1d1f]">{label}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>

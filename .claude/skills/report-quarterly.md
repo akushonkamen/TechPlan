@@ -6,6 +6,8 @@ description: |
   包含战略执行评估、市场环境、技术发展、投资合作、风险机遇复盘。
 category: reporting
 timeout: 600
+allowedTools:
+  - Bash
 params:
   - name: topicId
     type: string
@@ -346,10 +348,10 @@ console.log(JSON.stringify({
 
 ```json
 {
-  "title": "{{topicName}} 技术情报季报 · YYYY-QN",
+  "title": "{{topicName}} 技术情报季报 · {{timeRangeStart}} ~ {{timeRangeEnd}}",
   "summary": "季度战略判断（300-500字）：本季度最重要的战略发现、结论和建议",
   "content": {
-    "version": "1.0",
+    "version": "2.0",
     "meta": {
       "reportId": "QUARTERLY-{topicId}-YYYYQN-{随机8位}",
       "topicId": "{{topicId}}",
@@ -370,158 +372,103 @@ console.log(JSON.stringify({
       },
       "confidence": "high|medium|low"
     },
-    "strategicExecution": {
-      "strategicGoals": [
+    "executiveSummary": {
+      "overview": "季度战略判断（300-500字）：本季度最重要的战略发现、结论和建议",
+      "keyPoints": [
         {
-          "goal": "战略目标描述",
-          "target": "目标值/里程碑",
-          "actual": "实际达成情况",
-          "progress": "完成百分比",
-          "status": "on_track|at_risk|off_track|completed",
-          "analysis": "进展分析"
+          "point": "季度关键发现",
+          "evidence": ["支撑证据1", "支撑证据2"],
+          "impact": "影响描述"
         }
       ],
-      "keyInitiatives": [
-        {
-          "initiative": "关键举措名称",
-          "status": "completed|in_progress|delayed|cancelled",
-          "progress": "进展描述",
-          "obstacles": ["障碍1", "障碍2"],
-          "lessons": "经验教训"
-        }
-      ],
-      "executionBarriers": {
-        "internal": ["内部障碍1", "内部障碍2"],
-        "external": ["外部障碍1", "外部障碍2"]
-      }
+      "confidence": 0.85
     },
-    "marketEnvironment": {
-      "marketOverview": {
-        "size": "市场规模描述",
-        "growth": "增长率",
-        "drivers": ["驱动因素1", "驱动因素2"],
-        "challenges": ["挑战1", "挑战2"]
-      },
-      "competitiveDynamics": {
-        "landscapeShift": "竞争格局变化描述",
-        "newEntrants": ["新进入者1", "新进入者2"],
-        "consolidation": ["整合事件1", "整合事件2"],
-        "marketShareChanges": [
+    "sections": [
+      {
+        "id": "strategic_execution",
+        "title": "战略执行评估",
+        "thesis": "战略执行状态一句话总结",
+        "content": "Markdown 格式的战略执行评估：战略目标进展（每个目标包括目标值、实际达成、完成百分比、状态）、关键举措状态（已完成/进行中/延迟）、执行障碍分析（内部/外部）",
+        "highlights": ["目标进展1", "关键举措1", "执行障碍1"],
+        "signals": [
           {
-            "entity": "组织名称",
-            "change": "份额变化",
-            "trend": "gaining|stable|losing"
+            "type": "milestone|threat|opportunity",
+            "title": "战略执行信号",
+            "description": "信号描述",
+            "confidence": 0.85
           }
-        ]
+        ],
+        "entityRefs": ["相关组织1"]
       },
-      "regulatoryChanges": [
-        {
-          "change": "监管变化描述",
-          "impact": "high|medium|low",
-          "implications": "影响分析"
-        }
-      ]
-    },
-    "technologyAssessment": {
-      "technologyMaturity": [
-        {
-          "technology": "技术名称",
-          "maturityLevel": "emerging|growth|mature|declining",
-          "quarterChange": "↑|↓|→",
-          "keyDevelopments": ["关键进展1", "关键进展2"],
-          "marketAdoption": "市场采用情况"
-        }
-      ],
-      "innovationLandscape": {
-        "breakthroughs": ["突破1", "突破2"],
-        "emergingTech": ["新兴技术1", "新兴技术2"],
-        "decliningTech": ["衰退技术1", "衰退技术2"]
-      },
-      "technologyRisks": [
-        {
-          "risk": "技术风险描述",
-          "probability": "高|中|低",
-          "impact": "high|medium|low",
-          "mitigation": "缓解措施"
-        }
-      ]
-    },
-    "investmentReview": {
-      "investmentSummary": {
-        "totalDeals": 数字,
-        "hotSectors": ["热门领域1", "热门领域2"],
-        "coolingSectors": ["降温领域1"],
-        "trend": "heating_up|stable|cooling_down"
-      },
-      "notableDeals": [
-        {
-          "deal": "交易描述",
-          "amount": "金额（如有）",
-          "participants": ["参与方1", "参与方2"],
-          "strategicSignificance": "战略意义"
-        }
-      ],
-      "partnershipAnalysis": {
-        "newPartnerships": ["新合作1", "新合作2"],
-        "strategicAlliances": ["战略联盟1"],
-        "notableCollaborations": [
-          {
-            "partners": ["合作方A", "合作方B"],
-            "area": "合作领域",
-            "significance": "重要性"
-          }
-        ]
-      }
-    },
-    "riskReview": [
       {
-        "risk": "风险描述",
-        "category": "strategic|technology|market|regulatory|operational",
-        "materialized": true,
-        "impact": "实际影响描述",
-        "response": "应对措施",
-        "effectiveness": "effective|partially_effective|ineffective",
-        "lessons": "经验教训"
+        "id": "market_environment",
+        "title": "市场环境分析",
+        "thesis": "市场环境变化一句话总结",
+        "content": "Markdown 格式的市场环境分析：市场规模与增长、竞争态势演进（格局重构/稳态/动态）、客户需求变化、监管环境影响、技术发展驱动因素",
+        "highlights": ["市场变化1", "竞争格局变化1", "监管影响1"],
+        "signals": [],
+        "entityRefs": ["市场相关实体1"]
+      },
+      {
+        "id": "technology_assessment",
+        "title": "技术发展评估",
+        "thesis": "技术发展趋势一句话总结",
+        "content": "Markdown 格式的技术评估：技术成熟度矩阵（每个技术包括成熟度等级、季度变化、关键进展、市场采用情况）、创新全景（突破/新兴/衰退技术）、技术风险评估",
+        "highlights": ["突破性进展1", "新兴技术1", "衰退技术1"],
+        "signals": [],
+        "entityRefs": ["技术实体1", "技术实体2"]
+      },
+      {
+        "id": "investment_review",
+        "title": "投资与合作回顾",
+        "thesis": "投资合作动态一句话总结",
+        "content": "Markdown 格式的投资回顾：投资热度总结（交易数量、热门/降温领域）、重要交易分析（金额、参与方、战略意义）、合作模式演变、战略联盟动态",
+        "highlights": ["投资热点1", "重要交易1", "新合作模式1"],
+        "signals": [],
+        "entityRefs": ["投资方1", "被投方1"]
+      },
+      {
+        "id": "risk_opportunity_review",
+        "title": "风险与机遇复盘",
+        "thesis": "风险机遇复盘一句话总结",
+        "content": "Markdown 格式的风险机遇复盘：已实现风险（实际影响、应对措施、有效性）、已把握机遇（实际成果）、新识别风险（概率、影响）、新发现机遇（时间窗口、预期价值）",
+        "highlights": ["已实现风险1", "已把握机遇1", "新风险1", "新机遇1"],
+        "signals": [],
+        "entityRefs": ["风险相关实体1"]
+      },
+      {
+        "id": "strategic_adjustments",
+        "title": "战略调整建议",
+        "thesis": "战略调整方向一句话总结",
+        "content": "Markdown 格式的战略调整建议：每个调整包括调整领域、当前策略、建议调整、调整理由、优先级",
+        "highlights": ["调整建议1", "调整建议2", "调整建议3"],
+        "signals": [],
+        "entityRefs": []
+      },
+      {
+        "id": "next_quarter_outlook",
+        "title": "下季度展望",
+        "thesis": "下季度预期一句话总结",
+        "content": "Markdown 格式的下季度展望：核心主题、预期事件、战略优先事项（含具体行动）、需关注风险、信息需求",
+        "highlights": ["核心主题1", "预期事件1", "战略优先事项1"],
+        "signals": [],
+        "entityRefs": []
       }
     ],
-    "opportunityReview": [
-      {
-        "opportunity": "机遇描述",
-        "category": "market|technology|partnership",
-        "captured": true,
-        "outcome": "实际成果",
-        "missedReason": "未抓住原因（如适用）"
-      }
-    ],
-    "strategicAdjustments": [
-      {
-        "area": "调整领域",
-        "currentStrategy": "当前策略",
-        "proposedChange": "建议调整",
-        "rationale": "调整理由",
-        "priority": "high|medium|low"
-      }
-    ],
-    "nextQuarterOutlook": {
-      "keyThemes": ["核心主题1", "核心主题2"],
-      "expectedEvents": ["预期事件1", "预期事件2"],
-      "strategicPriorities": [
-        {
-          "priority": "优先事项",
-          "actions": ["行动1", "行动2"]
-        }
-      ],
-      "riskWatch": ["需关注风险1", "需关注风险2"],
-      "informationNeeds": ["信息需求1", "信息需求2"]
-    },
     "timeline": [
       {
         "date": "YYYY-MM-DD",
         "event": "事件描述",
         "significance": "重要性说明",
-        "category": "milestone|breakthrough|alert|other"
+        "category": "milestone|breakthrough|alert|other",
+        "entityRefs": ["相关实体"]
       }
-    ]
+    ],
+    "metrics": {
+      "documentsAnalyzed": 数字,
+      "entitiesCovered": 数字,
+      "quarterOverQuarterGrowth": "百分比"
+    }
   },
   "metadata": {
     "documentsAnalyzed": 数字,
@@ -543,20 +490,20 @@ console.log(JSON.stringify({
 输出 JSON 前确认：
 
 ### 5a. 数据完整性检查
-- [ ] `strategicExecution.strategicGoals` 至少有 1 条
-- [ ] `strategicExecution.keyInitiatives` 至少有 1 条
-- [ ] `riskReview` 至少有 1 条（可以是"未发现重大风险"）
-- [ ] `technologyAssessment.technologyMaturity` 至少有 1 条
+- [ ] `sections` 包含全部 7 个章节
+- [ ] 每个 section 至少有 1 个 highlight
+- [ ] `sections[0]` 至少有 1 个战略目标
+- [ ] `sections[4]` 至少有 1 条风险复盘
 - [ ] `timeline` 至少有 5 条事件
 
 ### 5b. 格式规范性检查
 - [ ] `summary` 字数 300-500 字
 - [ ] `quarter` 值合法：Q1|Q2|Q3|Q4
-- [ ] `status` 值合法：on_track|at_risk|off_track|completed
+- [ ] 日期使用 YYYY-MM-DD 格式
 
 ### 5c. 逻辑一致性检查
-- [ ] `progress` 与 `status` 逻辑一致
-- [ ] `materialized` 与 `response` 逻辑一致
+- [ ] 战略目标 progress 与 status 逻辑一致
+- [ ] 风险复盘 materialized 与 response 逻辑一致
 - [ ] 季度信息与时间范围匹配
 
 ---
@@ -573,7 +520,8 @@ console.log(JSON.stringify({
 
 ## 重要约束
 
-1. **只输出 JSON**，不要包裹在 markdown 代码块中
+1. **禁止网络搜索**：只使用 SQLite 中已有数据，不要进行网络搜索或信息采集。数据不足时在报告中标注数据缺口。
+2. **只输出 JSON**，不要包裹在 markdown 代码块中
 2. **不要执行数据库写入操作**
 3. **战略视角**：聚焦战略级发现，避免陷入细节
 4. **季度对比**：必须包含与上季度的对比分析

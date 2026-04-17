@@ -6,6 +6,8 @@ description: |
   24小时数据范围，聚焦 breakthrough/milestone/alert 类信号，输出精简 JSON。
 category: reporting
 timeout: 300
+allowedTools:
+  - Bash
 params:
   - name: topicId
     type: string
@@ -218,10 +220,10 @@ console.log(JSON.stringify({
 
 ```json
 {
-  "title": "{{topicName}} 技术情报日报 · YYYY-MM-DD",
+  "title": "{{topicName}} 技术情报日报 · {{timeRangeStart}} ~ {{timeRangeEnd}}",
   "summary": "核心摘要（100字内）：24h内最关键的1-2个变化",
   "content": {
-    "version": "1.0",
+    "version": "2.0",
     "meta": {
       "reportId": "DAILY-{topicId}-{YYYYMMDD}-{随机8位}",
       "topicId": "{{topicId}}",
@@ -239,38 +241,72 @@ console.log(JSON.stringify({
       },
       "confidence": "high|medium|low"
     },
-    "keyUpdates": [
+    "executiveSummary": {
+      "overview": "1-2 段核心判断，24h 内最关键的变化（100字内）",
+      "keyPoints": [
+        {
+          "point": "关键更新摘要",
+          "evidence": ["支撑证据"],
+          "impact": "影响描述"
+        }
+      ],
+      "confidence": 0.85
+    },
+    "sections": [
       {
-        "type": "breakthrough|milestone|alert|trend",
-        "title": "更新标题",
-        "summary": "一句话摘要（50字内）",
-        "significance": "高|中|低",
-        "source": "来源",
-        "timestamp": "YYYY-MM-DDTHH:mm:ssZ"
+        "id": "key_updates",
+        "title": "关键动态",
+        "thesis": "一句话总结今日核心变化",
+        "content": "Markdown 格式的关键更新详细分析（200-400 字），按 significance 从高到低排列",
+        "highlights": ["要点1（breakthrough/milestone/alert/trend 类型）", "要点2"],
+        "signals": [
+          {
+            "type": "breakthrough|milestone|alert|trend",
+            "title": "信号标题",
+            "description": "信号描述",
+            "confidence": 0.85
+          }
+        ],
+        "entityRefs": ["实体名1", "实体名2"]
+      },
+      {
+        "id": "data_highlights",
+        "title": "数据亮点",
+        "thesis": "今日数据变化概述",
+        "content": "Markdown 格式的新增文档、活跃实体、事件时间线分析",
+        "highlights": ["新增文档要点", "活跃实体要点", "事件密度要点"],
+        "signals": [],
+        "entityRefs": ["高频实体1", "高频实体2"]
+      },
+      {
+        "id": "alerts",
+        "title": "预警信号",
+        "thesis": "需要关注的预警信号",
+        "content": "Markdown 格式的风险/机会/异常预警分析，每条包含预警描述和建议行动",
+        "highlights": ["风险预警要点", "机会预警要点"],
+        "signals": [
+          {
+            "type": "threat|opportunity|anomaly",
+            "title": "预警标题",
+            "description": "预警描述和建议行动",
+            "confidence": 0.7
+          }
+        ],
+        "entityRefs": ["相关实体1"]
       }
     ],
-    "dataHighlights": {
-      "documentsAdded": [
-        "文档标题 · 来源"
-      ],
-      "topEntities": [
-        "实体名（提及次数）"
-      ],
-      "eventsTimeline": [
-        {
-          "time": "HH:mm",
-          "event": "事件简述"
-        }
-      ]
-    },
-    "alerts": [
+    "timeline": [
       {
-        "alertType": "risk|opportunity|anomaly",
-        "title": "预警标题",
-        "description": "预警描述",
-        "recommendedAction": "建议行动"
+        "date": "YYYY-MM-DD",
+        "event": "事件描述",
+        "significance": "事件意义",
+        "entityRefs": ["相关实体"]
       }
-    ]
+    ],
+    "metrics": {
+      "documentsAnalyzed": 数字,
+      "entitiesCovered": 数字
+    }
   },
   "metadata": {
     "documentsAnalyzed": 数字,
@@ -290,18 +326,17 @@ console.log(JSON.stringify({
 输出 JSON 前确认：
 
 ### 5a. 数据完整性检查
-- [ ] `keyUpdates` 至少有 1 条（数据不足时标注"今日暂无重大更新"）
-- [ ] `dataHighlights` 与查询结果一致
-- [ ] `period` 与实际查询范围一致
+- [ ] `sections` 包含全部 3 个章节（key_updates, data_highlights, alerts）
+- [ ] `sections[0]` 至少有 1 个 signal
+- [ ] `timeline` 至少有 1 条事件（如果数据充足）
 
 ### 5b. 格式规范性检查
 - [ ] `summary` 字数 < 100 字
-- [ ] `keyUpdates[].summary` 字数 < 50 字
 - [ ] 日期使用 YYYY-MM-DDTHH:mm:ssZ 格式
 
 ### 5c. 逻辑一致性检查
 - [ ] `significance` 与信号类型匹配
-- [ ] `alertType` 与 `recommendedAction` 逻辑一致
+- [ ] alerts 的 `recommendedAction` 逻辑一致
 
 ---
 
@@ -315,7 +350,8 @@ console.log(JSON.stringify({
 
 ## 重要约束
 
-1. **只输出 JSON**，不要包裹在 markdown 代码块中
+1. **禁止网络搜索**：只使用 SQLite 中已有数据，不要进行网络搜索或信息采集。数据不足时在 `metadata.dataGaps` 中标注。
+2. **只输出 JSON**，不要包裹在 markdown 代码块中
 2. **不要执行数据库写入操作**
 3. **时间精度**：日报关注小时级别变化，时间戳包含时分秒
 4. **简洁原则**：每条更新控制在 50 字内

@@ -12,29 +12,29 @@ interface StatCardProps {
 
 const colorStyles = {
   blue: {
-    bg: 'bg-[#0071e3]/10',
-    text: 'text-[#0071e3]',
-    gradient: 'from-[#0071e3]/20 to-[#0071e3]/5',
+    bg: 'bg-[#1d1d1f]/5 border border-[#1d1d1f]/20',
+    text: 'text-[#1d1d1f]',
+    gradient: 'from-[#1d1d1f]/20 to-[#1d1d1f]/5',
   },
   green: {
-    bg: 'bg-[#34c759]/10',
-    text: 'text-[#34c759]',
-    gradient: 'from-[#34c759]/20 to-[#34c759]/5',
+    bg: 'bg-[#5B7553]/10',
+    text: 'text-[#5B7553]',
+    gradient: 'from-[#5B7553]/20 to-[#5B7553]/5',
   },
   orange: {
-    bg: 'bg-[#ff9f0a]/10',
-    text: 'text-[#ff9f0a]',
-    gradient: 'from-[#ff9f0a]/20 to-[#ff9f0a]/5',
+    bg: 'bg-[#9C7B3C]/10',
+    text: 'text-[#9C7B3C]',
+    gradient: 'from-[#9C7B3C]/20 to-[#9C7B3C]/5',
   },
   red: {
-    bg: 'bg-[#ff3b30]/10',
-    text: 'text-[#ff3b30]',
-    gradient: 'from-[#ff3b30]/20 to-[#ff3b30]/5',
+    bg: 'bg-[#A0453A]/10',
+    text: 'text-[#A0453A]',
+    gradient: 'from-[#A0453A]/20 to-[#A0453A]/5',
   },
   purple: {
-    bg: 'bg-[#af52de]/10',
-    text: 'text-[#af52de]',
-    gradient: 'from-[#af52de]/20 to-[#af52de]/5',
+    bg: 'bg-[#7A5C6B]/10',
+    text: 'text-[#7A5C6B]',
+    gradient: 'from-[#7A5C6B]/20 to-[#7A5C6B]/5',
   },
 };
 
@@ -53,14 +53,14 @@ export default function StatCard({ label, value, trend, icon, color = 'blue' }: 
         </div>
         {trend && (
           <div className={`flex items-center gap-1 px-2 py-1 rounded-full ${
-            trend.positive ? 'bg-[#34c759]/10' : 'bg-[#ff3b30]/10'
+            trend.positive ? 'bg-[#5B7553]/10' : 'bg-[#A0453A]/10'
           }`}>
             {trend.positive ? (
-              <TrendingUp className="w-3 h-3 text-[#34c759]" />
+              <TrendingUp className="w-3 h-3 text-[#5B7553]" />
             ) : (
-              <TrendingDown className="w-3 h-3 text-[#ff3b30]" />
+              <TrendingDown className="w-3 h-3 text-[#A0453A]" />
             )}
-            <span className={`text-xs font-semibold ${trend.positive ? 'text-[#34c759]' : 'text-[#ff3b30]'}`}>
+            <span className={`text-xs font-semibold ${trend.positive ? 'text-[#5B7553]' : 'text-[#A0453A]'}`}>
               {trend.value}
             </span>
           </div>
@@ -68,7 +68,7 @@ export default function StatCard({ label, value, trend, icon, color = 'blue' }: 
       </div>
 
       <div>
-        <p className="text-[13px] font-medium text-[#86868b] mb-1">{label}</p>
+        <p className="text-[13px] font-medium text-[#888] mb-1">{label}</p>
         <p className="text-[32px] font-semibold tracking-tight text-[#1d1d1f] leading-none">
           {value}
         </p>

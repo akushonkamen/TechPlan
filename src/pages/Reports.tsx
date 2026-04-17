@@ -8,6 +8,7 @@ import SkillButton from '../components/SkillButton';
 import EmptyState from '../components/EmptyState';
 import { fetchTopics } from '../services/topicService';
 import { CARD, INPUT, SPINNER } from '../lib/design';
+import { useSkillExecutor } from '../hooks/useSkillExecutor';
 
 // ── Types ──
 
@@ -38,7 +39,7 @@ interface TimelineEntry {
 interface ReportContent {
   executiveSummary: {
     overview: string;
-    keyPoints: string[];
+    keyPoints: (string | { point?: string; text?: string; evidence?: string[]; impact?: string; [key: string]: unknown })[];
     confidence: 'high' | 'medium' | 'low';
     period: { start: string; end: string };
   };
@@ -68,10 +69,10 @@ interface Report {
 // ── Signal Badge ──
 
 const SIGNAL_STYLES: Record<string, { bg: string; text: string; label: string; icon: typeof TrendingUp }> = {
-  opportunity: { bg: 'bg-[#34c759]/10', text: 'text-[#34c759]', label: '机会', icon: TrendingUp },
-  threat:      { bg: 'bg-[#ff3b30]/10', text: 'text-[#ff3b30]', label: '威胁', icon: AlertTriangle },
-  trend:       { bg: 'bg-[#0071e3]/10', text: 'text-[#0071e3]', label: '趋势', icon: Zap },
-  milestone:   { bg: 'bg-[#af52de]/10', text: 'text-[#af52de]', label: '里程碑', icon: Flag },
+  opportunity: { bg: 'bg-[#5B7553]/10', text: 'text-[#5B7553]', label: '机会', icon: TrendingUp },
+  threat:      { bg: 'bg-[#A0453A]/10', text: 'text-[#A0453A]', label: '威胁', icon: AlertTriangle },
+  trend:       { bg: 'bg-[#2A5A6B]/10', text: 'text-[#2A5A6B]', label: '趋势', icon: Zap },
+  milestone:   { bg: 'bg-[#7A5C6B]/10', text: 'text-[#7A5C6B]', label: '里程碑', icon: Flag },
 };
 
 const SignalBadge: FC<{ signal: Signal }> = ({ signal }) => {
@@ -90,9 +91,9 @@ const SignalBadge: FC<{ signal: Signal }> = ({ signal }) => {
 // ── Confidence Badge ──
 
 const CONFIDENCE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  high:   { bg: 'bg-[#34c759]/10', text: 'text-[#34c759]', label: '高置信度' },
-  medium: { bg: 'bg-[#ff9f0a]/10', text: 'text-[#ff9f0a]', label: '中置信度' },
-  low:    { bg: 'bg-[#ff3b30]/10', text: 'text-[#ff3b30]', label: '低置信度' },
+  high:   { bg: 'bg-[#5B7553]/10', text: 'text-[#5B7553]', label: '高置信度' },
+  medium: { bg: 'bg-[#9C7B3C]/10', text: 'text-[#9C7B3C]', label: '中置信度' },
+  low:    { bg: 'bg-[#A0453A]/10', text: 'text-[#A0453A]', label: '低置信度' },
 };
 
 const ConfidenceBadge: FC<{ level: string }> = ({ level }) => {
@@ -170,9 +171,9 @@ function calculateFreshness(generatedAt: string | undefined, reportType: string)
 }
 
 const FRESHNESS_STYLES: Record<FreshnessLevel, { bg: string; text: string; icon: typeof CheckCircle }> = {
-  fresh: { bg: 'bg-[#34c759]/10', text: 'text-[#34c759]', icon: CheckCircle },
-  ok: { bg: 'bg-[#ff9f0a]/10', text: 'text-[#ff9f0a]', icon: Clock },
-  stale: { bg: 'bg-[#ff3b30]/10', text: 'text-[#ff3b30]', icon: AlertCircle },
+  fresh: { bg: 'bg-[#5B7553]/10', text: 'text-[#5B7553]', icon: CheckCircle },
+  ok: { bg: 'bg-[#9C7B3C]/10', text: 'text-[#9C7B3C]', icon: Clock },
+  stale: { bg: 'bg-[#A0453A]/10', text: 'text-[#A0453A]', icon: AlertCircle },
 };
 
 const FreshnessBadge: FC<{ freshness: FreshnessInfo }> = ({ freshness }) => {
@@ -193,20 +194,20 @@ const Timeline: FC<{ entries: TimelineEntry[] }> = ({ entries }) => {
   return (
     <div className="relative pl-6">
       {/* Vertical line */}
-      <div className="absolute left-2 top-2 bottom-2 w-px bg-[#d2d2d7]" />
+      <div className="absolute left-2 top-2 bottom-2 w-px bg-[#1d1d1f]/20" />
       <div className="space-y-4">
         {entries.map((entry, i) => (
           <div key={i} className="relative animate-fade-in">
             {/* Dot */}
-            <div className="absolute -left-6 top-1 w-3.5 h-3.5 rounded-full border-2 border-[#0071e3] bg-white" />
+            <div className="absolute -left-6 top-1 w-3.5 h-3.5 rounded-full border-2 border-[#2A5A6B] bg-[#F7F7F7]" />
             <div className="ml-2">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-medium text-[#0071e3]">{entry.date}</span>
+                <span className="text-xs font-medium text-[#2A5A6B]">{entry.date}</span>
                 {entry.entityRefs?.map((ref, j) => (
                   <Link
                     key={j}
                     to={`/graph?highlight=${encodeURIComponent(ref)}`}
-                    className="text-xs text-[#86868b] hover:text-[#0071e3] transition-colors"
+                    className="text-xs text-[#888] hover:text-[#2A5A6B] transition-colors"
                   >
                     @{ref}
                   </Link>
@@ -214,7 +215,7 @@ const Timeline: FC<{ entries: TimelineEntry[] }> = ({ entries }) => {
               </div>
               <p className="text-sm text-[#1d1d1f] font-medium">{entry.event}</p>
               {entry.significance && (
-                <p className="text-xs text-[#86868b] mt-1">So What? {entry.significance}</p>
+                <p className="text-xs text-[#888] mt-1">So What? {entry.significance}</p>
               )}
             </div>
           </div>
@@ -226,34 +227,54 @@ const Timeline: FC<{ entries: TimelineEntry[] }> = ({ entries }) => {
 
 // ── Section Block ──
 
+/** Convert nested JSON objects to readable Markdown */
+function jsonToMarkdown(obj: any, depth = 0): string {
+  if (typeof obj === 'string') return obj;
+  if (Array.isArray(obj)) return obj.map(item => typeof item === 'object' && item !== null ? `- ${jsonToMarkdown(item, depth + 1)}` : `- ${item}`).join('\n');
+  if (typeof obj === 'object' && obj !== null) {
+    return Object.entries(obj)
+      .map(([key, val]) => {
+        const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, (s: string) => s.toUpperCase());
+        if (typeof val === 'string') return `**${label}**: ${val}`;
+        if (Array.isArray(val)) {
+          const items = val.map((item: any) => typeof item === 'object' && item !== null ? `- ${jsonToMarkdown(item, depth + 1)}` : `- ${item}`).join('\n');
+          return `**${label}**:\n${items}`;
+        }
+        return `**${label}**:\n${jsonToMarkdown(val, depth + 1)}`;
+      })
+      .join('\n\n');
+  }
+  return String(obj);
+}
+
 const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ section, topicId }) => {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="border border-[#f5f5f7] rounded-2xl overflow-hidden transition-all">
+    <div className="border border-[#1d1d1f]/20 rounded-3xl overflow-hidden transition-all">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full px-5 py-4 flex items-start justify-between gap-4 text-left hover:bg-[#f5f5f7]/50 transition-colors"
+        className="w-full px-5 py-4 flex items-start justify-between gap-4 text-left hover:bg-[#1d1d1f]/5 transition-colors"
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
             <h4 className="text-sm font-semibold text-[#1d1d1f]">{section.title}</h4>
             {section.signals?.length > 0 && (
-              <span className="text-xs text-[#86868b]">{section.signals.length} 信号</span>
+              <span className="text-xs text-[#888]">{section.signals.length} 信号</span>
             )}
           </div>
-          <p className="text-sm text-[#0071e3] font-medium">{section.thesis}</p>
+          <p className="text-sm text-[#2A5A6B] font-medium">{section.thesis}</p>
         </div>
-        {open ? <ChevronUp className="w-4 h-4 text-[#aeaeb5] shrink-0 mt-1" /> : <ChevronDown className="w-4 h-4 text-[#aeaeb5] shrink-0 mt-1" />}
+        {open ? <ChevronUp className="w-4 h-4 text-[#aaa] shrink-0 mt-1" /> : <ChevronDown className="w-4 h-4 text-[#aaa] shrink-0 mt-1" />}
       </button>
 
       {open && (
-        <div className="px-5 pb-5 space-y-4 animate-fade-in border-t border-[#f5f5f7] pt-4">
+        <div className="px-5 pb-5 space-y-4 animate-fade-in border-t border-[#1d1d1f]/20 pt-4">
           {/* Markdown content */}
           {section.content && (
             <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f]">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {section.content}
+                {typeof section.content === 'string' ? section.content : jsonToMarkdown(section.content)}
               </ReactMarkdown>
             </div>
           )}
@@ -261,11 +282,11 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
           {/* Highlights */}
           {section.highlights?.length > 0 && (
             <div>
-              <h5 className="text-xs font-medium text-[#86868b] mb-2">关键要点</h5>
+              <h5 className="text-xs font-medium text-[#888] mb-2">关键要点</h5>
               <ul className="space-y-1.5">
                 {section.highlights.map((h, i) => (
                   <li key={i} className="text-sm text-[#1d1d1f] flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#0071e3] mt-1.5 shrink-0" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#2A5A6B] mt-1.5 shrink-0" />
                     {h}
                   </li>
                 ))}
@@ -276,7 +297,7 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
           {/* Signals */}
           {section.signals?.length > 0 && (
             <div>
-              <h5 className="text-xs font-medium text-[#86868b] mb-2">信号标记</h5>
+              <h5 className="text-xs font-medium text-[#888] mb-2">信号标记</h5>
               <div className="flex flex-wrap gap-2">
                 {section.signals.map((s, i) => (
                   <SignalBadge key={i} signal={s} />
@@ -291,13 +312,13 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
               {topicId && (
                 <Link
                   to={`/graph?topicId=${topicId}&highlight=${encodeURIComponent(section.entityRefs.join(','))}`}
-                  className="inline-flex items-center gap-1.5 text-xs text-[#0071e3] hover:text-[#0062cc] hover:underline transition-colors"
+                  className="inline-flex items-center gap-1.5 text-xs text-[#2A5A6B] hover:text-[#1E4A58] hover:underline transition-colors"
                 >
                   <Network className="w-3.5 h-3.5" />
                   查看相关图谱
                 </Link>
               )}
-              <span className="text-xs text-[#aeaeb5]">
+              <span className="text-xs text-[#aaa]">
                 关联实体: {section.entityRefs.join('、')}
               </span>
             </div>
@@ -319,21 +340,14 @@ export default function Reports() {
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [skillStatus, setSkillStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
+  const [errorMsg, setErrorMsg] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isCollecting, setIsCollecting] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [refreshInterval, setRefreshInterval] = useState<number>(60); // seconds
-  const mountedRef = useRef(true);
-  const pollTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const refreshTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
-      if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
-    };
-  }, []);
+  const { status: skillExecStatus, progress: skillProgress, connectOnly: connectToExecution, reset: resetExec } = useSkillExecutor();
 
   // Auto-refresh effect
   useEffect(() => {
@@ -343,9 +357,8 @@ export default function Reports() {
     }
 
     const scheduleRefresh = () => {
-      if (!mountedRef.current) return;
       refreshTimeoutRef.current = setTimeout(() => {
-        if (mountedRef.current && autoRefresh) {
+        if (autoRefresh) {
           loadData();
           scheduleRefresh();
         }
@@ -356,6 +369,14 @@ export default function Reports() {
   }, [autoRefresh, refreshInterval]);
 
   useEffect(() => { loadData(); }, []);
+
+  // Reload data when skill execution completes
+  useEffect(() => {
+    if (skillExecStatus === 'completed') {
+      loadData();
+      setTimeout(() => resetExec(), 3000);
+    }
+  }, [skillExecStatus]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -388,7 +409,7 @@ export default function Reports() {
   };
 
   const handleGenerateReport = async () => {
-    if (!selectedTopicId || skillStatus === 'running') return;
+    if (!selectedTopicId || skillExecStatus === 'running' || isCollecting) return;
     const topic = topics.find(t => t.id === selectedTopicId);
     if (!topic) return;
 
@@ -397,7 +418,6 @@ export default function Reports() {
     if (timeRangePreset === 'custom' && customStartDate && customEndDate) {
       period = { start: customStartDate, end: customEndDate };
     } else if (timeRangePreset !== 'auto') {
-      // Calculate preset ranges
       const now = new Date();
       const end = now.toISOString().split('T')[0];
       let start: string;
@@ -417,7 +437,9 @@ export default function Reports() {
       period = { start, end };
     }
 
-    setSkillStatus('running');
+    resetExec();
+    setErrorMsg('');
+    setIsCollecting(true);
     try {
       const res = await fetch('/api/reports/generate', {
         method: 'POST',
@@ -429,51 +451,35 @@ export default function Reports() {
         }),
       });
 
-      if (!res.ok) throw new Error((await res.json()).error || '启动失败');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: '启动失败' }));
+        throw new Error(errData.error || '启动失败');
+      }
 
       const { executionId } = await res.json();
+      setIsCollecting(false);
 
-      const poll = async () => {
-        let attempts = 0;
-        const MAX_ATTEMPTS = 120;
-        const doPoll = async () => {
-          if (!mountedRef.current) return;
-          attempts++;
-          if (attempts > MAX_ATTEMPTS) {
-            if (mountedRef.current) setSkillStatus('failed');
-            return;
-          }
-          try {
-            const statusRes = await fetch(`/api/skill/${executionId}/status`);
-            if (statusRes.ok) {
-              const status = await statusRes.json();
-              if (status.status === 'completed') {
-                if (mountedRef.current) {
-                  setSkillStatus('completed');
-                  await loadData();
-                  setTimeout(() => { if (mountedRef.current) setSkillStatus('idle'); }, 3000);
-                }
-                return;
-              } else if (status.status === 'failed') {
-                if (mountedRef.current) setSkillStatus('failed');
-                return;
-              }
-            }
-          } catch { /* ignore */ }
-          pollTimeoutRef.current = setTimeout(doPoll, 3000);
-        };
-        pollTimeoutRef.current = setTimeout(doPoll, 2000);
-      };
-      poll();
+      // Connect to the execution using the hook
+      connectToExecution(executionId, { timeoutMs: 1200000 }); // 20 minutes
     } catch (error: unknown) {
-      setSkillStatus('failed');
+      setIsCollecting(false);
+      const msg = error instanceof Error ? error.message : '生成失败';
+      setErrorMsg(msg);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('确定删除此报告？')) return;
     try {
-      await fetch(`/api/reports/${id}`, { method: 'DELETE' });
+      const response = await fetch(`/api/reports/${id}`, { method: 'DELETE' });
+      if (!response.ok) {
+        if (response.status === 404) {
+          alert('报告不存在或已被删除');
+        } else {
+          alert('删除报告失败');
+        }
+        return;
+      }
       await loadData();
     } catch {
       alert('删除报告失败');
@@ -503,7 +509,10 @@ export default function Reports() {
       <PageHeader
         title="分析报告"
         description="选择时间范围和主题，系统将自动采集数据并生成报告（已自动去重）"
-      >
+      />
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3">
         <select
           value={selectedTopicId}
           onChange={e => setSelectedTopicId(e.target.value)}
@@ -554,17 +563,19 @@ export default function Reports() {
             />
           </>
         )}
-        <SkillButton onClick={handleGenerateReport} status={skillStatus} disabled={!selectedTopicId}>
-          {skillStatus === 'running' ? '采集中...' : `生成${getTypeLabel(reportType)}`}
+        <SkillButton onClick={handleGenerateReport} status={isCollecting ? 'running' : skillExecStatus} disabled={!selectedTopicId}>
+          {isCollecting ? '采集中...' : skillExecStatus === 'running' ? '生成中...' : `生成${getTypeLabel(reportType)}`}
         </SkillButton>
-        <div className="w-px h-8 bg-[#d2d2d7] mx-2" />
-        {/* Auto-refresh controls */}
+        {errorMsg && !isCollecting && (
+          <span className="text-xs text-[#A0453A] max-w-xs">{errorMsg}</span>
+        )}
+        <div className="w-px h-8 bg-[#1d1d1f]/30 mx-1" />
         <button
           onClick={() => setAutoRefresh(!autoRefresh)}
           className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
             autoRefresh
-              ? 'bg-[#0071e3]/10 text-[#0071e3]'
-              : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e5e5e7]'
+              ? 'bg-[#1d1d1f]/5 border border-[#1d1d1f]/20 text-[#1d1d1f]'
+              : 'bg-[#F7F7F7] text-[#1d1d1f] hover:bg-[#1d1d1f]/5'
           }`}
           title={autoRefresh ? '关闭自动刷新' : '开启自动刷新'}
         >
@@ -584,7 +595,26 @@ export default function Reports() {
             <option value="300">5分钟</option>
           </select>
         )}
-      </PageHeader>
+      </div>
+
+      {/* Progress panel during collection + report generation */}
+      {(isCollecting || skillExecStatus === 'running') && (
+        <div className={CARD}>
+          <div className="flex items-center gap-3 mb-3">
+            <div className={SPINNER} />
+            <span className="text-sm font-medium text-[#1d1d1f]">
+              {isCollecting ? '正在采集数据...' : '正在生成报告...'}
+            </span>
+          </div>
+          {!isCollecting && skillProgress.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {skillProgress.slice(-10).map((msg, i) => (
+                <p key={i} className="text-xs text-[#888] animate-fade-in">{msg}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
@@ -607,26 +637,26 @@ export default function Reports() {
               <div key={report.id} className={`${CARD} overflow-hidden transition-all duration-200`}>
                 {/* Header */}
                 <div
-                  className="px-6 py-5 flex items-center justify-between cursor-pointer hover:bg-[#f5f5f7]/50 transition-colors"
+                  className="px-6 py-5 flex items-center justify-between cursor-pointer hover:bg-[#1d1d1f]/5 transition-colors"
                   onClick={() => setExpandedId(isExpanded ? null : report.id)}
                 >
                   <div className="flex items-center gap-4 min-w-0">
-                    <div className="w-10 h-10 bg-[#0071e3]/10 rounded-xl flex items-center justify-center shrink-0">
-                      <FileText className="w-5 h-5 text-[#0071e3]" />
+                    <div className="w-10 h-10 bg-[#2A5A6B]/10 rounded-xl flex items-center justify-center shrink-0">
+                      <FileText className="w-5 h-5 text-[#2A5A6B]" />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <h4 className="text-sm font-medium text-[#1d1d1f] truncate">{report.title}</h4>
                         <FreshnessBadge freshness={freshness} />
                       </div>
-                      <div className="mt-1 flex items-center gap-3 text-xs text-[#86868b]">
-                        <span className="px-2 py-0.5 bg-[#f5f5f7] rounded-full">{getTypeLabel(report.type)}</span>
+                      <div className="mt-1 flex items-center gap-3 text-xs text-[#888]">
+                        <span className="px-2 py-0.5 bg-[#1d1d1f]/5 border border-[#1d1d1f]/20 rounded-full">{getTypeLabel(report.type)}</span>
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
                           {report.generated_at ? new Date(report.generated_at).toLocaleDateString('zh-CN') : '-'}
                         </span>
-                        <span className="text-[#aeaeb5]">·</span>
-                        <span className="text-[#86868b]">{freshness.timeHorizon}</span>
+                        <span className="text-[#aaa]">·</span>
+                        <span className="text-[#888]">{freshness.timeHorizon}</span>
                         {report.topic_name && <span>{report.topic_name}</span>}
                         {content?.executiveSummary?.confidence && (
                           <ConfidenceBadge level={content.executiveSummary.confidence} />
@@ -637,36 +667,51 @@ export default function Reports() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={e => { e.stopPropagation(); handleDelete(report.id); }}
-                      className="p-2 text-[#aeaeb5] hover:text-[#ff3b30] rounded-full hover:bg-[#ff3b30]/5 transition-all"
+                      className="p-2 text-[#aaa] hover:text-[#A0453A] rounded-full hover:bg-[#A0453A]/5 transition-all"
                       aria-label="删除报告"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
-                    {isExpanded ? <ChevronUp className="w-4 h-4 text-[#aeaeb5]" /> : <ChevronDown className="w-4 h-4 text-[#aeaeb5]" />}
+                    {isExpanded ? <ChevronUp className="w-4 h-4 text-[#aaa]" /> : <ChevronDown className="w-4 h-4 text-[#aaa]" />}
                   </div>
                 </div>
 
                 {/* Expanded Content */}
                 {isExpanded && (
-                  <div className="px-6 pb-6 pt-2 border-t border-[#f5f5f7] animate-fade-in space-y-6">
+                  <div className="px-6 pb-6 pt-2 border-t border-[#1d1d1f]/20 animate-fade-in space-y-6">
 
                     {/* Executive Summary */}
                     {content?.executiveSummary ? (
                       <div>
-                        <h5 className="text-xs font-medium text-[#86868b] mb-3">执行摘要</h5>
-                        <div className="bg-[#0071e3]/5 rounded-2xl p-5 space-y-3">
-                          <p className="text-sm text-[#1d1d1f] leading-relaxed">{content.executiveSummary.overview}</p>
+                        <h5 className="text-xs font-medium text-[#888] mb-3">执行摘要</h5>
+                        <div className="bg-[#2A5A6B]/5 rounded-2xl p-5 space-y-3">
+                          <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f] leading-relaxed">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {content.executiveSummary.overview}
+                            </ReactMarkdown>
+                          </div>
                           {content.executiveSummary.keyPoints?.length > 0 && (
                             <ul className="space-y-1.5">
                               {content.executiveSummary.keyPoints.map((point, i) => (
                                 <li key={i} className="text-sm text-[#1d1d1f] flex items-start gap-2">
-                                  <span className="w-5 h-5 rounded-full bg-[#0071e3]/10 text-[#0071e3] flex items-center justify-center text-xs font-semibold shrink-0 mt-0.5">{i + 1}</span>
-                                  {point}
+                                  <span className="w-5 h-5 rounded-full bg-[#2A5A6B]/10 text-[#2A5A6B] flex items-center justify-center text-xs font-semibold shrink-0 mt-0.5">{i + 1}</span>
+                                  <div className="min-w-0">
+                                    <span>
+                                      {typeof point === 'string' ? point
+                                        : point?.point ?? point?.text ?? point?.title ?? point?.summary ?? ''}
+                                    </span>
+                                    {typeof point === 'object' && point?.impact && (
+                                      <span className="block text-xs text-[#888] mt-0.5">影响: {point.impact}</span>
+                                    )}
+                                    {typeof point === 'object' && point?.evidence?.length > 0 && (
+                                      <span className="block text-xs text-[#888] mt-0.5">证据: {point.evidence.join('、')}</span>
+                                    )}
+                                  </div>
                                 </li>
                               ))}
                             </ul>
                           )}
-                          <div className="flex items-center gap-4 pt-1 text-xs text-[#86868b]">
+                          <div className="flex items-center gap-4 pt-1 text-xs text-[#888]">
                             {content.executiveSummary.period?.start && (
                               <span>
                                 覆盖周期: {content.executiveSummary.period.start} ~ {content.executiveSummary.period.end}
@@ -679,12 +724,26 @@ export default function Reports() {
                     ) : (
                       report.summary && (
                         <div>
-                          <h5 className="text-xs font-medium text-[#86868b] mb-1.5">概要</h5>
-                          <p className="text-sm text-[#1d1d1f] leading-relaxed whitespace-pre-line">{report.summary}</p>
+                          <h5 className="text-xs font-medium text-[#888] mb-1.5">概要</h5>
+                          <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f] leading-relaxed">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {report.summary}
+                            </ReactMarkdown>
+                          </div>
                           {/* For old markdown reports, attempt to render raw content */}
                           {typeof report.content === 'string' && report.content.length > 100 && (
-                            <div className="mt-4 text-sm text-[#1d1d1f] leading-relaxed whitespace-pre-line border-t border-[#f5f5f7] pt-4">
-                              {report.content}
+                            <div className="mt-4 border-t border-[#1d1d1f]/20 pt-4">
+                              {report.content.trim().startsWith('{') ? (
+                                <pre className="text-xs text-[#888] bg-[#E8E8E8] rounded-xl p-4 overflow-x-auto">
+                                  {report.content}
+                                </pre>
+                              ) : (
+                                <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f]">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {report.content}
+                                  </ReactMarkdown>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -693,11 +752,11 @@ export default function Reports() {
 
                     {/* Data Timestamp & Staleness Warning */}
                     {report.generated_at && (
-                      <div className={`rounded-xl p-4 ${freshness.level === 'stale' ? 'bg-[#ff3b30]/5 border border-[#ff3b30]/20' : 'bg-[#f5f5f7]'}`}>
+                      <div className={`rounded-xl p-4 ${freshness.level === 'stale' ? 'bg-[#A0453A]/5 border border-[#A0453A]/20' : 'bg-[#F7F7F7]'}`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <Clock className="w-4 h-4 text-[#86868b]" />
-                            <div className="text-xs text-[#86868b]">
+                            <Clock className="w-4 h-4 text-[#888]" />
+                            <div className="text-xs text-[#888]">
                               <span>数据时间: </span>
                               <span className="font-medium text-[#1d1d1f]">
                                 {new Date(report.generated_at).toLocaleString('zh-CN')}
@@ -709,7 +768,7 @@ export default function Reports() {
                           <FreshnessBadge freshness={freshness} />
                         </div>
                         {freshness.level === 'stale' && (
-                          <div className="mt-3 flex items-start gap-2 text-xs text-[#ff3b30]">
+                          <div className="mt-3 flex items-start gap-2 text-xs text-[#A0453A]">
                             <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                             <span>
                               数据已过期 (
@@ -721,7 +780,7 @@ export default function Reports() {
                           </div>
                         )}
                         {freshness.level === 'ok' && report.type === 'daily' && freshness.hoursAgo > 12 && (
-                          <div className="mt-2 flex items-start gap-2 text-xs text-[#ff9f0a]">
+                          <div className="mt-2 flex items-start gap-2 text-xs text-[#9C7B3C]">
                             <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                             <span>日报数据较旧，建议关注最新动态。</span>
                           </div>
@@ -732,7 +791,7 @@ export default function Reports() {
                     {/* Sections */}
                     {content?.sections?.length > 0 && (
                       <div>
-                        <h5 className="text-xs font-medium text-[#86868b] mb-3">分析章节</h5>
+                        <h5 className="text-xs font-medium text-[#888] mb-3">分析章节</h5>
                         <div className="space-y-3">
                           {content.sections.map(section => (
                             <SectionBlock key={section.id} section={section} topicId={report.topic_id} />
@@ -744,7 +803,7 @@ export default function Reports() {
                     {/* Timeline */}
                     {content?.timeline?.length > 0 && (
                       <div>
-                        <h5 className="text-xs font-medium text-[#86868b] mb-3">事件时间线</h5>
+                        <h5 className="text-xs font-medium text-[#888] mb-3">事件时间线</h5>
                         <Timeline entries={content.timeline} />
                       </div>
                     )}
@@ -753,7 +812,7 @@ export default function Reports() {
                     <div className="flex items-center gap-4 pt-2">
                       {content?.metrics && (
                         <div className="flex items-center gap-3">
-                          <div className="bg-[#f5f5f7] rounded-xl px-4 py-2.5 text-xs text-[#86868b]">
+                          <div className="bg-[#F7F7F7] rounded-xl px-4 py-2.5 text-xs text-[#888]">
                             文档 {content.metrics.documentsAnalyzed ?? '-'} · 实体 {content.metrics.entitiesCovered ?? '-'} · {content.metrics.sourcesCredibility ?? ''}
                           </div>
                         </div>
@@ -761,7 +820,7 @@ export default function Reports() {
                       {report.topic_id && (
                         <Link
                           to={`/graph?topicId=${report.topic_id}`}
-                          className="flex items-center gap-1.5 text-xs text-[#0071e3] hover:text-[#0062cc] hover:underline transition-colors"
+                          className="flex items-center gap-1.5 text-xs text-[#2A5A6B] hover:text-[#1E4A58] hover:underline transition-colors"
                         >
                           <Network className="w-3.5 h-3.5" />
                           查看完整图谱

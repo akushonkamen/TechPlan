@@ -6,6 +6,8 @@ description: |
   适用于风险、机会、异常、突破等紧急情报响应。
 category: reporting
 timeout: 120
+allowedTools:
+  - Bash
 params:
   - name: topicId
     type: string
@@ -68,6 +70,9 @@ const db = new Database('database.sqlite');
 const topicId = '{{topicId}}';
 const alertType = '{{alertType}}';
 const alertData = '{{alertData}}';
+const startDate = '{{timeRangeStart}}';
+const endDate = '{{timeRangeEnd}}';
+const dateFilter = startDate && endDate ? startDate : new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
 
 // 解析 alertData（如果有）
 let alertInfo = {};
@@ -79,67 +84,63 @@ try {
   // 忽略解析错误
 }
 
-// 1. 获取最近 48 小时的相关文档
+// 1. 获取相关文档
 const recentDocs = db.prepare(\`
   SELECT id, title, source, published_date, substr(content, 1, 500) as excerpt
-  FROM documents WHERE topic_id = ? AND published_date >= datetime('now', '-48 hours')
+  FROM documents WHERE topic_id = ? AND published_date >= ?
   ORDER BY published_date DESC LIMIT 20
-\`).all(topicId);
+\`).all(topicId, dateFilter);
 
-// 2. 获取最近 48 小时的相关事件
+// 2. 获取相关事件
 const recentEvents = db.prepare(\`
   SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants
   FROM events ev JOIN documents d ON ev.document_id = d.id
-  WHERE d.topic_id = ? AND ev.event_time >= datetime('now', '-48 hours')
+  WHERE d.topic_id = ? AND d.published_date >= ?
   ORDER BY ev.event_time DESC LIMIT 15
-\`).all(topicId);
+\`).all(topicId, dateFilter);
 
-// 3. 获取高频实体（最近 48 小时）
+// 3. 获取高频实体
 const recentEntities = db.prepare(\`
   SELECT e.text, e.type, COUNT(*) as mentions
   FROM entities e JOIN documents d ON e.document_id = d.id
-  WHERE d.topic_id = ? AND d.published_date >= datetime('now', '-48 hours')
+  WHERE d.topic_id = ? AND d.published_date >= ?
   GROUP BY e.text ORDER BY mentions DESC LIMIT 15
-\`).all(topicId);
+\`).all(topicId, dateFilter);
 
 // 4. 根据预警类型查询特定数据
 let typeSpecificData = [];
 if (alertType === 'risk') {
-  // 查询负面事件
   typeSpecificData = db.prepare(\`
     SELECT ev.type, ev.title, ev.description, ev.event_time
     FROM events ev JOIN documents d ON ev.document_id = d.id
-    WHERE d.topic_id = ? AND ev.event_time >= datetime('now', '-48 hours')
+    WHERE d.topic_id = ? AND d.published_date >= ?
     AND (ev.type LIKE '%risk%' OR ev.type LIKE '%threat%' OR ev.type LIKE '%concern%')
     ORDER BY ev.event_time DESC LIMIT 10
-  \`).all(topicId);
+  \`).all(topicId, dateFilter);
 } else if (alertType === 'opportunity') {
-  // 查询正面事件
   typeSpecificData = db.prepare(\`
     SELECT ev.type, ev.title, ev.description, ev.event_time
     FROM events ev JOIN documents d ON ev.document_id = d.id
-    WHERE d.topic_id = ? AND ev.event_time >= datetime('now', '-48 hours')
+    WHERE d.topic_id = ? AND d.published_date >= ?
     AND (ev.type LIKE '%opportunity%' OR ev.type LIKE '%growth%' OR ev.type LIKE '%launch%')
     ORDER BY ev.event_time DESC LIMIT 10
-  \`).all(topicId);
+  \`).all(topicId, dateFilter);
 } else if (alertType === 'breakthrough') {
-  // 查询突破性事件
   typeSpecificData = db.prepare(\`
     SELECT ev.type, ev.title, ev.description, ev.event_time
     FROM events ev JOIN documents d ON ev.document_id = d.id
-    WHERE d.topic_id = ? AND ev.event_time >= datetime('now', '-48 hours')
+    WHERE d.topic_id = ? AND d.published_date >= ?
     AND (ev.type LIKE '%breakthrough%' OR ev.type LIKE '%milestone%' OR ev.type LIKE '%innovation%')
     ORDER BY ev.event_time DESC LIMIT 10
-  \`).all(topicId);
+  \`).all(topicId, dateFilter);
 } else if (alertType === 'anomaly') {
-  // 查询异常事件
   typeSpecificData = db.prepare(\`
     SELECT ev.type, ev.title, ev.description, ev.event_time
     FROM events ev JOIN documents d ON ev.document_id = d.id
-    WHERE d.topic_id = ? AND ev.event_time >= datetime('now', '-48 hours')
+    WHERE d.topic_id = ? AND d.published_date >= ?
     AND (ev.type LIKE '%anomaly%' OR ev.type LIKE '%unexpected%' OR ev.type LIKE '%unusual%')
     ORDER BY ev.event_time DESC LIMIT 10
-  \`).all(topicId);
+  \`).all(topicId, dateFilter);
 }
 
 // 5. 统计
@@ -159,13 +160,14 @@ const db = new sqlite3.Database('database.sqlite');
 
 const topicId = '{{topicId}}';
 const results = {};
+const startDate = '{{timeRangeStart}}';
+const endDate = '{{timeRangeEnd}}';
+const dateFilter = startDate && endDate ? startDate : new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
 
 db.serialize(() => {
-  const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-
-  db.all('SELECT id, title, source, published_date FROM documents WHERE topic_id = ? AND published_date >= ? ORDER BY published_date DESC LIMIT 20', [topicId, fortyEightHoursAgo], (err, rows) => {
+  db.all('SELECT id, title, source, published_date FROM documents WHERE topic_id = ? AND published_date >= ? ORDER BY published_date DESC LIMIT 20', [topicId, dateFilter], (err, rows) => {
     results.recentDocs = rows || [];
-    db.all('SELECT type, title, description, event_time FROM events WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ? AND published_date >= ?) ORDER BY event_time DESC LIMIT 15', [topicId, fortyEightHoursAgo], (err, rows) => {
+    db.all('SELECT type, title, description, event_time FROM events WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ? AND published_date >= ?) ORDER BY event_time DESC LIMIT 15', [topicId, dateFilter], (err, rows) => {
       results.recentEvents = rows || [];
       db.close();
       console.log(JSON.stringify(results, null, 2));
@@ -221,10 +223,10 @@ db.serialize(() => {
 
 ```json
 {
-  "title": "{{topicName}} 预警 · YYYY-MM-DD",
+  "title": "{{topicName}} 预警报告 · {{timeRangeStart}} ~ {{timeRangeEnd}}",
   "summary": "一句话预警摘要（50字内）",
   "content": {
-    "version": "1.0",
+    "version": "2.0",
     "meta": {
       "reportId": "自动生成 UUID",
       "topicId": "{{topicId}}",
@@ -234,48 +236,74 @@ db.serialize(() => {
       "generatedAt": "YYYY-MM-DDTHH:mm:ssZ",
       "confidence": 0.85
     },
-    "alertSummary": {
-      "alertType": "risk|opportunity|anomaly|breakthrough",
-      "severity": "critical|high|medium|low",
-      "confidence": 0.85,
-      "title": "预警标题（20字内）",
-      "description": "预警描述（100字内）",
-      "triggerCondition": "触发条件描述"
+    "executiveSummary": {
+      "overview": "预警概述（100字内）：预警类型、严重程度和核心影响",
+      "keyPoints": [
+        {
+          "point": "预警核心要点",
+          "evidence": ["触发证据"],
+          "impact": "影响评估"
+        }
+      ],
+      "confidence": 0.85
     },
-    "eventAnalysis": {
-      "what": "发生了什么（清晰描述事件）",
-      "who": "涉及哪些实体（列出关键实体）",
-      "timeline": "事件时间线（按时间顺序描述）",
-      "context": "背景上下文（相关背景信息）"
-    },
-    "impactAssessment": {
-      "scope": "影响范围描述（技术/市场/资本/政策等）",
-      "magnitude": "影响程度描述（重大/较大/一般/较小）",
-      "urgency": "时间紧迫性描述（紧急/较快/正常/待定）",
-      "affectedAreas": [
-        "受影响领域1",
-        "受影响领域2",
-        "受影响领域3"
-      ]
-    },
-    "recommendedActions": [
+    "sections": [
       {
-        "action": "建议行动描述",
-        "priority": "critical|high|medium|low",
-        "timeline": "建议执行时间（如立即/24小时内/本周内）",
-        "rationale": "行动理由"
+        "id": "alert_summary",
+        "title": "预警概述",
+        "thesis": "预警类型和严重程度一句话总结",
+        "content": "Markdown 格式的预警详情：包括预警类型（risk/opportunity/anomaly/breakthrough）、严重程度（critical/high/medium/low）、触发条件描述",
+        "highlights": ["预警类型", "严重程度", "触发条件"],
+        "signals": [
+          {
+            "type": "threat|opportunity|anomaly|breakthrough",
+            "title": "预警信号标题",
+            "description": "信号描述和触发条件",
+            "confidence": 0.85
+          }
+        ],
+        "entityRefs": ["相关实体1", "相关实体2"]
+      },
+      {
+        "id": "event_analysis",
+        "title": "事件分析",
+        "thesis": "事件分析核心结论",
+        "content": "Markdown 格式分析：发生了什么（what）、涉及哪些实体（who）、事件时间线（timeline）、背景上下文（context）",
+        "highlights": ["事件核心事实", "关键实体", "时间线"],
+        "signals": [],
+        "entityRefs": ["涉及实体1", "涉及实体2"]
+      },
+      {
+        "id": "impact_assessment",
+        "title": "影响评估",
+        "thesis": "影响评估一句话结论",
+        "content": "Markdown 格式的影响分析：影响范围（技术/市场/资本/政策）、影响程度（重大/较大/一般/较小）、时间紧迫性（紧急/较快/正常/待定）、受影响领域",
+        "highlights": ["影响范围", "影响程度", "时间紧迫性"],
+        "signals": [],
+        "entityRefs": ["受影响实体1"]
+      },
+      {
+        "id": "response_actions",
+        "title": "应对建议",
+        "thesis": "建议响应策略一句话总结",
+        "content": "Markdown 格式的行动建议：每条包含行动描述、优先级（critical/high/medium/low）、建议执行时间、行动理由。以及需要持续关注的监控点",
+        "highlights": ["立即行动", "短期跟进", "持续监控"],
+        "signals": [],
+        "entityRefs": []
       }
     ],
-    "monitoringPoints": [
-      "需要持续关注的指标或信号1",
-      "需要持续关注的指标或信号2",
-      "需要持续关注的指标或信号3"
+    "timeline": [
+      {
+        "date": "YYYY-MM-DD",
+        "event": "事件描述",
+        "significance": "事件意义",
+        "entityRefs": ["相关实体"]
+      }
     ],
-    "entityRefs": [
-      "相关实体1",
-      "相关实体2",
-      "相关实体3"
-    ]
+    "metrics": {
+      "documentsAnalyzed": 数字,
+      "entitiesCovered": 数字
+    }
   },
   "metadata": {
     "documentsAnalyzed": 数字,
@@ -289,7 +317,8 @@ db.serialize(() => {
 
 ## 重要约束
 
-1. **只输出 JSON**，不要包裹在 markdown 代码块中
+1. **禁止网络搜索**：只使用 SQLite 中已有数据，不要进行网络搜索或信息采集。数据不足时标注数据缺口。
+2. **只输出 JSON**，不要包裹在 markdown 代码块中
 2. **不要执行数据库写入操作**，由 server.ts 后处理负责写入数据库
 3. **时效优先**：在 120 秒内完成分析和报告生成
 4. 日期使用 YYYY-MM-DD 格式
@@ -438,9 +467,8 @@ db.serialize(() => {
 
 输出 JSON 前快速确认：
 - [ ] `summary` 在 50 字内
-- [ ] `alertSummary.title` 在 20 字内
-- [ ] `alertSummary.description` 在 100 字内
-- [ ] `recommendedActions` 至少有 1 条
-- [ ] `monitoringPoints` 至少有 2 个
+- [ ] `executiveSummary.overview` 在 100 字内
+- [ ] `sections` 包含全部 4 个章节（alert_summary, event_analysis, impact_assessment, response_actions）
+- [ ] `response_actions` section 的 content 中至少包含 1 条行动建议
 - [ ] `severity` 与实际情况匹配
-- [ ] `priority` 与 `severity` 对应
+- [ ] `monitoringPoints` 已整合到 response_actions section 中

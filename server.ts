@@ -10,8 +10,10 @@ import { v4 as uuidv4 } from "uuid";
 import * as crypto from "crypto";
 import { SkillRegistry } from "./src/skillRegistry.js";
 import { SkillExecutor } from "./src/skillExecutor.js";
+
 import type { SkillExecution } from "./src/skillExecutor.js";
 import { SkillWebSocket } from "./src/websocket.js";
+import { validateReportOutput } from "./src/schemas/report.js";
 import { SchedulerService } from "./src/scheduler.js";
 
 // 配置文件上传（使用内存存储）
@@ -637,24 +639,31 @@ async function startServer() {
   app.post("/api/topics", async (req, res) => {
     try {
       const topic = req.body;
+      const id = topic.id || `topic-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const now = new Date().toISOString();
+      const topicData = {
+        ...topic,
+        id,
+        createdAt: topic.createdAt || now,
+      };
       await db.run(
         `INSERT INTO topics (id, name, description, aliases, owner, priority, scope, createdAt, keywords, organizations, schedule)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          topic.id,
-          topic.name,
-          topic.description,
-          JSON.stringify(topic.aliases || []),
-          topic.owner,
-          topic.priority,
-          topic.scope,
-          topic.createdAt,
-          JSON.stringify(topic.keywords || []),
-          JSON.stringify(topic.organizations || []),
-          topic.schedule
+          topicData.id,
+          topicData.name,
+          topicData.description || '',
+          JSON.stringify(topicData.aliases || []),
+          topicData.owner || '',
+          topicData.priority || 'medium',
+          topicData.scope || '',
+          topicData.createdAt,
+          JSON.stringify(topicData.keywords || []),
+          JSON.stringify(topicData.organizations || []),
+          topicData.schedule || 'weekly'
         ]
       );
-      res.status(201).json(topic);
+      res.status(201).json(topicData);
     } catch (error) {
       console.error("Failed to create topic:", error);
       res.status(500).json({ error: "Failed to create topic" });
@@ -1034,9 +1043,10 @@ async function startServer() {
       };
 
       const startDate = normalizeDate(period_start as string);
-      const endDate = period_end.includes('T') || period_end.includes(' ')
-        ? period_end as string
-        : `${period_end}T23:59:59.999Z`;
+      const endDateStr = period_end as string;
+      const endDate = (endDateStr.includes('T') || endDateStr.includes(' '))
+        ? endDateStr
+        : `${endDateStr}T23:59:59.999Z`;
 
       const usePublished = use_published_date === 'true';
       const dateColumn = usePublished ? 'published_date' : 'collected_date';
@@ -1081,89 +1091,6 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to fetch documents by period:", error);
       res.status(500).json({ error: "Failed to fetch documents by period" });
-    }
-  });
-
-  /**
-   * Check for duplicate sources before collection
-   * Returns existing documents that would be duplicates based on URL or content fingerprint
-   */
-  app.post("/api/documents/check-duplicates", async (req, res) => {
-    try {
-      const { sources } = req.body; // Array of { url, title, content? }
-
-      if (!Array.isArray(sources) || sources.length === 0) {
-        return res.status(400).json({ error: "sources must be a non-empty array" });
-      }
-
-      const duplicates: any[] = [];
-
-      for (const source of sources) {
-        const url = source.url?.trim();
-        const title = source.title?.trim();
-
-        if (!url && !title) continue;
-
-        // Check by URL first
-        if (url) {
-          const existingByUrl = await db.get(
-            "SELECT id, title, source_url, published_date, collected_date FROM documents WHERE source_url = ? LIMIT 1",
-            [url]
-          );
-          if (existingByUrl) {
-            duplicates.push({
-              ...existingByUrl,
-              match_type: 'url',
-              fingerprint: generateFingerprint(url)
-            });
-            continue;
-          }
-        }
-
-        // Check by fingerprint (URL + title hash)
-        if (title) {
-          const fingerprint = generateFingerprint(url ? `${url}|||${title}` : title);
-          const existingByFingerprint = await db.get(
-            "SELECT id, title, source_url, published_date, collected_date FROM documents WHERE dedup_hash = ? LIMIT 1",
-            [`dedup_${fingerprint.substring(0, 16)}`]
-          );
-          if (existingByFingerprint) {
-            duplicates.push({
-              ...existingByFingerprint,
-              match_type: 'fingerprint',
-              fingerprint
-            });
-          }
-        }
-
-        // Check sources table for rate limiting
-        if (url) {
-          const domain = extractDomain(url);
-          if (domain) {
-            const sourceRecord = await db.get(
-              "SELECT * FROM sources WHERE url = ? OR domain = ? ORDER BY last_collected DESC LIMIT 1",
-              [url, domain]
-            );
-            if (sourceRecord) {
-              duplicates.push({
-                ...sourceRecord,
-                match_type: 'source_record',
-                note: 'Source was previously collected'
-              });
-            }
-          }
-        }
-      }
-
-      res.json({
-        duplicates,
-        total_sources: sources.length,
-        duplicate_count: duplicates.length,
-        new_sources: sources.length - duplicates.length
-      });
-    } catch (error) {
-      console.error("Failed to check duplicates:", error);
-      res.status(500).json({ error: "Failed to check duplicates" });
     }
   });
 
@@ -1245,42 +1172,6 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to delete document:", error);
       res.status(500).json({ error: "Failed to delete document" });
-    }
-  });
-
-  // Refresh timeliness metrics for all documents or a specific topic
-  app.post("/api/documents/refresh-timeliness", async (req, res) => {
-    try {
-      const { topic_id } = req.body;
-
-      let query = "SELECT * FROM documents";
-      const params: string[] = [];
-
-      if (topic_id) {
-        query += " WHERE topic_id = ?";
-        params.push(topic_id);
-      }
-
-      const documents = await db.all(query, params);
-
-      for (const doc of documents) {
-        const freshnessHours = calculateFreshnessHours(doc.published_date);
-        const relevanceScore = calculateTimeDecay(doc.published_date, doc.urgency || 'ongoing');
-
-        await db.run(
-          `UPDATE documents SET freshness_hours = ?, relevance_score = ? WHERE id = ?`,
-          [freshnessHours, relevanceScore, doc.id]
-        );
-      }
-
-      res.json({
-        success: true,
-        updated: documents.length,
-        message: `Refreshed timeliness metrics for ${documents.length} documents`
-      });
-    } catch (error) {
-      console.error("Failed to refresh timeliness:", error);
-      res.status(500).json({ error: "Failed to refresh timeliness metrics" });
     }
   });
 
@@ -1375,52 +1266,6 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to upload file:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "文件上传失败" });
-    }
-  });
-
-  // ===== Entities Read API =====
-
-  /**
-   * GET /api/documents/:id/extraction
-   * 获取文档的所有抽取结果
-   */
-  app.get("/api/documents/:id/extraction", async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      // 并行获取所有抽取数据
-      const [entities, claims, relations, events] = await Promise.all([
-        db.all("SELECT * FROM entities WHERE document_id = ?", [id]),
-        db.all("SELECT * FROM claims WHERE document_id = ?", [id]),
-        db.all("SELECT * FROM relations WHERE document_id = ?", [id]),
-        db.all("SELECT * FROM events WHERE document_id = ?", [id])
-      ]);
-
-      // 解析 JSON 字段
-      const parsedEntities = entities.map((e: any) => ({
-        ...e,
-        metadata: safeJsonParse(e.metadata)
-      }));
-      const parsedEvents = events.map((e: any) => ({
-        ...e,
-        participants: safeJsonParse(e.participants, [])
-      }));
-
-      res.json({
-        entities: parsedEntities,
-        claims,
-        relations,
-        events: parsedEvents,
-        stats: {
-          entityCount: parsedEntities.length,
-          claimCount: claims.length,
-          relationCount: relations.length,
-          eventCount: parsedEvents.length
-        }
-      });
-    } catch (error) {
-      console.error("Failed to fetch extraction results:", error);
-      res.status(500).json({ error: "Failed to fetch extraction results" });
     }
   });
 
@@ -1551,32 +1396,125 @@ async function startServer() {
     }
   });
 
+  // ── Graph helpers: deterministic node IDs from entity text ──
+  function entityNodeId(text: string): string {
+    return 'e_' + Buffer.from(text, 'utf-8').toString('base64url');
+  }
+  function nodeIdToText(id: string): string | null {
+    if (!id.startsWith('e_')) return null;
+    try { return Buffer.from(id.slice(2), 'base64url').toString('utf-8'); } catch { return null; }
+  }
+
   /**
    * GET /api/graph/topic/:id
-   * 获取主题图谱（节点和边）
+   * 获取主题图谱 — SQLite-direct (entities, relations, events, claims)
    */
   app.get("/api/graph/topic/:id", async (req, res) => {
     try {
-      const { id } = req.params;
-      const depth = Math.max(1, Math.min(10, parseInt(req.query.depth as string) || 2));
+      const topicId = req.params.id;
 
-      const subgraph = await graphService.getTopicGraph(id, depth);
+      const topic = await db.get("SELECT * FROM topics WHERE id = ?", [topicId]);
+      if (!topic) return res.status(404).json({ error: "Topic not found" });
 
-      // 转换为前端可用的格式
-      const nodes = subgraph.nodes.map(n => ({
-        id: n.id,
-        label: n.properties.name || n.properties.title || n.id,
-        type: n.label.toLowerCase(),
-        properties: n.properties,
-      }));
+      const nodes: Array<{ id: string; label: string; type: string; properties: Record<string, any> }> = [];
+      const links: Array<{ id: string; source: string; target: string; label: string; properties: Record<string, any> }> = [];
 
-      const links = subgraph.relationships.map(r => ({
-        id: r.id,
-        source: r.from,
-        target: r.to,
-        label: r.type,
-        properties: r.properties || {},
-      }));
+      // Topic center node
+      nodes.push({
+        id: topicId,
+        label: topic.name,
+        type: 'topic',
+        properties: { description: topic.description },
+      });
+
+      // Deduplicated entity nodes (top 80 by document count)
+      const entities = await db.all(`
+        SELECT e.text, e.type, COUNT(DISTINCT e.document_id) as doc_count,
+               MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen
+        FROM entities e JOIN documents d ON e.document_id = d.id
+        WHERE d.topic_id = ?
+        GROUP BY e.text ORDER BY doc_count DESC LIMIT 80
+      `, [topicId]);
+
+      const entityTexts = new Set(entities.map(e => e.text));
+      for (const ent of entities) {
+        const nid = entityNodeId(ent.text);
+        nodes.push({
+          id: nid, label: ent.text,
+          type: (ent.type || 'entity').toLowerCase(),
+          properties: { docCount: ent.doc_count, confidence: ent.confidence, firstSeen: ent.first_seen },
+        });
+        links.push({ id: `t-${nid}`, source: topicId, target: nid, label: 'HAS_ENTITY', properties: {} });
+      }
+
+      // Relations between deduplicated entities (best confidence per pair+type)
+      const rawRels = await db.all(`
+        SELECT r.source_text, r.target_text, r.relation, MAX(r.confidence) as confidence
+        FROM relations r JOIN documents d ON r.document_id = d.id
+        WHERE d.topic_id = ? AND r.source_text != r.target_text
+        GROUP BY r.source_text, r.target_text, r.relation
+        ORDER BY confidence DESC LIMIT 60
+      `, [topicId]);
+
+      let relIdx = 0;
+      for (const rel of rawRels) {
+        if (!entityTexts.has(rel.source_text) || !entityTexts.has(rel.target_text)) continue;
+        links.push({
+          id: `r${relIdx++}`,
+          source: entityNodeId(rel.source_text),
+          target: entityNodeId(rel.target_text),
+          label: (rel.relation || 'RELATED_TO').toUpperCase(),
+          properties: { confidence: rel.confidence },
+        });
+      }
+
+      // Event nodes (top 15)
+      const events = await db.all(`
+        SELECT ev.id, ev.title, ev.type, ev.event_time, ev.participants, ev.confidence
+        FROM events ev JOIN documents d ON ev.document_id = d.id
+        WHERE d.topic_id = ?
+        ORDER BY ev.confidence DESC, ev.event_time DESC LIMIT 15
+      `, [topicId]);
+
+      for (const ev of events) {
+        const evId = `ev_${ev.id}`;
+        nodes.push({
+          id: evId, label: ev.title || ev.type, type: 'event',
+          properties: { eventType: ev.type, eventTime: ev.event_time, confidence: ev.confidence },
+        });
+        links.push({ id: `ev-${evId}`, source: topicId, target: evId, label: 'HAS_EVENT', properties: {} });
+        // Link participants to event
+        if (ev.participants) {
+          try {
+            const parts = typeof ev.participants === 'string' ? JSON.parse(ev.participants) : ev.participants;
+            for (const p of Array.isArray(parts) ? parts : []) {
+              const name = typeof p === 'string' ? p : (p.name || p.text);
+              if (name && entityTexts.has(name)) {
+                links.push({ id: `ep-${evId}-${entityNodeId(name)}`, source: entityNodeId(name), target: evId, label: 'PARTICIPATED_IN', properties: {} });
+              }
+            }
+          } catch { /* skip malformed participants */ }
+        }
+      }
+
+      // Claim nodes (top 10)
+      const claims = await db.all(`
+        SELECT c.id, c.text, c.polarity, c.confidence
+        FROM claims c JOIN documents d ON c.document_id = d.id
+        WHERE d.topic_id = ?
+        ORDER BY c.confidence DESC LIMIT 10
+      `, [topicId]);
+
+      for (const cl of claims) {
+        const clId = `cl_${cl.id}`;
+        nodes.push({
+          id: clId,
+          label: cl.text?.length > 60 ? cl.text.slice(0, 60) + '…' : cl.text,
+          type: 'claim',
+          properties: { polarity: cl.polarity, confidence: cl.confidence, fullText: cl.text },
+        });
+        links.push({ id: `cl-${clId}`, source: topicId, target: clId, label: 'HAS_CLAIM', properties: {} });
+      }
 
       res.json({ nodes, links });
     } catch (error) {
@@ -1587,44 +1525,76 @@ async function startServer() {
 
   /**
    * GET /api/graph/entity/:id
-   * 获取实体详情和邻域
+   * 获取实体详情和邻域 — SQLite-direct
    */
   app.get("/api/graph/entity/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const neighborhood = await graphService.getEntityNeighborhood(id);
+      const entityText = nodeIdToText(decodeURIComponent(id));
 
-      if (!neighborhood) {
-        return res.status(404).json({ error: "Entity not found" });
+      if (!entityText) {
+        // Fallback: try direct DB lookup
+        const entity = await db.get("SELECT * FROM entities WHERE id = ?", [id]);
+        if (!entity) return res.status(404).json({ error: "Entity not found" });
+        return res.json({
+          entity: { id, name: entity.text, type: entity.type, properties: { confidence: entity.confidence } },
+          relations: [], graph: { nodes: [], links: [] },
+        });
       }
 
-      // 转换为前端可用的格式
-      const nodes = [
-        {
-          id: neighborhood.entity.id,
-          label: neighborhood.entity.properties.name || neighborhood.entity.id,
-          type: neighborhood.entity.label.toLowerCase(),
-          properties: neighborhood.entity.properties,
-        },
-        ...neighborhood.neighbors.map(n => ({
-          id: n.node.id,
-          label: n.node.properties.name || n.node.properties.title || n.node.id,
-          type: n.node.label.toLowerCase(),
-          properties: n.node.properties,
-        })),
-      ];
+      // Find all mentions of this entity
+      const entityRecords = await db.all(`
+        SELECT e.id, e.text, e.type, e.confidence, e.document_id, d.topic_id
+        FROM entities e JOIN documents d ON e.document_id = d.id
+        WHERE e.text = ? LIMIT 50
+      `, [entityText]);
 
-      const links = neighborhood.neighbors.map(n => ({
-        id: n.relationship.id,
-        source: n.relationship.from,
-        target: n.relationship.to,
-        label: n.relationship.type,
-        properties: n.relationship.properties || {},
-      }));
+      if (entityRecords.length === 0) return res.status(404).json({ error: "Entity not found" });
+
+      const mainEntity = entityRecords[0];
+      const docCount = entityRecords.length;
+
+      // Relations where this entity is source or target
+      const relations = await db.all(`
+        SELECT r.source_text, r.target_text, r.relation, r.confidence
+        FROM relations r JOIN documents d ON r.document_id = d.id
+        WHERE (r.source_text = ? OR r.target_text = ?)
+        ORDER BY r.confidence DESC LIMIT 30
+      `, [entityText, entityText]);
+
+      // Build neighborhood graph
+      const nodes: any[] = [{
+        id: entityNodeId(entityText), label: entityText,
+        type: (mainEntity.type || 'entity').toLowerCase(),
+        properties: { docCount, confidence: mainEntity.confidence },
+      }];
+      const links: any[] = [];
+      const neighborTexts = new Set<string>();
+
+      for (const rel of relations) {
+        const otherText = rel.source_text === entityText ? rel.target_text : rel.source_text;
+        if (otherText === entityText) continue;
+        neighborTexts.add(otherText);
+        links.push({
+          id: `r-${entityNodeId(rel.source_text)}-${entityNodeId(rel.target_text)}`,
+          source: entityNodeId(rel.source_text), target: entityNodeId(rel.target_text),
+          label: (rel.relation || 'RELATED_TO').toUpperCase(),
+          properties: { confidence: rel.confidence },
+        });
+      }
+
+      for (const text of neighborTexts) {
+        const neighbor = await db.get("SELECT type, confidence FROM entities WHERE text = ? LIMIT 1", [text]);
+        nodes.push({
+          id: entityNodeId(text), label: text,
+          type: (neighbor?.type || 'entity').toLowerCase(),
+          properties: { confidence: neighbor?.confidence },
+        });
+      }
 
       res.json({
-        entity: neighborhood.entity,
-        neighbors: neighborhood.neighbors,
+        entity: { id: entityNodeId(entityText), name: entityText, type: mainEntity.type, properties: { docCount, confidence: mainEntity.confidence } },
+        relations: relations.map(r => ({ sourceText: r.source_text, targetText: r.target_text, relation: r.relation, confidence: r.confidence })),
         graph: { nodes, links },
       });
     } catch (error) {
@@ -1635,15 +1605,20 @@ async function startServer() {
 
   /**
    * GET /api/graph/claims/:topicId
-   * 查找主题相关的 Claims
+   * 查找主题相关的 Claims — SQLite-direct
    */
   app.get("/api/graph/claims/:topicId", async (req, res) => {
     try {
       const { topicId } = req.params;
-      const claims = await graphService.findClaimsByTopic(topicId);
+      const claims = await db.all(`
+        SELECT c.id, c.text, c.polarity, c.confidence, c.source_context
+        FROM claims c JOIN documents d ON c.document_id = d.id
+        WHERE d.topic_id = ?
+        ORDER BY c.confidence DESC LIMIT 30
+      `, [topicId]);
 
       res.json({
-        claims,
+        claims: claims.map(c => ({ id: c.id, text: c.text, polarity: c.polarity, confidence: c.confidence, sourceContext: c.source_context })),
         count: claims.length,
       });
     } catch (error) {
@@ -1654,19 +1629,32 @@ async function startServer() {
 
   /**
    * GET /api/graph/related/:entityId
-   * 查找相关实体
+   * 查找相关实体 — SQLite-direct
    */
   app.get("/api/graph/related/:entityId", async (req, res) => {
     try {
-      const { entityId } = req.params;
-      const depth = Math.max(1, Math.min(10, parseInt(req.query.depth as string) || 2));
+      const entityId = req.params.entityId;
+      const entityText = nodeIdToText(decodeURIComponent(entityId));
 
-      const entities = await graphService.findRelatedEntities(entityId, depth);
+      if (!entityText) return res.json({ entities: [], count: 0 });
 
-      res.json({
-        entities,
-        count: entities.length,
-      });
+      const related = await db.all(`
+        SELECT DISTINCT
+          CASE WHEN r.source_text = ? THEN r.target_text ELSE r.source_text END as name,
+          r.relation, MAX(r.confidence) as confidence
+        FROM relations r JOIN documents d ON r.document_id = d.id
+        WHERE r.source_text = ? OR r.target_text = ?
+        GROUP BY name, r.relation
+        ORDER BY confidence DESC LIMIT 20
+      `, [entityText, entityText, entityText]);
+
+      const entities = [];
+      for (const r of related) {
+        const ent = await db.get("SELECT type, confidence FROM entities WHERE text = ? LIMIT 1", [r.name]);
+        entities.push({ id: entityNodeId(r.name), name: r.name, type: ent?.type || 'entity', relation: r.relation, confidence: r.confidence });
+      }
+
+      res.json({ entities, count: entities.length });
     } catch (error) {
       console.error("Failed to find related entities:", error);
       res.status(500).json({ error: "Failed to find related entities" });
@@ -1704,44 +1692,38 @@ async function startServer() {
         LIMIT 20
       `, [topicId, cutoffDate]);
 
-      // 获取最近相关的实体
+      // 获取最近相关的实体（去重，按文档数排序）
       const recentEntities = await db.all(`
         SELECT
-          e.id,
-          e.name,
+          e.text as name,
           e.type,
-          e.created_at,
-          e.first_seen_date,
-          COUNT(DISTINCT d.id) as document_count
+          COUNT(DISTINCT e.document_id) as document_count,
+          MAX(e.created_at) as first_seen_date
         FROM entities e
-        JOIN document_entities de ON e.id = de.entity_id
-        JOIN documents d ON de.document_id = d.id
+        JOIN documents d ON e.document_id = d.id
         WHERE d.topic_id = ?
           AND d.collected_date > ?
-        GROUP BY e.id
-        ORDER BY document_count DESC, e.first_seen_date DESC
+        GROUP BY e.text
+        ORDER BY document_count DESC, first_seen_date DESC
         LIMIT 15
       `, [topicId, cutoffDate]);
 
       // 获取最近的关系（新兴连接）
       const emergingRelations = await db.all(`
         SELECT
-          r.source_entity_id,
-          r.target_entity_id,
-          r.relation_type,
+          r.source_text as source_name,
+          r.target_text as target_name,
+          r.relation as relation_type,
           r.confidence,
-          e1.name as source_name,
-          e2.name as target_name,
-          r.first_seen_date
+          MAX(r.created_at) as first_seen_date
         FROM relations r
-        JOIN entities e1 ON r.source_entity_id = e1.id
-        JOIN entities e2 ON r.target_entity_id = e2.id
-        JOIN document_entities de1 ON e1.id = de1.entity_id
-        JOIN documents d1 ON de1.document_id = d1.id
-        WHERE d1.topic_id = ?
-          AND r.first_seen_date > ?
+        JOIN documents d ON r.document_id = d.id
+        WHERE d.topic_id = ?
+          AND r.created_at > ?
           AND r.confidence > 0.5
-        ORDER BY r.first_seen_date DESC, r.confidence DESC
+          AND r.source_text != r.target_text
+        GROUP BY r.source_text, r.target_text, r.relation
+        ORDER BY first_seen_date DESC, r.confidence DESC
         LIMIT 10
       `, [topicId, cutoffDate]);
 
@@ -1758,19 +1740,17 @@ async function startServer() {
           freshnessHours: d.freshness_hours,
         })),
         entities: recentEntities.map(e => ({
-          id: e.id,
+          id: entityNodeId(e.name),
           name: e.name,
           type: e.type,
           documentCount: e.document_count,
           firstSeenDate: e.first_seen_date,
         })),
         emergingRelations: emergingRelations.map(r => ({
-          sourceId: r.source_entity_id,
-          targetId: r.target_entity_id,
-          relationType: r.relation_type,
-          confidence: r.confidence,
           sourceName: r.source_name,
           targetName: r.target_name,
+          relationType: r.relation_type,
+          confidence: r.confidence,
           firstSeenDate: r.first_seen_date,
         })),
         timeRange: {
@@ -1806,6 +1786,8 @@ async function startServer() {
         return res.status(404).json({ error: "Entity not found" });
       }
 
+      const entityText = entity.text;
+
       // 获取相关的文档时间线
       const documentTimeline = await db.all(`
         SELECT
@@ -1816,34 +1798,29 @@ async function startServer() {
           d.relevance_score,
           d.source
         FROM documents d
-        JOIN document_entities de ON d.id = de.document_id
-        WHERE de.entity_id = ?
+        JOIN entities e ON d.id = e.document_id
+        WHERE e.text = ?
           AND d.collected_date > ?
         ORDER BY d.collected_date DESC
         LIMIT 50
-      `, [entityId, cutoffDate]);
+      `, [entityText, cutoffDate]);
 
       // 获取关系演化（新出现的关系）
       const relationEvolution = await db.all(`
         SELECT
-          r.relation_type,
-          r.first_seen_date,
+          r.relation as relation_type,
+          r.created_at as first_seen_date,
           r.confidence,
-          e2.name as related_entity_name,
-          e2.type as related_entity_type,
-          CASE
-            WHEN r.source_entity_id = ? THEN 'source'
-            ELSE 'target'
-          END as direction
+          CASE WHEN r.source_text = ? THEN r.target_text ELSE r.source_text END as related_entity_name,
+          (SELECT e3.type FROM entities e3 WHERE e3.text = CASE WHEN r.source_text = ? THEN r.target_text ELSE r.source_text END LIMIT 1) as related_entity_type,
+          CASE WHEN r.source_text = ? THEN 'source' ELSE 'target' END as direction
         FROM relations r
-        JOIN entities e2 ON
-          (r.source_entity_id = ? AND r.target_entity_id = e2.id) OR
-          (r.target_entity_id = ? AND r.source_entity_id = e2.id)
-        WHERE (r.source_entity_id = ? OR r.target_entity_id = ?)
-          AND r.first_seen_date > ?
-        ORDER BY r.first_seen_date DESC
+        JOIN documents d ON r.document_id = d.id
+        WHERE (r.source_text = ? OR r.target_text = ?)
+          AND r.created_at > ?
+        ORDER BY r.created_at DESC
         LIMIT 30
-      `, [entityId, entityId, entityId, entityId, entityId, cutoffDate]);
+      `, [entityText, entityText, entityText, entityText, entityText, cutoffDate]);
 
       // 按日期聚合数据
       const timelineByDate: Record<string, {
@@ -1885,9 +1862,9 @@ async function startServer() {
       res.json({
         entity: {
           id: entity.id,
-          name: entity.name,
+          name: entity.text,
           type: entity.type,
-          firstSeenDate: entity.first_seen_date,
+          firstSeenDate: entity.created_at,
         },
         timeline,
         documents: documentTimeline,
@@ -1901,6 +1878,24 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to fetch entity timeline:", error);
       res.status(500).json({ error: "Failed to fetch entity timeline" });
+    }
+  });
+
+  /**
+   * POST /api/graph/sync/:topicId
+   * 触发主题图谱同步到 Neo4j/JSON 存储
+   */
+  app.post("/api/graph/sync/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const topic = await db.get("SELECT * FROM topics WHERE id = ?", [topicId]);
+      if (!topic) return res.status(404).json({ error: "Topic not found" });
+
+      const result = await graphService.syncFromSQLite(db);
+      res.json({ success: true, topicId, ...result });
+    } catch (error) {
+      console.error("Failed to sync graph:", error);
+      res.status(500).json({ error: "Failed to sync graph" });
     }
   });
 
@@ -1974,8 +1969,15 @@ async function startServer() {
    */
   app.delete("/api/reports/:id", async (req, res) => {
     try {
+      console.log(`[DELETE] /api/reports/${req.params.id}`);
       const result = await db.run("DELETE FROM reports WHERE id = ?", [req.params.id]);
-      if (!result.changes) { res.status(404).json({ error: "Report not found" }); return; }
+      console.log(`[DELETE] Result:`, result);
+      if (!result.changes) { 
+        console.log(`[DELETE] Report not found: ${req.params.id}`);
+        res.status(404).json({ error: "Report not found" }); 
+        return; 
+      }
+      console.log(`[DELETE] Report deleted: ${req.params.id}`);
       res.status(204).send();
     } catch (error) {
       console.error("Failed to delete report:", error);
@@ -1988,47 +1990,8 @@ async function startServer() {
   const { migrateReportTables } = await import('./src/services/reportService.js');
   await migrateReportTables(db);
 
-  const { ReportReviewService } = await import('./src/services/reportReviewService.js');
   const { ReportGraphService } = await import('./src/services/reportGraphService.js');
-  const reviewService = new ReportReviewService(db);
   const reportGraphService = new ReportGraphService(db);
-
-  app.get("/api/reports/templates", async (_req, res) => {
-    try {
-      const rows = await db.all("SELECT * FROM report_templates WHERE is_active = 1");
-      res.json(rows.map(r => ({
-        ...r,
-        structure: safeJsonParse(r.structure, {}),
-        validation_rules: safeJsonParse(r.validation_rules, {}),
-      })));
-    } catch (error) {
-      console.error("Failed to fetch templates:", error);
-      res.status(500).json({ error: "Failed to fetch templates" });
-    }
-  });
-
-  // ── Report Type Configs ──
-  app.get("/api/report-types", async (req, res) => {
-    try {
-      const { active } = req.query;
-      let query = "SELECT * FROM report_type_configs";
-      const params: any[] = [];
-      if (active === '1' || active === 'true') {
-        query += " WHERE is_active = 1";
-      }
-      query += " ORDER BY schedule, type";
-      const rows = await db.all(query, params);
-      res.json(rows.map((r: any) => ({
-        ...r,
-        review_config: r.review_config ? JSON.parse(r.review_config) : null,
-        distribution_config: r.distribution_config ? JSON.parse(r.distribution_config) : null,
-        trigger_rules: r.trigger_rules ? JSON.parse(r.trigger_rules) : null,
-      })));
-    } catch (error) {
-      console.error("Failed to fetch report types:", error);
-      res.status(500).json({ error: "Failed to fetch report types" });
-    }
-  });
 
   // ── Unified Report Generation ──
   const REPORT_TYPE_TO_SKILL: Record<string, string> = {
@@ -2187,9 +2150,9 @@ async function startServer() {
 
     const { executionId, promise } = skillExecutor.startExecution('research', researchParams);
 
-    // Wait for completion (with timeout)
+    // Wait for completion (with timeout — research skill timeout is 1200s)
     const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Collection timeout')), 120000)
+      setTimeout(() => reject(new Error('Collection timeout')), 600000)
     );
 
     try {
@@ -2285,12 +2248,12 @@ async function startServer() {
         params.alertType = 'risk';
       }
 
-      // Automatic collection before report generation (if enabled)
-      const autoCollect = options?.autoCollect !== false; // Default true
+      // Step 1: Collect data first (blocking) — report needs data to be useful
+      const autoCollect = options?.autoCollect !== false;
       let collectionResult = { executionId: '', collected: 0, duplicatesSkipped: 0 };
 
       if (autoCollect) {
-        console.log(`[ReportGenerate] Auto-collection enabled for topic ${topicId}, period ${computedPeriod.start} - ${computedPeriod.end}`);
+        console.log(`[ReportGenerate] Auto-collection for topic ${topicId}, period ${computedPeriod.start} - ${computedPeriod.end}`);
         try {
           collectionResult = await triggerCollectionForPeriod(
             topicId,
@@ -2303,19 +2266,28 @@ async function startServer() {
           console.log(`[ReportGenerate] Collection result:`, collectionResult);
         } catch (collectErr: any) {
           console.error(`[ReportGenerate] Collection failed:`, collectErr?.message || collectErr);
-          // Continue with report generation even if collection fails
         }
       }
 
-      // Add collection metadata to params
+      // Step 2: Check if we have enough data to generate a meaningful report
+      const docCount = await getDocumentsCountInPeriod(topicId, computedPeriod.start, computedPeriod.end);
+      if (docCount === 0) {
+        res.status(400).json({
+          error: '当前时间范围内没有文档数据，请先采集数据或调整时间范围',
+          collectionResult,
+        });
+        return;
+      }
+
+      // Step 3: Start report skill with collected data
       params.collectionResult = collectionResult;
       params.periodPreset = computedPeriod.preset;
 
+      // All report types: use single-skill execution (faster than multi-step workflow)
       const { executionId, promise } = skillExecutor.startExecution(skillName, params);
 
       // Route report results through handleReportResult
       promise.then(async (execution) => {
-        // All report types go through result handling (alerts included)
         await handleReportResult(execution, params, computedPeriod);
         ws.send(execution.id, 'result', JSON.stringify(execution.result ?? { error: execution.error }));
       }).catch((err) => {
@@ -2329,197 +2301,12 @@ async function startServer() {
         period: computedPeriod,
         status: 'started',
         autoCollect,
-        collectionResult
+        collectionResult,
+        documentsAvailable: docCount,
       });
     } catch (error) {
       console.error("Failed to generate report:", error);
       res.status(500).json({ error: "Failed to generate report" });
-    }
-  });
-
-  app.get("/api/reports/:id/reviews", async (req, res) => {
-    try {
-      const reviews = await reviewService.getReviews(req.params.id);
-      res.json(reviews);
-    } catch (error) {
-      console.error("Failed to fetch reviews:", error);
-      res.status(500).json({ error: "Failed to fetch reviews" });
-    }
-  });
-
-  app.post("/api/reports/:id/reviews", async (req, res) => {
-    try {
-      const { reviewType, checklistResults, issues, comments, action } = req.body;
-      const review = await reviewService.submitReview(
-        req.params.id,
-        req.body.reviewerId || 'system',
-        reviewType,
-        checklistResults,
-        issues,
-        comments,
-        action
-      );
-      res.status(201).json(review);
-    } catch (error) {
-      console.error("Failed to submit review:", error);
-      res.status(500).json({ error: "Failed to submit review" });
-    }
-  });
-
-  app.get("/api/reports/:id/graph", async (req, res) => {
-    try {
-      const snapshot = await reportGraphService.getGraphSnapshot(req.params.id);
-      res.json(snapshot);
-    } catch (error) {
-      console.error("Failed to get report graph:", error);
-      res.status(500).json({ error: "Failed to get report graph" });
-    }
-  });
-
-  app.get("/api/reports/:id/section/:sectionId/evidence", async (req, res) => {
-    try {
-      const evidence = await reportGraphService.getSectionEvidence(req.params.id, req.params.sectionId);
-      res.json(evidence);
-    } catch (error) {
-      console.error("Failed to get section evidence:", error);
-      res.status(500).json({ error: "Failed to get section evidence" });
-    }
-  });
-
-  app.get("/api/reports/:id/evidence-path", async (req, res) => {
-    try {
-      const { from, to } = req.query;
-      if (!from || !to) {
-        res.status(400).json({ error: "Missing 'from' or 'to' parameter" });
-        return;
-      }
-      const path = await reportGraphService.findEvidencePath(req.params.id, from as string, to as string);
-      if (!path) {
-        res.status(404).json({ error: "Path not found" });
-        return;
-      }
-      res.json(path);
-    } catch (error) {
-      console.error("Failed to find evidence path:", error);
-      res.status(500).json({ error: "Failed to find evidence path" });
-    }
-  });
-
-  app.post("/api/reports/:id/feedback", async (req, res) => {
-    try {
-      const { type, content } = req.body;
-      const id = uuidv4();
-      await db.run(
-        `INSERT INTO report_feedback (id, report_id, user_id, feedback_type, content, status, created_at)
-         VALUES (?, ?, ?, ?, ?, 'new', ?)`,
-        [id, req.params.id, req.body.userId || null, type, JSON.stringify(content), new Date().toISOString()]
-      );
-      res.status(201).json({ id, status: 'created' });
-    } catch (error) {
-      console.error("Failed to submit feedback:", error);
-      res.status(500).json({ error: "Failed to submit feedback" });
-    }
-  });
-
-  app.get("/api/reports/:id/feedback", async (req, res) => {
-    try {
-      const rows = await db.all(
-        "SELECT * FROM report_feedback WHERE report_id = ? ORDER BY created_at DESC",
-        [req.params.id]
-      );
-      const feedback = rows.map(r => ({
-        ...r,
-        content: safeJsonParse(r.content, {}),
-      }));
-
-      const ratingRows = rows.filter(r => r.feedback_type === 'rating');
-      const avgRating = ratingRows.length > 0
-        ? ratingRows.reduce((sum, r) => sum + (safeJsonParse(r.content, {}).rating || 0), 0) / ratingRows.length
-        : 0;
-
-      res.json({
-        feedback,
-        stats: {
-          averageRating: Math.round(avgRating * 10) / 10,
-          totalFeedback: rows.length,
-          byType: rows.reduce((acc, r) => {
-            acc[r.feedback_type] = (acc[r.feedback_type] || 0) + 1;
-            return acc;
-          }, {} as Record<string, number>),
-        },
-      });
-    } catch (error) {
-      console.error("Failed to fetch feedback:", error);
-      res.status(500).json({ error: "Failed to fetch feedback" });
-    }
-  });
-
-  app.post("/api/reports/:id/publish", async (req, res) => {
-    try {
-      const { publishedBy } = req.body;
-      await db.run(
-        `UPDATE reports SET status = 'published', review_status = 'approved', published_at = ?, published_by = ? WHERE id = ?`,
-        [new Date().toISOString(), publishedBy || 'system', req.params.id]
-      );
-      res.json({ status: 'published' });
-    } catch (error) {
-      console.error("Failed to publish report:", error);
-      res.status(500).json({ error: "Failed to publish report" });
-    }
-  });
-
-  app.post("/api/reports/:id/versions", async (req, res) => {
-    try {
-      const { changeSummary, changedBy } = req.body;
-      const report = await db.get("SELECT * FROM reports WHERE id = ?", [req.params.id]);
-      if (!report) {
-        res.status(404).json({ error: "Report not found" });
-        return;
-      }
-
-      const latestVersion = await db.get(
-        "SELECT version FROM report_versions WHERE report_id = ? ORDER BY created_at DESC LIMIT 1",
-        [req.params.id]
-      );
-
-      let newVersion = '1.0.0';
-      if (latestVersion) {
-        const parts = latestVersion.version.split('.');
-        if (parts.length === 3) {
-          const patch = parseInt(parts[2]) + 1;
-          newVersion = `${parts[0]}.${parts[1]}.${patch}`;
-        }
-      }
-
-      const id = uuidv4();
-      await db.run(
-        `INSERT INTO report_versions (id, report_id, version, content, change_summary, changed_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [id, req.params.id, newVersion, report.content, changeSummary || '', changedBy || 'system', new Date().toISOString()]
-      );
-
-      await db.run(
-        `UPDATE reports SET version = ? WHERE id = ?`,
-        [newVersion, req.params.id]
-      );
-
-      res.status(201).json({ id, version: newVersion });
-    } catch (error) {
-      console.error("Failed to create version:", error);
-      res.status(500).json({ error: "Failed to create version" });
-    }
-  });
-
-  app.get("/api/reports/:id/versions", async (req, res) => {
-    try {
-      const rows = await db.all(
-        "SELECT id, version, change_summary, changed_by, created_at FROM report_versions WHERE report_id = ? ORDER BY created_at DESC",
-        [req.params.id]
-      );
-      res.json(rows);
-    } catch (error) {
-      console.error("Failed to fetch versions:", error);
-      res.status(500).json({ error: "Failed to fetch versions" });
     }
   });
 
@@ -3045,6 +2832,26 @@ async function startServer() {
     return null;
   }
 
+  // ── Convert nested JSON objects to readable Markdown ──
+  function jsonToMarkdown(obj: any, depth = 0): string {
+    if (typeof obj === 'string') return obj;
+    if (Array.isArray(obj)) return obj.map(item => typeof item === 'object' && item !== null ? `- ${jsonToMarkdown(item, depth + 1)}` : `- ${item}`).join('\n');
+    if (typeof obj === 'object' && obj !== null) {
+      return Object.entries(obj)
+        .map(([key, val]) => {
+          const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, (s: string) => s.toUpperCase());
+          if (typeof val === 'string') return `**${label}**: ${val}`;
+          if (Array.isArray(val)) {
+            const items = val.map((item: any) => typeof item === 'object' && item !== null ? `- ${jsonToMarkdown(item, depth + 1)}` : `- ${item}`).join('\n');
+            return `**${label}**:\n${items}`;
+          }
+          return `**${label}**:\n${jsonToMarkdown(val, depth + 1)}`;
+        })
+        .join('\n\n');
+    }
+    return String(obj);
+  }
+
   // ── Extracted report persistence handler (shared by HTTP endpoint & scheduler) ──
   async function handleReportResult(
     execution: SkillExecution,
@@ -3105,172 +2912,31 @@ async function startServer() {
       const meta = content.meta ?? {};
       const reportType = params.reportType ?? parsed.type ?? meta.type ?? 'weekly';
 
-      // ── Multi-type report normalization ──
-      // All report types are normalized to { executiveSummary, sections, timeline, metrics }
+      // ── Unified report normalization ──
+      // All report types now output unified { executiveSummary, sections[], timeline[], metrics } format (v2.0)
       let normalizedContent: any;
 
-      if (reportType === 'daily' && (content.keyUpdates || content.dataHighlights || content.alerts)) {
-        // Daily report format
-        normalizedContent = {
-          executiveSummary: {
-            overview: parsed.summary ?? content.summary ?? '',
-            keyPoints: (content.keyUpdates ?? []).map((u: any) =>
-              typeof u === 'object' ? `[${u.type ?? 'update'}] ${u.title}: ${u.summary ?? ''}` : String(u)
-            ),
-            confidence: meta.confidence ?? 'low',
-            period: meta.period ?? { start: params.timeRangeStart, end: params.timeRangeEnd },
-          },
-          sections: [
-            ...(content.keyUpdates?.length ? [{
-              id: 'key_updates', title: '关键更新', thesis: `检测到 ${content.keyUpdates.length} 条重要更新`,
-              content: content.keyUpdates.map((u: any) => `**${u.title}** (${u.significance ?? '中'}影响): ${u.summary ?? ''}`).join('\n'),
-              highlights: content.keyUpdates.map((u: any) => u.title),
-              signals: content.keyUpdates.map((u: any) => ({ type: u.type ?? 'trend', title: u.title, description: u.summary ?? '', confidence: 0.7 })),
-              entityRefs: [],
-            }] : []),
-            ...(content.dataHighlights ? [{
-              id: 'data_highlights', title: '数据亮点', thesis: '24h 数据采集概况',
-              content: [
-                content.dataHighlights.documentsAdded?.length ? `新增文档: ${content.dataHighlights.documentsAdded.join('; ')}` : '',
-                content.dataHighlights.topEntities?.length ? `高频实体: ${content.dataHighlights.topEntities.join(', ')}` : '',
-              ].filter(Boolean).join('\n'),
-              highlights: [...(content.dataHighlights.documentsAdded ?? []), ...(content.dataHighlights.topEntities ?? [])],
-              signals: [], entityRefs: content.dataHighlights.topEntities ?? [],
-            }] : []),
-            ...(content.alerts?.length ? [{
-              id: 'alerts', title: '预警信号', thesis: `检测到 ${content.alerts.length} 条预警`,
-              content: content.alerts.map((a: any) => `**[${a.alertType ?? 'alert'}]** ${a.title}: ${a.description ?? ''}\n建议: ${a.recommendedAction ?? ''}`).join('\n\n'),
-              highlights: content.alerts.map((a: any) => a.title),
-              signals: content.alerts.map((a: any) => ({ type: 'threat', title: a.title, description: a.description ?? '', confidence: 0.7 })),
-              entityRefs: [],
-            }] : []),
-          ],
-          timeline: (content.dataHighlights?.eventsTimeline ?? []).map((e: any) => ({
-            date: e.time ?? params.timeRangeStart, event: e.event ?? String(e), significance: '', entityRefs: [],
-          })),
-          metrics: meta.dataCoverage ?? {},
-        };
-      } else if (reportType === 'alert' && (content.alertSummary || content.eventAnalysis)) {
-        // Alert report format
-        const alert = content.alertSummary ?? {};
-        normalizedContent = {
-          executiveSummary: {
-            overview: `${alert.title ?? '预警报告'}: ${alert.description ?? parsed.summary ?? ''}`,
-            keyPoints: [alert.title ?? '预警'].filter(Boolean),
-            confidence: alert.confidence ?? 'medium',
-            period: meta.period ?? {},
-          },
-          sections: [
-            ...(content.eventAnalysis ? [{
-              id: 'event_analysis', title: '事件分析', thesis: '事件经过与上下文',
-              content: [content.eventAnalysis.what, content.eventAnalysis.who, content.eventAnalysis.timeline, content.eventAnalysis.context].filter(Boolean).join('\n\n'),
-              highlights: [content.eventAnalysis.what, content.eventAnalysis.who].filter(Boolean),
-              signals: [], entityRefs: content.entityRefs ?? [],
-            }] : []),
-            ...(content.impactAssessment ? [{
-              id: 'impact', title: '影响评估', thesis: `影响范围: ${content.impactAssessment.scope ?? '待评估'}`,
-              content: `范围: ${content.impactAssessment.scope ?? '-'}\n程度: ${content.impactAssessment.magnitude ?? '-'}\n紧迫性: ${content.impactAssessment.urgency ?? '-'}`,
-              highlights: content.impactAssessment.affectedAreas ?? [],
-              signals: [{ type: alert.severity === 'critical' ? 'threat' : 'trend', title: alert.title ?? '预警', description: alert.description ?? '', confidence: alert.confidence ?? 0.7 }],
-              entityRefs: [],
-            }] : []),
-            ...(content.recommendedActions?.length ? [{
-              id: 'actions', title: '建议行动', thesis: `${content.recommendedActions.length} 条建议行动`,
-              content: content.recommendedActions.map((a: any) => `[${a.priority ?? '中'}] ${a.action}${a.timeline ? ` (${a.timeline})` : ''}: ${a.rationale ?? ''}`).join('\n'),
-              highlights: content.recommendedActions.map((a: any) => a.action),
-              signals: [], entityRefs: [],
-            }] : []),
-          ],
-          timeline: [],
-          metrics: {},
-        };
-      } else {
-        // Weekly/monthly/quarterly/tech-topic/competitor — standard format with sections
+      {
         const execSummary = content.executiveSummary ?? {};
         const rawKeyPoints = execSummary.keyPoints ?? [];
-        const normalizedKeyPoints = rawKeyPoints.map((kp: any) =>
-          typeof kp === 'object' ? (kp.point ?? kp.text ?? JSON.stringify(kp)) : String(kp)
-        );
 
         normalizedContent = {
           executiveSummary: {
-            overview: execSummary.overview ?? content.monthlyOverview ?? content.summary ?? parsed.summary ?? '',
-            keyPoints: normalizedKeyPoints,
+            overview: execSummary.overview ?? parsed.summary ?? '',
+            keyPoints: rawKeyPoints,
             confidence: execSummary.confidence ?? meta.confidence ?? 'medium',
-            period: execSummary.period ?? meta.period ?? {},
+            period: execSummary.period ?? meta.period ?? computedPeriod ?? {},
           },
-          sections: content.sections ?? [],
+          sections: (content.sections ?? []).map((sec: any) => {
+            // Normalize section.content: convert JSON objects to Markdown strings
+            if (sec.content && typeof sec.content !== 'string') {
+              sec.content = jsonToMarkdown(sec.content);
+            }
+            return sec;
+          }),
           timeline: content.timeline ?? [],
           metrics: content.metrics ?? {},
         };
-
-        // Handle monthly report specific fields — convert to sections if no sections exist
-        if (reportType === 'monthly' && !content.sections?.length) {
-          const monthlySections: any[] = [];
-          if (content.technologyTrends?.length) monthlySections.push({
-            id: 'tech_trends', title: '技术趋势', thesis: '技术发展趋势分析',
-            content: content.technologyTrends.map((t: any) => `${t.trend} (${t.direction}, ${t.changeRate ?? '-'}): ${(t.keyDrivers ?? []).join(', ')}`).join('\n'),
-            highlights: content.technologyTrends.map((t: any) => t.trend), signals: [], entityRefs: [],
-          });
-          if (content.competitiveLandscape) monthlySections.push({
-            id: 'competitive', title: '竞争格局', thesis: '竞争格局变化分析',
-            content: JSON.stringify(content.competitiveLandscape, null, 2),
-            highlights: [], signals: [], entityRefs: [],
-          });
-          if (content.riskAssessment?.length) monthlySections.push({
-            id: 'risk', title: '风险评估', thesis: '风险与机遇',
-            content: content.riskAssessment.map((r: any) => `[${r.probability}/${r.impact}] ${r.risk}: ${r.mitigation ?? ''}`).join('\n'),
-            highlights: content.riskAssessment.map((r: any) => r.risk), signals: [], entityRefs: [],
-          });
-          if (content.nextMonthOutlook) monthlySections.push({
-            id: 'outlook', title: '下月展望', thesis: '未来关注重点',
-            content: (content.nextMonthOutlook.focusAreas ?? []).join('\n'),
-            highlights: content.nextMonthOutlook.focusAreas ?? [], signals: [], entityRefs: [],
-          });
-          normalizedContent.sections = monthlySections;
-          normalizedContent.executiveSummary.overview = normalizedContent.executiveSummary.overview || content.monthlyOverview || '';
-        }
-
-        // Handle tech-topic report fields
-        if (reportType === 'tech_topic' && !content.sections?.length) {
-          const sections: any[] = [];
-          if (content.technologyOverview) sections.push({
-            id: 'tech_overview', title: '技术概述', thesis: `${content.technologyOverview.definition ?? ''}`,
-            content: `原理: ${(content.technologyOverview.corePrinciples ?? []).join(', ')}\n组件: ${(content.technologyOverview.keyComponents ?? []).join(', ')}\n领域: ${(content.technologyOverview.applicationDomains ?? []).join(', ')}`,
-            highlights: content.technologyOverview.keyComponents ?? [], signals: [], entityRefs: [],
-          });
-          if (content.competitiveLandscape?.competitiveMatrix) sections.push({
-            id: 'competitive', title: '竞争格局', thesis: '竞争矩阵分析',
-            content: content.competitiveLandscape.competitiveMatrix.map((p: any) => `${p.player}: 优势[${(p.strengths ?? []).join(',')}] 劣势[${(p.weaknesses ?? []).join(',')}]`).join('\n'),
-            highlights: [], signals: [], entityRefs: [],
-          });
-          if (content.riskOpportunity) sections.push({
-            id: 'risk_opp', title: '风险与机遇', thesis: '风险评估与机会识别',
-            content: `风险: ${(content.riskOpportunity.risks ?? []).map((r: any) => r.risk).join('; ')}\n机遇: ${(content.riskOpportunity.opportunities ?? []).map((o: any) => o.opportunity).join('; ')}`,
-            highlights: [], signals: [], entityRefs: [],
-          });
-          normalizedContent.sections = sections;
-        }
-
-        // Handle competitor report fields
-        if (reportType === 'competitor' && !content.sections?.length) {
-          const sections: any[] = [];
-          if (content.companyProfile) sections.push({
-            id: 'profile', title: '公司概况', thesis: content.companyProfile.basicInfo?.name ?? params.competitorName ?? '',
-            content: JSON.stringify(content.companyProfile, null, 2), highlights: [], signals: [], entityRefs: [],
-          });
-          if (content.swotAnalysis) sections.push({
-            id: 'swot', title: 'SWOT 分析', thesis: '优势/劣势/机遇/威胁',
-            content: `优势: ${(content.swotAnalysis.strengths ?? []).map((s: any) => s.strength ?? s).join('; ')}\n劣势: ${(content.swotAnalysis.weaknesses ?? []).map((w: any) => w.weakness ?? w).join('; ')}\n机遇: ${(content.swotAnalysis.opportunities ?? []).map((o: any) => o.opportunity ?? o).join('; ')}\n威胁: ${(content.swotAnalysis.threats ?? []).map((t: any) => t.threat ?? t).join('; ')}`,
-            highlights: [], signals: [], entityRefs: [],
-          });
-          if (content.competitiveAssessment) sections.push({
-            id: 'assessment', title: '竞争评估', thesis: `威胁等级: ${content.competitiveAssessment.threatLevel ?? '-'}`,
-            content: `威胁领域: ${(content.competitiveAssessment.threatAreas ?? []).join(', ')}\n建议: ${(content.competitiveAssessment.recommendedResponse ?? []).map((r: any) => r.action).join('; ')}`,
-            highlights: content.competitiveAssessment.threatAreas ?? [], signals: [], entityRefs: [],
-          });
-          normalizedContent.sections = sections;
-        }
       }
 
       const hasSubstantialContent = (normalizedContent.sections?.length ?? 0) > 0
@@ -3294,7 +2960,25 @@ async function startServer() {
         }];
       }
 
-      const title = parsed.title ?? `${params.topicName ?? ''} 分析报告`;
+      const TYPE_LABELS: Record<string, string> = {
+        daily: '日报', weekly: '周报', monthly: '月报', quarterly: '季报',
+        tech_topic: '技术专题', competitor: '友商分析', alert: '预警',
+      };
+      const periodStart = computedPeriod?.start ?? normalizedContent.executiveSummary.period?.start;
+      const periodEnd = computedPeriod?.end ?? normalizedContent.executiveSummary.period?.end;
+      let title = parsed.title ?? '';
+      // Ensure title includes date range for consistent display
+      if (!title || title.length < 5) {
+        const label = TYPE_LABELS[reportType] ?? '报告';
+        const name = reportType === 'competitor' ? (params.competitorName ?? params.topicName ?? '') : (params.topicName ?? '');
+        title = `${name} ${label}`;
+      }
+      if (periodStart && periodEnd) {
+        const dateRange = `${periodStart.slice(0, 10)} ~ ${periodEnd.slice(0, 10)}`;
+        if (!title.includes(dateRange) && !title.includes('—') && !title.includes(' ~ ')) {
+          title = `${title} · ${dateRange}`;
+        }
+      }
       const summary = parsed.summary ?? normalizedContent.executiveSummary.overview ?? '';
       const period = normalizedContent.executiveSummary.period ?? {};
       const rptId = `rpt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -3306,6 +2990,18 @@ async function startServer() {
         timelineCount: normalizedContent.timeline.length,
         confidence: normalizedContent.executiveSummary.confidence,
       });
+
+      // Validate report structure with Zod schema
+      const validation = validateReportOutput({ title, summary, content: normalizedContent });
+      if (validation.warnings.length > 0) {
+        console.warn('[Report] Schema validation warnings:', validation.warnings);
+      }
+      if (!validation.valid) {
+        console.warn('[Report] Schema validation failed, proceeding with best-effort save');
+        if (normalizedContent.executiveSummary) {
+          normalizedContent.executiveSummary.confidence = 'low';
+        }
+      }
 
       const docCount = await db.get(
         "SELECT COUNT(*) as count FROM documents WHERE topic_id = ?",
@@ -3369,16 +3065,6 @@ async function startServer() {
         // Non-critical error, continue with report processing
       }
 
-      try {
-        const autoReview = await reviewService.createAutoReview(rptId, normalizedContent, {
-          documentCount: docCount?.count || 0,
-          entityCount: entityCount?.count || 0,
-        });
-        console.log(`[Report] Auto review completed: ${autoReview.status}`);
-      } catch (reviewErr) {
-        console.error('[Report] Auto review failed:', reviewErr);
-      }
-
       if (params.topicId && normalizedContent.sections) {
         try {
           const links = await reportGraphService.buildGraphLinks(rptId, params.topicId, normalizedContent);
@@ -3407,18 +3093,22 @@ async function startServer() {
   scheduler.setDb(db);
   scheduler.setStartExecution(skillExecutor.startExecution.bind(skillExecutor));
   scheduler.setReportHandler(handleReportResult);
+  scheduler.setCollectFunction(async (topicId, topicName, start, end) => {
+    return triggerCollectionForPeriod(topicId, topicName, start, end);
+  });
+  scheduler.setGetDocumentsCountInPeriod(async (topicId, start, end) => {
+    return getDocumentsCountInPeriod(topicId, start, end);
+  });
 
   // Trigger a skill execution
   app.post("/api/skill/:name", requireAdmin, async (req, res) => {
     const { name } = req.params;
     const params = req.body ?? {};
 
-    // Deprecation notice for standalone research collection
+    // Research skill is only available via /api/reports/generate (auto-collect)
     if (name === 'research') {
-      console.warn('[API] DEPRECATED: Standalone research collection via /api/skill/research is deprecated.');
-      console.warn('[API] Use /api/reports/generate with autoCollect option instead.');
-      // Add deprecation header to response
-      res.setHeader('X-API-Deprecation', 'Standalone research is deprecated. Use /api/reports/generate with autoCollect=true');
+      res.status(400).json({ error: 'Use /api/reports/generate with autoCollect=true instead of calling research directly' });
+      return;
     }
 
     if (!skillRegistry.get(name)) {
@@ -3486,116 +3176,10 @@ async function startServer() {
       executionId,
       skillName: name,
       status: 'started',
-      deprecated: name === 'research' ? 'Use /api/reports/generate with autoCollect=true' : undefined
     });
   });
 
   // ── Time Period Document Query API ──
-
-  /**
-   * GET /api/documents/by-period
-   * Get documents within a time period with optional filtering
-   */
-  app.get("/api/documents/by-period", async (req, res) => {
-    try {
-      const { topicId, start, end, preset } = req.query;
-
-      if (!start || !end) {
-        if (!preset) {
-          return res.status(400).json({ error: "Either 'start' and 'end' dates, or 'preset' (24h, 7d, 30d, 90d, 1y) is required" });
-        }
-        // Compute period from preset
-        const period = computePeriod('weekly', { preset: preset as string });
-        req.query.start = period.start;
-        req.query.end = period.end;
-      }
-
-      let query = `
-        SELECT d.*,
-               COUNT(DISTINCT e.id) as entity_count,
-               COUNT(DISTINCT ev.id) as event_count
-        FROM documents d
-        LEFT JOIN entities e ON e.document_id = d.id
-        LEFT JOIN events ev ON ev.document_id = d.id
-        WHERE d.published_date >= ? AND d.published_date <= ?
-      `;
-      const params: any[] = [req.query.start, req.query.end];
-
-      if (topicId) {
-        query += ` AND d.topic_id = ?`;
-        params.push(topicId);
-      }
-
-      query += ` GROUP BY d.id ORDER BY d.published_date DESC LIMIT 100`;
-
-      const rows = await db.all(query, params);
-      res.json(rows);
-    } catch (error) {
-      console.error("Failed to query documents by period:", error);
-      res.status(500).json({ error: "Failed to query documents" });
-    }
-  });
-
-  /**
-   * GET /api/reports/:id/time-period
-   * Get the time period info for a specific report
-   */
-  app.get("/api/reports/:id/time-period", async (req, res) => {
-    try {
-      const periodInfo = await db.get(
-        `SELECT rtp.*, r.type as report_type, r.title as report_title
-         FROM report_time_periods rtp
-         JOIN reports r ON r.id = rtp.report_id
-         WHERE rtp.report_id = ?`,
-        [req.params.id]
-      );
-
-      if (!periodInfo) {
-        return res.status(404).json({ error: "Time period info not found for this report" });
-      }
-
-      res.json(periodInfo);
-    } catch (error) {
-      console.error("Failed to get report time period:", error);
-      res.status(500).json({ error: "Failed to get time period info" });
-    }
-  });
-
-  /**
-   * GET /api/sources/stats
-   * Get source collection statistics with rate limiting info
-   */
-  app.get("/api/sources/stats", async (req, res) => {
-    try {
-      const { domain, hours } = req.query;
-      const hoursAgo = hours
-        ? new Date(Date.now() - (parseInt(hours as string) * 60 * 60 * 1000)).toISOString()
-        : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
-      let query = `
-        SELECT domain,
-               COUNT(*) as collection_count,
-               MAX(last_collected) as last_collection,
-               SUM(CASE WHEN last_collected > ? THEN 1 ELSE 0 END) as recent_count
-        FROM sources
-        WHERE last_collected > ?
-      `;
-      const params: any[] = [hoursAgo, hoursAgo];
-
-      if (domain) {
-        query += ` AND domain = ?`;
-        params.push(domain);
-      }
-
-      query += ` GROUP BY domain ORDER BY collection_count DESC LIMIT 50`;
-
-      const rows = await db.all(query, params);
-      res.json(rows);
-    } catch (error) {
-      console.error("Failed to get source stats:", error);
-      res.status(500).json({ error: "Failed to get source stats" });
-    }
-  });
 
   // Get progress lines for an execution (poll-based, reliable)
   app.get("/api/skill/:id/progress", (req, res) => {

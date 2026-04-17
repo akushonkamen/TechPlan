@@ -12,10 +12,10 @@ const SKILL_NAMES: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  completed: '#34c759',
-  failed: '#ff3b30',
-  running: '#0071e3',
-  timeout: '#ff9f0a',
+  completed: '#5B7553',
+  failed: '#A0453A',
+  running: '#2A5A6B',
+  timeout: '#9C7B3C',
 };
 
 interface Execution {
@@ -68,7 +68,7 @@ export default function ExecutionHistory() {
 
   if (executions.length === 0) {
     return (
-      <div className={`${CARD} p-12 text-center text-sm text-[#86868b]`}>
+      <div className={`${CARD} p-12 text-center text-sm text-[#888]`}>
         暂无执行记录
       </div>
     );
@@ -78,44 +78,44 @@ export default function ExecutionHistory() {
     <div className="space-y-4">
       {/* Filter bar */}
       <div className="flex items-center gap-2">
-        <Filter className="w-4 h-4 text-[#86868b]" />
+        <Filter className="w-4 h-4 text-[#888]" />
         {(['all', 'completed', 'failed'] as StatusFilter[]).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
             className={`px-3 py-1.5 rounded-[980px] text-xs font-medium transition-all ${
               filter === f
-                ? 'bg-[#1d1d1f] text-white'
-                : 'bg-[#f5f5f7] text-[#86868b] hover:bg-[#e8e8ed]'
+                ? 'bg-[#1d1d1f] text-[#F7F7F7]'
+                : 'bg-[#E8E8E8] text-[#888] hover:bg-[#1d1d1f]/5'
             }`}
           >
             {f === 'all' ? '全部' : f === 'completed' ? '已完成' : '失败'}
           </button>
         ))}
-        <span className="text-xs text-[#86868b] ml-2">{filtered.length} 条记录</span>
+        <span className="text-xs text-[#888] ml-2">{filtered.length} 条记录</span>
       </div>
 
       {/* Execution list */}
-      <div className={`${CARD} divide-y divide-[#f5f5f7]`}>
+      <div className={`${CARD} divide-y divide-[#1d1d1f]/10`}>
         {filtered.map(exec => (
           <div key={exec.id}>
             <button
               onClick={() => setExpanded(expanded === exec.id ? null : exec.id)}
-              className="w-full flex items-center gap-3 px-5 py-4 hover:bg-[#f5f5f7]/50 transition-colors text-left"
+              className="w-full flex items-center gap-3 px-5 py-4 hover:bg-[#1d1d1f]/5 transition-colors text-left"
             >
               {expanded === exec.id
-                ? <ChevronDown className="w-4 h-4 text-[#86868b] shrink-0" />
-                : <ChevronRight className="w-4 h-4 text-[#86868b] shrink-0" />
+                ? <ChevronDown className="w-4 h-4 text-[#888] shrink-0" />
+                : <ChevronRight className="w-4 h-4 text-[#888] shrink-0" />
               }
               <span
                 className="w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: STATUS_COLORS[exec.status] ?? '#aeaeb5' }}
+                style={{ backgroundColor: STATUS_COLORS[exec.status] ?? '#aaa' }}
               />
               <span className="text-sm font-medium text-[#1d1d1f]">
                 {SKILL_NAMES[exec.skill_name] ?? exec.skill_name}
               </span>
-              <span className="text-xs text-[#aeaeb5] font-mono">{exec.id.slice(0, 12)}</span>
-              <span className="ml-auto text-xs text-[#86868b]">
+              <span className="text-xs text-[#aaa] font-mono">{exec.id.slice(0, 12)}</span>
+              <span className="ml-auto text-xs text-[#888]">
                 {exec.started_at ? new Date(exec.started_at).toLocaleString('zh-CN') : ''}
               </span>
             </button>
@@ -125,8 +125,8 @@ export default function ExecutionHistory() {
                 {/* Params */}
                 {exec.params && Object.keys(exec.params).length > 0 && (
                   <div>
-                    <div className="text-xs font-medium text-[#86868b] mb-1">参数</div>
-                    <pre className="text-xs bg-[#f5f5f7] rounded-xl p-3 overflow-x-auto text-[#1d1d1f] whitespace-pre-wrap">
+                    <div className="text-xs font-medium text-[#888] mb-1">参数</div>
+                    <pre className="text-xs bg-[#E8E8E8] rounded-xl p-3 overflow-x-auto text-[#1d1d1f] whitespace-pre-wrap">
                       {JSON.stringify(exec.params, null, 2)}
                     </pre>
                   </div>
@@ -135,8 +135,8 @@ export default function ExecutionHistory() {
                 {/* Error */}
                 {exec.error && (
                   <div>
-                    <div className="text-xs font-medium text-[#ff3b30] mb-1">错误</div>
-                    <pre className="text-xs bg-[#ff3b30]/5 rounded-xl p-3 text-[#ff3b30] whitespace-pre-wrap">
+                    <div className="text-xs font-medium text-[#A0453A] mb-1">错误</div>
+                    <pre className="text-xs bg-[#A0453A]/5 rounded-xl p-3 text-[#A0453A] whitespace-pre-wrap">
                       {exec.error}
                     </pre>
                   </div>
@@ -145,8 +145,8 @@ export default function ExecutionHistory() {
                 {/* Result */}
                 {exec.result != null && (
                   <div>
-                    <div className="text-xs font-medium text-[#86868b] mb-1">结果</div>
-                    <pre className="text-xs bg-[#f5f5f7] rounded-xl p-3 overflow-x-auto text-[#1d1d1f] whitespace-pre-wrap max-h-96 overflow-y-auto">
+                    <div className="text-xs font-medium text-[#888] mb-1">结果</div>
+                    <pre className="text-xs bg-[#E8E8E8] rounded-xl p-3 overflow-x-auto text-[#1d1d1f] whitespace-pre-wrap max-h-96 overflow-y-auto">
                       {typeof exec.result === 'string'
                         ? exec.result
                         : JSON.stringify(exec.result, null, 2)}
@@ -155,7 +155,7 @@ export default function ExecutionHistory() {
                 )}
 
                 {/* Meta */}
-                <div className="flex gap-6 text-xs text-[#aeaeb5]">
+                <div className="flex gap-6 text-xs text-[#aaa]">
                   {exec.completed_at && (
                     <span>完成于 {new Date(exec.completed_at).toLocaleString('zh-CN')}</span>
                   )}
