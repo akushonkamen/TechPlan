@@ -1350,64 +1350,6 @@ async function startServer() {
   // ===== Graph Data (ReactFlow) =====
 
   /**
-   * GET /api/topics/:id/graph
-   * 获取主题的知识图谱（节点和边）
-   */
-  app.get("/api/topics/:id/graph", async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      // 获取所有实体作为节点
-      const entities = await db.all(
-        `SELECT DISTINCT e.text, e.type
-         FROM entities e
-         JOIN documents d ON e.document_id = d.id
-         WHERE d.topic_id = ?
-         ORDER BY e.text`,
-        [id]
-      );
-
-      // 获取所有关系作为边
-      const relations = await db.all(
-        `SELECT r.source_text, r.target_text, r.relation, r.confidence
-         FROM relations r
-         JOIN documents d ON r.document_id = d.id
-         WHERE d.topic_id = ?`,
-        [id]
-      );
-
-      const nodes = entities.map((e: any, idx: number) => ({
-        id: `node_${idx}`,
-        label: e.text,
-        type: e.type
-      }));
-
-      const nodeMap = new Map(entities.map((e: any, idx: number) => [e.text.toLowerCase(), `node_${idx}`]));
-
-      const links = relations
-        .map((r: any) => {
-          const sourceId = nodeMap.get(r.source_text.toLowerCase());
-          const targetId = nodeMap.get(r.target_text.toLowerCase());
-          if (sourceId && targetId) {
-            return {
-              source: sourceId,
-              target: targetId,
-              label: r.relation,
-              confidence: r.confidence
-            };
-          }
-          return null;
-        })
-        .filter((l): l is NonNullable<typeof l> => l !== null);
-
-      res.json({ nodes, links });
-    } catch (error) {
-      console.error("Failed to fetch topic graph:", error);
-      res.status(500).json({ error: "Failed to fetch topic graph" });
-    }
-  });
-
-  /**
    * GET /api/topics/:id/scoring
    * 获取主题的数据评分
    */
@@ -1437,26 +1379,26 @@ async function startServer() {
 
   // ===== Graph Database API =====
 
-  // Import graph service
-  const { getGraphService } = await import('./src/services/graphService.js');
-  const graphService = getGraphService();
-  await graphService.init();
-
-  console.log(`Graph database initialized with backend: ${graphService.getBackendType()}`);
-
   /**
    * GET /api/graph/status
    * 获取图数据库状态
    */
   app.get("/api/graph/status", async (req, res) => {
     try {
-      const syncStatus = await graphService.getSyncStatus();
+      const entityCount = await db.get("SELECT COUNT(*) as count FROM entities");
+      const relCount = await db.get("SELECT COUNT(*) as count FROM relations");
+      const claimCount = await db.get("SELECT COUNT(*) as count FROM claims");
+      const eventCount = await db.get("SELECT COUNT(*) as count FROM events");
+      const lastEntity = await db.get("SELECT MAX(created_at) as last FROM entities");
       res.json({
-        backend: graphService.getBackendType(),
-        ...syncStatus,
+        backend: "sqlite",
+        nodeCount: entityCount?.count || 0,
+        relationshipCount: relCount?.count || 0,
+        claimCount: claimCount?.count || 0,
+        eventCount: eventCount?.count || 0,
+        lastSyncAt: lastEntity?.last || null,
       });
     } catch (error) {
-      console.error("Failed to get graph status:", error);
       res.status(500).json({ error: "Failed to get graph status" });
     }
   });
@@ -1952,15 +1894,19 @@ async function startServer() {
    */
   app.post("/api/graph/sync/:topicId", async (req, res) => {
     try {
-      const { topicId } = req.params;
-      const topic = await db.get("SELECT * FROM topics WHERE id = ?", [topicId]);
-      if (!topic) return res.status(404).json({ error: "Topic not found" });
-
-      const result = await graphService.syncFromSQLite(db);
-      res.json({ success: true, topicId, ...result });
+      const topicId = req.params.topicId;
+      const topic = await db.get("SELECT name FROM topics WHERE id = ?", [topicId]);
+      if (!topic) {
+        res.status(404).json({ error: "Topic not found" });
+        return;
+      }
+      res.json({
+        message: "Use POST /api/skill/extract to extract knowledge from documents",
+        topicId,
+        topicName: topic.name,
+      });
     } catch (error) {
-      console.error("Failed to sync graph:", error);
-      res.status(500).json({ error: "Failed to sync graph" });
+      res.status(500).json({ error: "Failed to process sync request" });
     }
   });
 
@@ -2286,9 +2232,6 @@ async function startServer() {
 
   const { migrateReportTables } = await import('./src/services/reportService.js');
   await migrateReportTables(db);
-
-  const { ReportGraphService } = await import('./src/services/reportGraphService.js');
-  const reportGraphService = new ReportGraphService(db);
 
   // ── Unified Report Generation ──
   const REPORT_TYPE_TO_SKILL: Record<string, string> = {
@@ -3468,14 +3411,7 @@ async function startServer() {
         // Non-critical error, continue with report processing
       }
 
-      if (params.topicId && normalizedContent.sections) {
-        try {
-          const links = await reportGraphService.buildGraphLinks(rptId, params.topicId, normalizedContent);
-          console.log(`[Report] Built ${links.length} graph links`);
-        } catch (graphErr) {
-          console.error('[Report] Failed to build graph links:', graphErr);
-        }
-      }
+      // Graph links removed - using SQLite only
     } catch (err) {
       console.error('[Report] Failed to persist report:', err);
     }

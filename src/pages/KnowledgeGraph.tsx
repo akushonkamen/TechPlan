@@ -24,8 +24,10 @@ interface ApiLink {
 
 interface GraphStatus {
   backend: string;
-  nodeCount?: number;
-  relationshipCount?: number;
+  nodeCount: number;
+  relationshipCount: number;
+  claimCount: number;
+  eventCount: number;
   lastSyncAt?: string;
 }
 
@@ -468,9 +470,11 @@ export default function KnowledgeGraph() {
               <div className="px-5 py-4">
                 <div className="text-[9px] font-extrabold uppercase tracking-widest text-[#888] mb-3">System Health</div>
                 <div className="font-mono text-[10px] text-[#1d1d1f] space-y-1">
-                  <div>Backend: {graphStatus?.backend || '—'}</div>
+                  <div>Backend: {graphStatus?.backend || 'SQLite'}</div>
                   <div>Nodes: {graphStatus?.nodeCount ?? nodes.length}</div>
-                  <div>Edges: {graphStatus?.relationshipCount ?? edges.length}</div>
+                  <div>Relationships: {graphStatus?.relationshipCount ?? edges.length}</div>
+                  <div>Claims: {graphStatus?.claimCount ?? 0}</div>
+                  <div>Events: {graphStatus?.eventCount ?? 0}</div>
                   {graphStatus?.lastSyncAt && (
                     <div>Sync: {new Date(graphStatus.lastSyncAt).toLocaleString('zh-CN')}</div>
                   )}
