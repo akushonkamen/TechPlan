@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type FC } from 'react';
-import { FileText, Calendar, Trash2, ChevronDown, ChevronUp, Network, TrendingUp, AlertTriangle, Zap, Flag, Clock, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
+import { FileText, Calendar, Trash2, ChevronDown, ChevronUp, Network, TrendingUp, AlertTriangle, Zap, Flag, Clock, RefreshCw, CheckCircle, AlertCircle, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,7 +8,6 @@ import SkillButton from '../components/SkillButton';
 import EmptyState from '../components/EmptyState';
 import { fetchTopics } from '../services/topicService';
 import { CARD, INPUT, SPINNER } from '../lib/design';
-import { useSkillExecutor } from '../hooks/useSkillExecutor';
 
 // ── Types ──
 
@@ -406,12 +405,11 @@ export default function Reports() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isCollecting, setIsCollecting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [refreshInterval, setRefreshInterval] = useState<number>(60); // seconds
   const refreshTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
-
-  const { status: skillExecStatus, progress: skillProgress, error: skillError, connectOnly: connectToExecution, reset: resetExec } = useSkillExecutor();
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; link?: string } | null>(null);
 
   // Auto-refresh effect
   useEffect(() => {
@@ -434,13 +432,12 @@ export default function Reports() {
 
   useEffect(() => { loadData(); }, []);
 
-  // Reload data when skill execution completes
+  // Auto-dismiss toast after 8 seconds
   useEffect(() => {
-    if (skillExecStatus === 'completed') {
-      loadData();
-      setTimeout(() => resetExec(), 5000);
-    }
-  }, [skillExecStatus]);
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 8000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -473,9 +470,26 @@ export default function Reports() {
   };
 
   const handleGenerateReport = async () => {
-    if (!selectedTopicId || skillExecStatus === 'running' || isCollecting) return;
+    if (!selectedTopicId || isSubmitting) return;
     const topic = topics.find(t => t.id === selectedTopicId);
     if (!topic) return;
+
+    // Check for running duplicate tasks
+    try {
+      const execRes = await fetch('/api/skill/executions');
+      if (execRes.ok) {
+        const executions = await execRes.json();
+        const runningExec = executions.find((e: any) =>
+          e.status === 'running' &&
+          e.params?.reportType === reportType &&
+          e.params?.topicId === selectedTopicId
+        );
+        if (runningExec) {
+          const label = getTypeLabel(reportType);
+          if (!confirm(`该主题的${label}正在生成中，确定要重复提交吗？`)) return;
+        }
+      }
+    } catch { /* ignore check failure */ }
 
     // Build period parameter based on selection
     let period: { start: string; end: string } | undefined;
@@ -501,9 +515,8 @@ export default function Reports() {
       period = { start, end };
     }
 
-    resetExec();
     setErrorMsg('');
-    setIsCollecting(true);
+    setIsSubmitting(true);
     try {
       const res = await fetch('/api/reports/generate', {
         method: 'POST',
@@ -520,15 +533,18 @@ export default function Reports() {
         throw new Error(errData.error || '启动失败');
       }
 
-      const { executionId } = await res.json();
-      setIsCollecting(false);
-
-      // Connect to the execution using the hook
-      connectToExecution(executionId, { timeoutMs: 1200000 }); // 20 minutes
+      setToast({
+        message: `${getTypeLabel(reportType)}生成已提交，请到任务中心查看进度`,
+        type: 'success',
+        link: '/tasks',
+      });
+      // Auto-reload after a delay to pick up the new report
+      setTimeout(() => loadData(), 15000);
     } catch (error: unknown) {
-      setIsCollecting(false);
       const msg = error instanceof Error ? error.message : '生成失败';
-      setErrorMsg(msg);
+      setToast({ message: msg, type: 'error' });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -627,10 +643,10 @@ export default function Reports() {
             />
           </>
         )}
-        <SkillButton onClick={handleGenerateReport} status={isCollecting ? 'running' : skillExecStatus} disabled={!selectedTopicId}>
-          {isCollecting ? '采集中...' : skillExecStatus === 'running' ? '生成中...' : `生成${getTypeLabel(reportType)}`}
+        <SkillButton onClick={handleGenerateReport} status={isSubmitting ? 'running' : 'idle'} disabled={!selectedTopicId || isSubmitting}>
+          {isSubmitting ? '提交中...' : `生成${getTypeLabel(reportType)}`}
         </SkillButton>
-        {errorMsg && !isCollecting && (
+        {errorMsg && (
           <span className="text-xs text-[#A0453A] max-w-xs">{errorMsg}</span>
         )}
         <div className="w-px h-8 bg-[#1d1d1f]/30 mx-1" />
@@ -661,35 +677,25 @@ export default function Reports() {
         )}
       </div>
 
-      {/* Progress panel during collection + report generation */}
-      {(isCollecting || skillExecStatus === 'running' || skillExecStatus === 'completed' || skillExecStatus === 'failed') && (
-        <div className={CARD}>
-          <div className="flex items-center gap-3 mb-3">
-            {(isCollecting || skillExecStatus === 'running') && <div className={SPINNER} />}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-[#1d1d1f]">
-                {isCollecting ? 'Step 1/2 · 采集数据'
-                  : skillExecStatus === 'running' ? 'Step 2/2 · 生成报告'
-                  : skillExecStatus === 'completed' ? '生成完成'
-                  : '生成失败'}
-              </span>
-              {skillExecStatus === 'completed' && <CheckCircle className="w-4 h-4 text-[#5B7553]" />}
-              {skillExecStatus === 'failed' && <AlertCircle className="w-4 h-4 text-[#A0453A]" />}
-            </div>
-          </div>
-          {skillProgress.length > 0 && !isCollecting && (
-            <div className="space-y-1 max-h-48 overflow-y-auto">
-              {skillProgress.slice(-50).map((msg, i) => (
-                <p key={`${i}-${msg.slice(0, 20)}`} className="text-xs text-[#888] animate-fade-in">{msg}</p>
-              ))}
-            </div>
+      {/* Toast notification */}
+      {toast && (
+        <div className={`flex items-center gap-3 px-5 py-3.5 rounded-2xl border animate-fade-in ${
+          toast.type === 'success'
+            ? 'bg-[#5B7553]/10 border-[#5B7553]/30 text-[#5B7553]'
+            : 'bg-[#A0453A]/10 border-[#A0453A]/30 text-[#A0453A]'
+        }`}>
+          {toast.type === 'success'
+            ? <CheckCircle className="w-4 h-4 shrink-0" />
+            : <AlertCircle className="w-4 h-4 shrink-0" />}
+          <span className="text-sm font-medium flex-1">{toast.message}</span>
+          {toast.link && (
+            <Link to={toast.link} className="text-sm font-bold underline underline-offset-2 hover:opacity-80 transition-opacity">
+              前往查看
+            </Link>
           )}
-          {skillExecStatus === 'failed' && skillError && (
-            <div className="mt-3 flex items-start gap-2 px-4 py-3 bg-[#A0453A]/5 border border-[#A0453A]/20 rounded-2xl">
-              <AlertCircle className="w-4 h-4 text-[#A0453A] shrink-0 mt-0.5" />
-              <span className="text-sm text-[#A0453A]">{skillError}</span>
-            </div>
-          )}
+          <button onClick={() => setToast(null)} className="ml-2 opacity-60 hover:opacity-100 transition-opacity">
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
