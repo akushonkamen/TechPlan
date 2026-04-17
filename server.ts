@@ -457,6 +457,24 @@ async function startServer() {
     }
   }
 
+  // Migrate: add review_status column to claims if missing
+  try {
+    await db.exec(`ALTER TABLE claims ADD COLUMN review_status TEXT DEFAULT 'pending'`);
+  } catch (e: any) {
+    if (!e.message?.includes('duplicate column')) {
+      console.warn('[Migration] Warning adding claims.review_status:', e.message);
+    }
+  }
+
+  // Migrate: add review_status column to entities if missing
+  try {
+    await db.exec(`ALTER TABLE entities ADD COLUMN review_status TEXT DEFAULT 'pending'`);
+  } catch (e: any) {
+    if (!e.message?.includes('duplicate column')) {
+      console.warn('[Migration] Warning adding entities.review_status:', e.message);
+    }
+  }
+
   // Migration: Add source tracking and deduplication columns to documents
   const sourceTrackingColumns = [
     'original_source TEXT',      // First source where document was found
@@ -1389,6 +1407,34 @@ async function startServer() {
     }
   });
 
+  /**
+   * GET /api/topics/:id/scoring
+   * 获取主题的数据评分
+   */
+  app.get("/api/topics/:id/scoring", requireAdmin, async (req, res) => {
+    try {
+      const topicId = req.params.id;
+      const docCount = await db.get("SELECT COUNT(*) as count FROM documents WHERE topic_id = ?", [topicId]);
+      const entityCount = await db.get("SELECT COUNT(*) as count FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ?", [topicId]);
+      const claimCount = await db.get("SELECT COUNT(*) as count FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ?", [topicId]);
+      const eventCount = await db.get("SELECT COUNT(*) as count FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ?", [topicId]);
+
+      const docs = docCount?.count || 0;
+      const entities = entityCount?.count || 0;
+      const claims = claimCount?.count || 0;
+      const events = eventCount?.count || 0;
+      const score = Math.min(100, docs * 5 + entities * 2 + claims * 3 + events * 4);
+
+      let recommendation = '建议增加数据采集量';
+      if (score >= 70) recommendation = '数据充分，可以生成深度分析报告';
+      else if (score >= 40) recommendation = '数据基本充足，建议补充采集后生成报告';
+
+      res.json({ score, breakdown: { documents: docs, entities, claims, events }, recommendation });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to compute scoring" });
+    }
+  });
+
   // ===== Graph Database API =====
 
   // Import graph service
@@ -2001,6 +2047,238 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to delete report:", error);
       res.status(500).json({ error: "Failed to delete report" });
+    }
+  });
+
+  // ===== Review API =====
+
+  /**
+   * GET /api/reviews
+   * 获取待审核项目列表（claims和entities）
+   * Query params: status (pending/approved/rejected), type (claim_review/entity_disambig)
+   */
+  app.get("/api/reviews", async (req, res) => {
+    try {
+      const { status = 'pending', type } = req.query;
+
+      // 构建查询条件
+      let whereClause = "WHERE review_status = ?";
+      const params: any[] = [status];
+
+      if (type === 'claim_review') {
+        // 只查询claims
+        whereClause += " AND confidence < 0.7";
+        const claims = await db.all(
+          `SELECT
+            id,
+            'claim_review' as type,
+            text as content,
+            source_context as source,
+            confidence,
+            created_at as time
+           FROM claims
+           ${whereClause}
+           ORDER BY created_at DESC`,
+          params
+        );
+
+        // 添加topic信息
+        const reviews = await Promise.all(claims.map(async (claim: any) => {
+          const doc = await db.get("SELECT topic_id, url FROM documents WHERE id = (SELECT document_id FROM claims WHERE id = ?)", [claim.id]);
+          return {
+            ...claim,
+            topic_id: doc?.topic_id || '',
+            source_url: doc?.url || '',
+            topic_name: doc?.topic_id || '未分类',
+            reason: ''
+          };
+        }));
+
+        return res.json(reviews);
+      } else if (type === 'entity_disambig') {
+        // 只查询entities
+        whereClause += " AND confidence < 0.7";
+        const entities = await db.all(
+          `SELECT
+            id,
+            'entity_disambig' as type,
+            text as content,
+            '' as source,
+            confidence,
+            created_at as time
+           FROM entities
+           ${whereClause}
+           ORDER BY created_at DESC`,
+          params
+        );
+
+        // 添加topic信息
+        const reviews = await Promise.all(entities.map(async (entity: any) => {
+          const doc = await db.get("SELECT topic_id, url FROM documents WHERE id = (SELECT document_id FROM entities WHERE id = ?)", [entity.id]);
+          return {
+            ...entity,
+            topic_id: doc?.topic_id || '',
+            source_url: doc?.url || '',
+            topic_name: doc?.topic_id || '未分类',
+            reason: ''
+          };
+        }));
+
+        return res.json(reviews);
+      } else {
+        // 查询所有
+        const claims = await db.all(
+          `SELECT
+            id,
+            'claim_review' as type,
+            text as content,
+            source_context as source,
+            confidence,
+            created_at as time
+           FROM claims
+           WHERE review_status = ? AND confidence < 0.7
+           ORDER BY created_at DESC
+           LIMIT 50`,
+          [status]
+        );
+
+        const entities = await db.all(
+          `SELECT
+            id,
+            'entity_disambig' as type,
+            text as content,
+            '' as source,
+            confidence,
+            created_at as time
+           FROM entities
+           WHERE review_status = ? AND confidence < 0.7
+           ORDER BY created_at DESC
+           LIMIT 50`,
+          [status]
+        );
+
+        // 合并结果并添加topic信息
+        const allItems = [...claims, ...entities];
+        const reviews = await Promise.all(allItems.map(async (item: any) => {
+          const tableName = item.type === 'claim_review' ? 'claims' : 'entities';
+          const doc = await db.get(`SELECT topic_id, url FROM documents WHERE id = (SELECT document_id FROM ${tableName} WHERE id = ?)`, [item.id]);
+          return {
+            ...item,
+            topic_id: doc?.topic_id || '',
+            source_url: doc?.url || '',
+            topic_name: doc?.topic_id || '未分类',
+            reason: ''
+          };
+        }));
+
+        // 按时间排序
+        reviews.sort((a: any, b: any) => new Date(b.time).getTime() - new Date(a.time).getTime());
+
+        return res.json(reviews);
+      }
+    } catch (error) {
+      console.error("Failed to fetch reviews:", error);
+      res.status(500).json({ error: "Failed to fetch reviews" });
+    }
+  });
+
+  /**
+   * GET /api/reviews/stats
+   * 获取审核统计信息
+   */
+  app.get("/api/reviews/stats", async (req, res) => {
+    try {
+      const [pendingResult, approvedResult, rejectedResult] = await Promise.all([
+        db.get("SELECT COUNT(*) as count FROM claims WHERE review_status = 'pending' AND confidence < 0.7"),
+        db.get("SELECT COUNT(*) as count FROM entities WHERE review_status = 'pending' AND confidence < 0.7"),
+        db.get("SELECT COUNT(*) as count FROM claims WHERE review_status = 'approved'"),
+        db.get("SELECT COUNT(*) as count FROM entities WHERE review_status = 'approved'"),
+        db.get("SELECT COUNT(*) as count FROM claims WHERE review_status = 'rejected'"),
+        db.get("SELECT COUNT(*) as count FROM entities WHERE review_status = 'rejected'"),
+      ]);
+
+      const pendingClaims = (pendingResult as any)?.count || 0;
+      const pendingEntities = (approvedResult as any)?.count || 0;
+      const approvedClaims = (approvedResult as any)?.count || 0;
+      const approvedEntities = (rejectedResult as any)?.count || 0;
+      const rejectedClaims = (rejectedResult as any)?.count || 0;
+      const rejectedEntities = (rejectedResult as any)?.count || 0;
+
+      res.json({
+        total: pendingClaims + pendingEntities,
+        entityDisambig: pendingEntities,
+        claimReview: pendingClaims,
+        conflictResolve: 0
+      });
+    } catch (error) {
+      console.error("Failed to fetch review stats:", error);
+      res.status(500).json({ error: "Failed to fetch review stats" });
+    }
+  });
+
+  /**
+   * POST /api/reviews/:id/approve
+   * 审核通过
+   */
+  app.post("/api/reviews/:id/approve", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // 尝试更新claims表
+      const claimResult = await db.run(
+        "UPDATE claims SET review_status = 'approved' WHERE id = ?",
+        [id]
+      );
+
+      // 如果claims表没有更新，尝试entities表
+      if (claimResult.changes === 0) {
+        const entityResult = await db.run(
+          "UPDATE entities SET review_status = 'approved' WHERE id = ?",
+          [id]
+        );
+
+        if (entityResult.changes === 0) {
+          return res.status(404).json({ error: "Review item not found" });
+        }
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Failed to approve review:", error);
+      res.status(500).json({ error: "Failed to approve review" });
+    }
+  });
+
+  /**
+   * POST /api/reviews/:id/reject
+   * 审核拒绝
+   */
+  app.post("/api/reviews/:id/reject", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // 尝试更新claims表
+      const claimResult = await db.run(
+        "UPDATE claims SET review_status = 'rejected' WHERE id = ?",
+        [id]
+      );
+
+      // 如果claims表没有更新，尝试entities表
+      if (claimResult.changes === 0) {
+        const entityResult = await db.run(
+          "UPDATE entities SET review_status = 'rejected' WHERE id = ?",
+          [id]
+        );
+
+        if (entityResult.changes === 0) {
+          return res.status(404).json({ error: "Review item not found" });
+        }
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Failed to reject review:", error);
+      res.status(500).json({ error: "Failed to reject review" });
     }
   });
 
