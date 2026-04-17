@@ -3255,6 +3255,17 @@ async function startServer() {
         parsed = {};
       }
 
+      // Detect LLM API error responses (rate limits, auth failures, etc.)
+      if (parsed?.error?.code || parsed?.error?.message) {
+        const errMsg = parsed.error.message || parsed.error.code || 'Unknown LLM API error';
+        console.error(`[Report] LLM API error: ${errMsg}`);
+        await db.run(
+          "UPDATE skill_executions SET status = 'failed', error = ? WHERE id = ?",
+          [`LLM API 错误: ${errMsg}`, execution.id]
+        );
+        return;
+      }
+
       // Fallback: scan raw stdout for report JSON when primary parsing yields nothing useful
       const hasReportStructure = (obj: any): boolean =>
         obj && typeof obj === 'object' && (
