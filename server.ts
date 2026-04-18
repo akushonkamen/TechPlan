@@ -15,6 +15,7 @@ import { SkillExecutor } from "./src/skillExecutor.js";
 import type { SkillExecution } from "./src/skillExecutor.js";
 import { SkillWebSocket } from "./src/websocket.js";
 import { validateReportOutput } from "./src/schemas/report.js";
+import { validateExtractionOutput } from "./src/schemas/extraction.js";
 import { SchedulerService } from "./src/scheduler.js";
 
 // 配置文件上传（使用内存存储）
@@ -3504,6 +3505,25 @@ async function startServer() {
 
       if (name === 'report' || name.startsWith('report-')) {
         await handleReportResult(execution, params);
+      }
+
+      if (name === 'extract') {
+        const validation = validateExtractionOutput(execution.result);
+        if (validation.warnings.length > 0) {
+          console.warn('[Extract] Schema validation warnings:', validation.warnings);
+        }
+
+        if (!validation.valid) {
+          execution.status = 'failed';
+          execution.error = `Extraction schema validation failed: ${validation.warnings.slice(0, 3).join('; ')}`;
+          await db.run(
+            "UPDATE skill_executions SET status = 'failed', error = ? WHERE id = ?",
+            [execution.error, execution.id]
+          );
+          ws.send(execution.id, 'error', execution.error);
+        } else {
+          execution.result = validation.data;
+        }
       }
 
       ws.send(execution.id, 'result', JSON.stringify(execution.result ?? { error: execution.error }));

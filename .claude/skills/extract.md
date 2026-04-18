@@ -53,6 +53,29 @@ sqlite3 -json database.sqlite "SELECT id, title, content FROM documents WHERE to
 
 对每篇文档，进行以下抽取：
 
+在执行 INSERT 前，先构造一个严格 JSON 结果对象用于校验，格式必须如下（不要包含额外字段）：
+
+```json
+{
+  "topicId": "{{topicId}}",
+  "documentsProcessed": 0,
+  "extractionStats": { "entities": 0, "relations": 0, "claims": 0, "events": 0 },
+  "entities": [],
+  "relations": [],
+  "claims": [],
+  "events": [],
+  "topEntities": []
+}
+```
+
+字段要求：
+- `confidence` 必须在 `0~1`。
+- `entities[].type` 仅允许：`Technology|Organization|Person|Product|Location|TimePeriod|Other`。
+- `relations[].relation` 仅允许：`develops|competes_with|published_by|uses|invests_in|partners_with|acquires|supports|contradicts|related_to`。
+- `claims[].polarity` 仅允许：`positive|negative|neutral`。
+- `events[].type` 仅允许：`breakthrough|partnership|product_launch|regulation|funding|acquisition|research|other`。
+- 字段 `text/title/source_text/target_text` 不可为空。
+
 #### 实体抽取
 从文档中识别：
 - **技术/方法** (Technology): 具体技术、算法、方法论
