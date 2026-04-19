@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { FileText, Download, Calendar, ArrowRight, Play, Loader2, Trash2 } from 'lucide-react';
-import { fetchReports, generateWeeklyReport, saveReport, type GeneratedReport } from '../services/reportService';
 import { fetchTopics } from '../services/topicService';
+import { useReportGeneration } from '../hooks/useSkills';
 
 export default function Reports() {
+  const reportSkill = useReportGeneration();
   const [reports, setReports] = useState<any[]>([]);
   const [topics, setTopics] = useState<any[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
@@ -18,10 +19,11 @@ export default function Reports() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [reportsData, topicsData] = await Promise.all([
-        fetchReports(),
+      const [reportsRes, topicsData] = await Promise.all([
+        fetch('/api/reports'),
         fetchTopics()
       ]);
+      const reportsData = reportsRes.ok ? await reportsRes.json() : [];
       setReports(reportsData);
       setTopics(topicsData);
       if (topicsData.length > 0 && !selectedTopicId) {
@@ -39,29 +41,28 @@ export default function Reports() {
 
     setIsGenerating(true);
     try {
-      const topic = topics.find(t => t.id === selectedTopicId);
-      if (!topic) return;
-
-      // 获取该主题的文档
-      const docsResponse = await fetch(`http://localhost:3000/api/documents?topic_id=${selectedTopicId}`);
+      // 检查该主题是否有文档
+      const docsResponse = await fetch(`/api/documents?topic_id=${selectedTopicId}`);
       const documents = await docsResponse.json();
 
-      if (documents.length === 0) {
-        alert('该主题暂无采集文档，请先在"数据采集"页面进行采集');
+      if (!documents || documents.length === 0) {
+        alert('该主题暂无采集文档，请先采集数据');
         return;
       }
 
-      // 生成报告
-      const report = await generateWeeklyReport({
+      // 调用 skill 生成报告
+      const topic = topics.find((t: any) => t.id === selectedTopicId);
+      await reportSkill.generateReport({
         topicId: selectedTopicId,
-        topicName: topic.name,
-        documents
+        topicName: topic?.name || '',
+        reportType: 'weekly',
       });
 
-      // 保存报告
-      await saveReport(report);
-
-      // 刷新报告列表
+      if (reportSkill.status === 'completed') {
+        alert('周报生成成功！');
+      } else if (reportSkill.error) {
+        throw new Error(reportSkill.error);
+      }
       await loadData();
     } catch (error: any) {
       console.error("Failed to generate report:", error);
@@ -74,7 +75,7 @@ export default function Reports() {
   const handleDeleteReport = async (id: string) => {
     if (!confirm('确定要删除此报告吗？')) return;
     try {
-      await fetch(`http://localhost:3000/api/reports/${id}`, { method: 'DELETE' });
+      await fetch(`/api/reports/${id}`, { method: 'DELETE' });
       await loadData();
     } catch (error) {
       console.error("Failed to delete report:", error);

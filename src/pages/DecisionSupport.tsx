@@ -125,19 +125,36 @@ export default function DecisionSupport() {
 
     setAnalyzing(true);
     try {
-      const res = await fetch('/api/analysis/run', {
+      // Trigger analysis via skill executor
+      const res = await fetch('/api/skill/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topicId: selectedTopic,
-          type: 'special_analysis',
-          depth: 2,
+          topicName: topics.find((t: any) => t.id === selectedTopic)?.name || '',
+          reportType: 'special',
         }),
       });
 
       if (res.ok) {
-        const result = await res.json();
-        setAnalysisResult(result);
+        const { executionId } = await res.json();
+        // Poll for result
+        let attempts = 0;
+        while (attempts < 60) {
+          await new Promise(r => setTimeout(r, 2000));
+          const statusRes = await fetch(`/api/skill/${executionId}/status`);
+          if (statusRes.ok) {
+            const status = await statusRes.json();
+            if (status.status === 'completed') {
+              const result = status.result ? JSON.parse(status.result) : {};
+              setAnalysisResult(result);
+              break;
+            } else if (status.status === 'failed') {
+              throw new Error(status.error || 'Analysis failed');
+            }
+          }
+          attempts++;
+        }
         await fetchScoringCard(selectedTopic);
       }
     } catch (error) {

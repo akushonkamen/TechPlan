@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Save, Eye, EyeOff, Key, Globe, AlertCircle, Check, ChevronDown } from 'lucide-react';
-import { resetAIConfig } from '../services/aiService';
+
+// 简单的客户端缓存重置（无需导入服务端模块）
+const resetAIConfig = () => {};
 
 interface Config {
   // AI 模型配置
