@@ -116,11 +116,7 @@ export default function DecisionSupport() {
       // Auto-trigger sync-graph after competitor tracking completes
       if (selectedTopic) {
         try {
-          await fetch('/api/skill/sync-graph', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ topicId: selectedTopic }),
-          });
+          await fetch(`/api/graph/sync/${selectedTopic}`, { method: 'POST' });
         } catch (error) {
           console.error('Auto sync-graph failed after competitor tracking:', error);
         }

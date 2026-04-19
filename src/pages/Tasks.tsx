@@ -60,7 +60,7 @@ function getLogColor(line: string): string {
   if (line.startsWith('超时') || line.startsWith('失败')) return 'text-[#A0453A]';
   if (line.includes('完成')) return 'text-[#5B7553] font-medium';
   if (line.startsWith('系统')) return 'text-[#888]';
-  return 'text-[#1d1d1f/10]';
+  return 'text-[#1d1d1f]/10';
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; icon: typeof Activity }> = {
@@ -135,15 +135,14 @@ export default function Tasks() {
         const res = await fetch(`/api/skill/${activeId}/progress?after=${totalKnown}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.lines && data.lines.length > 0) {
+          if (data.total < totalKnown) totalKnown = 0;
+          if (data.lines?.length > 0) {
             setProgress(prev => ({
               ...prev,
               [activeId]: [...(prev[activeId] || []), ...data.lines],
             }));
-            totalKnown = data.total;
-          } else {
-            totalKnown = data.total || totalKnown;
           }
+          totalKnown = data.total || totalKnown;
         }
       } catch { /* ignore */ }
     };
@@ -167,7 +166,12 @@ export default function Tasks() {
   }, [progress, activeId]);
 
   const handleCancel = async (id: string) => {
-    await fetch(`/api/skill/${id}/cancel`, { method: 'POST' });
+    try {
+      const res = await fetch(`/api/skill/${id}/cancel`, { method: 'POST' });
+      if (!res.ok) alert('取消任务失败');
+    } catch {
+      alert('取消任务失败');
+    }
     fetchExecutions();
   };
 
@@ -179,7 +183,6 @@ export default function Tasks() {
   });
 
   const displayLogs = activeId ? (progress[activeId] || []) : [];
-  const activeExec = executions.find(e => e.id === activeId);
 
   // Force re-render every second for duration timer
   const [, setTick] = useState(0);

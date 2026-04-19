@@ -38,7 +38,7 @@ interface TimelineEntry {
 interface ReportContent {
   executiveSummary: {
     overview: string;
-    keyPoints: (string | { point?: string; text?: string; evidence?: string[]; impact?: string; [key: string]: unknown })[];
+    keyPoints: (string | { point?: string; text?: string; title?: string; summary?: string; evidence?: string[]; impact?: string; [key: string]: unknown })[];
     confidence: 'high' | 'medium' | 'low';
     period: { start: string; end: string };
   };
