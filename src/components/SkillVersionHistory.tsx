@@ -74,11 +74,11 @@ export default function SkillVersionHistory({
       {/* Modal */}
       <div className={`${MODAL_CONTAINER} w-full max-w-lg mx-4 animate-scale-in`}>
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-[#f5f5f7]">
+        <div className="flex items-center justify-between p-6 border-b border-[#1d1d1f]/20">
           <h2 className="text-lg font-semibold text-[#1d1d1f]">版本历史 — {displayName}</h2>
           <button
             onClick={onClose}
-            className="p-1.5 text-[#86868b] hover:text-[#1d1d1f] hover:bg-[#f5f5f7] rounded-full transition-all"
+            className="p-1.5 text-[#888] hover:text-[#1d1d1f] hover:bg-[#1d1d1f]/5 rounded-full transition-all"
           >
             <X className="w-5 h-5" />
           </button>
@@ -88,32 +88,32 @@ export default function SkillVersionHistory({
         <div className="p-6 max-h-[60vh] overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-6 h-6 text-[#0071e3] animate-spin" />
+              <Loader2 className="w-6 h-6 text-[#2A5A6B] animate-spin" />
             </div>
           ) : versions.length === 0 ? (
-            <p className="text-sm text-[#86868b] text-center py-8">暂无版本历史</p>
+            <p className="text-sm text-[#888] text-center py-8">暂无版本历史</p>
           ) : (
             <div className="space-y-3">
               {versions.map((v) => (
                 <div
                   key={v.id}
-                  className="flex items-center justify-between p-4 bg-[#f5f5f7] rounded-xl"
+                  className="flex items-center justify-between p-4 bg-[#E8E8E8] rounded-xl"
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-[#1d1d1f]">v{v.version}</span>
-                      <span className="text-xs text-[#86868b]">
+                      <span className="text-xs text-[#888]">
                         {new Date(v.created_at).toLocaleDateString('zh-CN')}
                       </span>
                     </div>
                     {v.changelog && (
-                      <p className="text-sm text-[#86868b] mt-1 truncate">{v.changelog}</p>
+                      <p className="text-sm text-[#888] mt-1 truncate">{v.changelog}</p>
                     )}
                   </div>
                   <button
                     onClick={() => handleRestore(v.version)}
                     disabled={restoring === v.version}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-[#0071e3] hover:bg-[#0071e3]/5 rounded-full transition-all disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-[#2A5A6B] hover:bg-[#2A5A6B]/5 rounded-full transition-all disabled:opacity-50"
                   >
                     {restoring === v.version ? (
                       <Loader2 className="w-4 h-4 animate-spin" />

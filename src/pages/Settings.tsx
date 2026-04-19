@@ -321,8 +321,8 @@ export default function Settings() {
                     onClick={() => setConfig({ ...config, aiProvider: p.value })}
                     className={`px-4 py-2 rounded-[980px] text-sm font-medium transition-all ${
                       config.aiProvider === p.value
-                        ? 'bg-[#1d1d1f] text-white'
-                        : 'bg-[#f5f5f7] text-[#86868b] hover:bg-[#e8e8ed]'
+                        ? 'bg-[#1d1d1f] text-white hover:bg-[#1a1a1a] active:bg-[#2a2a2a]'
+                        : 'bg-[#1d1d1f]/5 border border-[#1d1d1f]/20 text-[#888] hover:bg-[#1d1d1f]/10'
                     }`}
                   >
                     {p.label}
@@ -343,7 +343,7 @@ export default function Settings() {
                       placeholder="sk-..."
                       className={`${INPUT} pr-10 font-mono`}
                     />
-                    <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeb5] hover:text-[#86868b]">
+                    <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#888] hover:text-[#1d1d1f]">
                       {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
@@ -367,7 +367,7 @@ export default function Settings() {
                   <label className={LABEL}>API Key</label>
                   <div className="relative">
                     <input type={showApiKey ? 'text' : 'password'} value={config.geminiApiKey} onChange={e => setConfig({ ...config, geminiApiKey: e.target.value })} placeholder="AIza..." className={`${INPUT} pr-10 font-mono`} />
-                    <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeb5] hover:text-[#86868b]">
+                    <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#888] hover:text-[#1d1d1f]">
                       {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
@@ -391,7 +391,7 @@ export default function Settings() {
                   <label className={LABEL}>API Key</label>
                   <div className="relative">
                     <input type={showApiKey ? 'text' : 'password'} value={config.customApiKey} onChange={e => setConfig({ ...config, customApiKey: e.target.value })} placeholder="你的 API Key" className={`${INPUT} pr-10 font-mono`} />
-                    <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeb5] hover:text-[#86868b]">
+                    <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#888] hover:text-[#1d1d1f]">
                       {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
@@ -407,15 +407,15 @@ export default function Settings() {
               </div>
             )}
 
-            <div className="flex items-center gap-3 pt-4 border-t border-[#f5f5f7]">
+            <div className="flex items-center gap-3 pt-4 border-t border-[#1d1d1f]/20">
               <button
                 onClick={handleTest}
                 disabled={!getCurrentApiKey() || testing}
-                className="px-4 py-2 rounded-[980px] text-sm font-medium bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] transition-all disabled:opacity-40"
+                className="px-4 py-2 rounded-[980px] text-sm font-medium bg-[#1d1d1f]/5 border border-[#1d1d1f]/20 text-[#1d1d1f] hover:bg-[#1d1d1f]/10 transition-all disabled:opacity-40"
               >
                 {testing ? (
                   <span className="flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-[#d2d2d7] border-t-[#0071e3] rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-[#1d1d1f]/30 border-t-[#1d1d1f] rounded-full animate-spin" />
                     测试中...
                   </span>
                 ) : (
@@ -423,10 +423,10 @@ export default function Settings() {
                 )}
               </button>
               {testStatus === 'success' && (
-                <span className="flex items-center gap-1 text-sm text-[#34c759]"><Check className="w-4 h-4" />连接成功</span>
+                <span className="flex items-center gap-1 text-sm text-[#5B7553]"><Check className="w-4 h-4" />连接成功</span>
               )}
               {testStatus === 'error' && (
-                <span className="flex items-center gap-1 text-sm text-[#ff3b30]"><AlertCircle className="w-4 h-4" />{testError || '连接失败'}</span>
+                <span className="flex items-center gap-1 text-sm text-[#A0453A]"><AlertCircle className="w-4 h-4" />{testError || '连接失败'}</span>
               )}
             </div>
           </div>
@@ -436,7 +436,7 @@ export default function Settings() {
       {/* Graph DB Tab */}
       {activeTab === 'graph' && (
         <div className={`${CARD} p-8 space-y-4 animate-fade-in`}>
-          <p className="text-sm text-[#86868b]">配置 Neo4j 图数据库连接（可选）。不配置则使用本地存储。</p>
+          <p className="text-sm text-[#888]">配置 Neo4j 图数据库连接（可选）。不配置则使用本地存储。</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={LABEL}>连接 URI</label>
@@ -451,7 +451,7 @@ export default function Settings() {
             <label className={LABEL}>密码</label>
             <div className="relative">
               <input type={showNeo4jPassword ? 'text' : 'password'} value={config.neo4jPassword} onChange={e => setConfig({ ...config, neo4jPassword: e.target.value })} placeholder="密码" className={`${INPUT} pr-10 font-mono`} />
-              <button type="button" onClick={() => setShowNeo4jPassword(!showNeo4jPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#aeaeb5] hover:text-[#86868b]">
+              <button type="button" onClick={() => setShowNeo4jPassword(!showNeo4jPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#888] hover:text-[#1d1d1f]">
                 {showNeo4jPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
@@ -463,7 +463,7 @@ export default function Settings() {
       {activeTab === 'skills' && (
         <div className="space-y-6 animate-fade-in">
           {skillsLoading ? (
-            <div className={`${CARD} p-12 text-center text-sm text-[#86868b]`}>
+            <div className={`${CARD} p-12 text-center text-sm text-[#888]`}>
               加载中...
             </div>
           ) : (
@@ -518,12 +518,12 @@ export default function Settings() {
           <div className={`${CARD} p-8 space-y-5`}>
             <div>
               <h3 className="text-base font-medium text-[#1d1d1f]">技能优化</h3>
-              <p className="text-sm text-[#86868b] mt-1">通过双层优化循环自动提升技能质量</p>
+              <p className="text-sm text-[#888] mt-1">通过双层优化循环自动提升技能质量</p>
             </div>
             <div>
               <label className={LABEL}>选择技能</label>
               {skillsLoading ? (
-                <div className="text-sm text-[#86868b]">加载中...</div>
+                <div className="text-sm text-[#888]">加载中...</div>
               ) : (
                 <select value={selectedSkill} onChange={e => setSelectedSkill(e.target.value)} className={INPUT}>
                   {allSkills.map(s => (
@@ -541,12 +541,12 @@ export default function Settings() {
               </SkillButton>
             </div>
             {optimizeSkill.status === 'completed' && optimizeSkill.result && (
-              <div className="bg-[#34c759]/5 rounded-xl p-4 text-sm text-[#34c759]">
+              <div className="bg-[#5B7553]/5 border border-[#5B7553]/20 rounded-3xl p-4 text-sm text-[#5B7553]">
                 优化完成！技能质量已提升。
               </div>
             )}
             {optimizeSkill.error && (
-              <div className="bg-[#ff3b30]/5 rounded-xl p-4 text-sm text-[#ff3b30]">
+              <div className="bg-[#A0453A]/5 border border-[#A0453A]/20 rounded-3xl p-4 text-sm text-[#A0453A]">
                 优化失败：{optimizeSkill.error}
               </div>
             )}
@@ -559,13 +559,13 @@ export default function Settings() {
             saving={optConfigSaving}
           />
           {optConfigSaveStatus === 'success' && (
-            <div className="text-sm text-[#34c759]">优化配置已保存</div>
+            <div className="text-sm text-[#5B7553]">优化配置已保存</div>
           )}
           {optConfigSaveStatus === 'error' && (
-            <div className="text-sm text-[#ff3b30]">优化配置保存失败，请稍后重试</div>
+            <div className="text-sm text-[#A0453A]">优化配置保存失败，请稍后重试</div>
           )}
           {optConfigLoading && (
-            <div className="text-sm text-[#86868b]">正在加载优化配置...</div>
+            <div className="text-sm text-[#888]">正在加载优化配置...</div>
           )}
 
           {/* Optimization History */}
@@ -574,16 +574,16 @@ export default function Settings() {
               <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">优化历史</h4>
               <div className="space-y-3">
                 {optHistory.map((entry) => (
-                  <div key={entry.id} className="flex items-center justify-between py-3 border-b border-[#f5f5f7] last:border-0">
+                  <div key={entry.id} className="flex items-center justify-between py-3 border-b border-[#1d1d1f]/20 last:border-0">
                     <div className="flex items-center gap-4">
-                      <span className={entry.converged ? 'text-[#34c759]' : 'text-[#ff3b30]'}>
+                      <span className={entry.converged ? 'text-[#5B7553]' : 'text-[#A0453A]'}>
                         {entry.converged ? '✓' : '✗'}
                       </span>
                       <div>
                         <div className="text-sm text-[#1d1d1f]">
                           {entry.iterations_completed} 次迭代 · 峰值 {entry.peak_score} · 最终 {entry.final_score}
                         </div>
-                        <div className="text-xs text-[#86868b]">
+                        <div className="text-xs text-[#888]">
                           {new Date(entry.created_at).toLocaleString('zh-CN')} · 提取 {entry.lessons_extracted} 条经验
                         </div>
                       </div>
@@ -602,14 +602,14 @@ export default function Settings() {
           <div className={`${CARD} p-8 space-y-5`}>
             <div>
               <h3 className="text-base font-medium text-[#1d1d1f]">定时任务调度器</h3>
-              <p className="text-sm text-[#86868b] mt-1">按主题的采集频率自动触发周报生成</p>
+              <p className="text-sm text-[#888] mt-1">按主题的采集频率自动触发周报生成</p>
             </div>
 
             {/* Enable/Disable Toggle */}
-            <div className="flex items-center justify-between py-3 border-b border-[#f5f5f7]">
+            <div className="flex items-center justify-between py-3 border-b border-[#1d1d1f]/20">
               <div>
                 <div className="text-sm font-medium text-[#1d1d1f]">启用调度器</div>
-                <div className="text-xs text-[#86868b] mt-0.5">
+                <div className="text-xs text-[#888] mt-0.5">
                   {schedulerStatus?.running
                     ? `运行中 · 每 ${schedulerStatus.checkIntervalMinutes} 分钟检查`
                     : '未启用'}
@@ -619,7 +619,7 @@ export default function Settings() {
                 onClick={() => handleSchedulerToggle(!schedulerStatus?.running)}
                 disabled={schedulerToggling}
                 className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
-                  schedulerStatus?.running ? 'bg-[#34c759]' : 'bg-[#d2d2d7]'
+                  schedulerStatus?.running ? 'bg-[#5B7553]' : 'bg-[#1d1d1f]/30'
                 } ${schedulerToggling ? 'opacity-50' : ''}`}
               >
                 <span
@@ -644,21 +644,21 @@ export default function Settings() {
                   className={`${INPUT} w-32`}
                   disabled={!schedulerStatus?.running}
                 />
-                <span className="text-xs text-[#86868b]">最小 5，最大 1440（24h）</span>
+                <span className="text-xs text-[#888]">最小 5，最大 1440（24h）</span>
               </div>
             </div>
 
             {/* Status Info */}
             {schedulerStatus && (
-              <div className="grid grid-cols-3 gap-4 py-3 border-t border-[#f5f5f7]">
+              <div className="grid grid-cols-3 gap-4 py-3 border-t border-[#1d1d1f]/20">
                 <div>
-                  <div className="text-xs text-[#86868b]">运行状态</div>
-                  <div className={`text-sm font-medium mt-1 ${schedulerStatus.running ? 'text-[#34c759]' : 'text-[#86868b]'}`}>
+                  <div className="text-xs text-[#888]">运行状态</div>
+                  <div className={`text-sm font-medium mt-1 ${schedulerStatus.running ? 'text-[#5B7553]' : 'text-[#888]'}`}>
                     {schedulerStatus.running ? '运行中' : '已停止'}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-[#86868b]">上次检查</div>
+                  <div className="text-xs text-[#888]">上次检查</div>
                   <div className="text-sm text-[#1d1d1f] mt-1">
                     {schedulerStatus.lastCheckAt
                       ? new Date(schedulerStatus.lastCheckAt).toLocaleString('zh-CN')
@@ -666,7 +666,7 @@ export default function Settings() {
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-[#86868b]">下次检查</div>
+                  <div className="text-xs text-[#888]">下次检查</div>
                   <div className="text-sm text-[#1d1d1f] mt-1">
                     {schedulerStatus.nextCheckAt
                       ? new Date(schedulerStatus.nextCheckAt).toLocaleString('zh-CN')
@@ -681,21 +681,21 @@ export default function Settings() {
           <div className={`${CARD} p-6`}>
             <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">待触发主题</h4>
             {schedulerLoading ? (
-              <div className="text-sm text-[#86868b]">加载中...</div>
+              <div className="text-sm text-[#888]">加载中...</div>
             ) : (schedulerStatus?.pendingTopics?.length ?? 0) === 0 ? (
-              <div className="text-sm text-[#86868b]">暂无到期主题</div>
+              <div className="text-sm text-[#888]">暂无到期主题</div>
             ) : (
               <div className="space-y-3">
                 {schedulerStatus?.pendingTopics.map(topic => (
-                  <div key={topic.topicId} className="flex items-center justify-between py-3 border-b border-[#f5f5f7] last:border-0">
+                  <div key={topic.topicId} className="flex items-center justify-between py-3 border-b border-[#1d1d1f]/20 last:border-0">
                     <div>
                       <div className="text-sm text-[#1d1d1f]">{topic.topicName}</div>
-                      <div className="text-xs text-[#86868b] mt-0.5">
+                      <div className="text-xs text-[#888] mt-0.5">
                         周期: {topic.schedule === 'daily' ? '每日' : topic.schedule === 'weekly' ? '每周' : '每月'}
                         {topic.lastReportAt && ` · 上次报告: ${new Date(topic.lastReportAt).toLocaleString('zh-CN')}`}
                       </div>
                     </div>
-                    <span className="text-xs text-[#ff9500] bg-[#ff9500]/10 px-2 py-1 rounded-full">待触发</span>
+                    <span className="text-xs text-[#9C7B3C] bg-[#9C7B3C]/10 border border-[#9C7B3C]/20 px-2 py-1 rounded-full">待触发</span>
                   </div>
                 ))}
               </div>
@@ -708,17 +708,17 @@ export default function Settings() {
               <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">最近触发记录</h4>
               <div className="space-y-3">
                 {schedulerStatus?.recentTriggers.slice(0, 10).map((trigger, i) => (
-                  <div key={i} className="flex items-center justify-between py-3 border-b border-[#f5f5f7] last:border-0">
+                  <div key={i} className="flex items-center justify-between py-3 border-b border-[#1d1d1f]/20 last:border-0">
                     <div>
                       <div className="text-sm text-[#1d1d1f]">{trigger.topicName}</div>
-                      <div className="text-xs text-[#86868b] mt-0.5">
+                      <div className="text-xs text-[#888] mt-0.5">
                         {new Date(trigger.triggeredAt).toLocaleString('zh-CN')}
                       </div>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full ${
-                      trigger.status === 'completed' ? 'text-[#34c759] bg-[#34c759]/10' :
-                      trigger.status === 'running' ? 'text-[#0071e3] bg-[#0071e3]/10' :
-                      'text-[#ff3b30] bg-[#ff3b30]/10'
+                      trigger.status === 'completed' ? 'text-[#5B7553] bg-[#5B7553]/5 border border-[#5B7553]/20' :
+                      trigger.status === 'running' ? 'text-[#2A5A6B] bg-[#2A5A6B]/5 border border-[#2A5A6B]/20' :
+                      'text-[#A0453A] bg-[#A0453A]/5 border border-[#A0453A]/20'
                     }`}>
                       {trigger.status === 'completed' ? '完成' :
                        trigger.status === 'running' ? '运行中' : '失败'}
@@ -734,7 +734,7 @@ export default function Settings() {
       {/* Save bar */}
       <div className="flex items-center justify-end gap-3">
         {saveStatus === 'success' && (
-          <span className="flex items-center gap-1 text-sm text-[#34c759] animate-fade-in">
+          <span className="flex items-center gap-1 text-sm text-[#5B7553] animate-fade-in">
             <Check className="w-4 h-4" />已保存
           </span>
         )}

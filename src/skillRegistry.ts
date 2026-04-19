@@ -21,6 +21,7 @@ export interface SkillConfig {
   steps: string[];
   promptTemplate: string;
   timeout: number;
+  allowedTools?: string[];
 }
 
 // Backward compatible simple config for existing code
@@ -147,6 +148,19 @@ function parseYamlSubset(frontmatterStr: string): FrontmatterData {
         result[key] = steps;
         continue;
       }
+
+      // Generic string arrays: allowedTools, etc.
+      if (key === 'allowedTools') {
+        const items: string[] = [];
+        i++;
+        while (i < lines.length && lines[i].startsWith('  - ')) {
+          const item = lines[i].trim().slice(2).trim();
+          items.push(String(parseScalar(item)));
+          i++;
+        }
+        result[key] = items;
+        continue;
+      }
     }
 
     result[key] = parseScalar(rawValue);
@@ -216,6 +230,7 @@ export class SkillRegistry {
           steps: frontmatter.steps ?? [],
           promptTemplate: body,
           timeout: frontmatter.timeout ?? SKILL_TIMEOUTS[name] ?? DEFAULT_TIMEOUT,
+          allowedTools: (frontmatter as any).allowedTools,
         });
       } else {
         // Old format - backward compatibility

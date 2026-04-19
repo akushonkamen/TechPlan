@@ -100,7 +100,7 @@ export function useSkillExecutor() {
     });
   }, []);
 
-  const execute = useCallback(async (skillName: string, params: Record<string, any> = {}) => {
+  const execute = useCallback(async (skillName: string, params: Record<string, any> = {}, options?: { timeoutMs?: number }) => {
     progressRef.current = [];
     const startedAt = new Date().toISOString();
     setState({
@@ -161,7 +161,8 @@ export function useSkillExecutor() {
         }
       };
 
-      // Poll every 2 seconds for up to 5 minutes
+      // Poll every 2 seconds for up to timeout (default 5 minutes)
+      const timeoutMs = options?.timeoutMs ?? 300000;
       const pollInterval = setInterval(pollStatus, 2000);
       const timeout = setTimeout(() => {
         clearInterval(pollInterval);
@@ -171,7 +172,7 @@ export function useSkillExecutor() {
           }
           return prev;
         });
-      }, 300000);
+      }, timeoutMs);
 
       // Clean up when status changes
       const checkDone = setInterval(() => {
@@ -191,6 +192,73 @@ export function useSkillExecutor() {
         error: err instanceof Error ? err.message : String(err),
       }));
     }
+  }, [connectWebSocket]);
+
+  const connectOnly = useCallback((executionId: string, options?: { timeoutMs?: number }) => {
+    progressRef.current = [];
+    const startedAt = new Date().toISOString();
+    setState({
+      executionId,
+      status: 'running',
+      progress: [],
+      result: null,
+      error: null,
+      startedAt,
+    });
+
+    // Connect WebSocket for progress
+    connectWebSocket(executionId);
+
+    // Also poll for final status as fallback
+    const pollStatus = async () => {
+      try {
+        const statusRes = await fetch(`/api/skill/${executionId}/status`);
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          if (statusData.status === 'completed' || statusData.status === 'failed') {
+            let parsedResult = null;
+            try {
+              if (statusData.result) parsedResult = JSON.parse(statusData.result);
+            } catch {
+              // Ignore malformed JSON
+            }
+            setState(prev => ({
+              ...prev,
+              status: statusData.status,
+              result: parsedResult,
+              error: statusData.error,
+            }));
+          }
+        }
+      } catch {
+        // Polling is a fallback, ignore errors
+      }
+    };
+
+    // Poll every 2 seconds for up to timeout (default 5 minutes)
+    const timeoutMs = options?.timeoutMs ?? 300000;
+    const pollInterval = setInterval(pollStatus, 2000);
+    const timeout = setTimeout(() => {
+      clearInterval(pollInterval);
+      setState(prev => {
+        if (prev.status === 'running') {
+          return { ...prev, status: 'timeout', error: 'Execution timed out' };
+        }
+        return prev;
+      });
+    }, timeoutMs);
+
+    // Clean up when status changes
+    const checkDone = setInterval(() => {
+      setState(prev => {
+        if (prev.status !== 'running') {
+          clearInterval(pollInterval);
+          clearInterval(checkDone);
+          clearTimeout(timeout);
+        }
+        return prev;
+      });
+    }, 1000);
   }, [connectWebSocket]);
 
   const cancel = useCallback(async () => {
@@ -220,5 +288,5 @@ export function useSkillExecutor() {
     };
   }, []);
 
-  return { ...state, execute, cancel, reset };
+  return { ...state, execute, connectOnly, cancel, reset };
 }

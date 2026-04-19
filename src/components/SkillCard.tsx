@@ -3,12 +3,12 @@ import { CARD } from '../lib/design';
 
 // Category color mapping
 const CATEGORY_COLORS: Record<string, string> = {
-  research: '#5856d6',
-  extraction: '#ff9500',
-  reporting: '#34c759',
-  sync: '#0071e3',
-  optimization: '#af52de',
-  general: '#86868b',
+  research: '#4A6670',
+  extraction: '#9C7B3C',
+  reporting: '#5B7553',
+  sync: '#1d1d1f',
+  optimization: '#7A5C6B',
+  general: '#888',
 };
 
 interface SkillCardProps {
@@ -24,7 +24,7 @@ export default function SkillCard({ skill, onClick, isExpanded }: SkillCardProps
     <div
       onClick={onClick}
       className={`${CARD} p-5 cursor-pointer transition-all ${
-        isExpanded ? 'ring-2 ring-[#0071e3]' : 'hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]'
+        isExpanded ? 'ring-2 ring-[#1d1d1f]' : 'hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -37,12 +37,12 @@ export default function SkillCard({ skill, onClick, isExpanded }: SkillCardProps
             >
               {skill.category}
             </span>
-            <span className="text-xs text-[#86868b]">{skill.version ? `v${skill.version}` : ''}</span>
+            <span className="text-xs text-[#888]">{skill.version ? `v${skill.version}` : ''}</span>
           </div>
         </div>
-        <div className={`w-2 h-2 rounded-full transition-all ${isExpanded ? 'bg-[#0071e3]' : 'bg-[#e8e8ed]'}`} />
+        <div className={`w-2 h-2 rounded-full transition-all ${isExpanded ? 'bg-[#1d1d1f]' : 'bg-[#1d1d1f]/20'}`} />
       </div>
-      <p className="text-sm text-[#86868b] mt-3 line-clamp-2">{skill.description}</p>
+      <p className="text-sm text-[#888] mt-3 line-clamp-2">{skill.description}</p>
     </div>
   );
 }

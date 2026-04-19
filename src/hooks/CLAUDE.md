@@ -54,23 +54,19 @@ useEffect(() => {
 
 ### useSkills (`useSkills.ts`)
 
-**Purpose**: Convenience hooks for common skills
+**Purpose**: Convenience hooks for optimization
 
 **Available Hooks**:
 ```typescript
-useResearchSkill()      // Document collection
-useExtractSkill()       // Knowledge extraction
-useSyncGraphSkill()     // Graph synchronization
-useReportSkill()        // Report generation
-useOptimizeSkill()      // Topic optimization
+useBilevelOptimization()  // Bilevel optimization for skills
 ```
 
 **Usage**:
 ```typescript
-const { status, execute, result } = useResearchSkill();
+const { status, execute, optimize } = useBilevelOptimization();
 
-const handleResearch = () => {
-  execute({ topicId, topicName, keywords, organizations });
+const handleOptimize = () => {
+  optimize({ skillName, evaluationCriteria, maxIterations });
 };
 ```
 

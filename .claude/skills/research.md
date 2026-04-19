@@ -28,6 +28,14 @@ params:
     required: false
     default: 10
     description: "最大采集数量"
+  - name: timeRangeStart
+    type: string
+    required: false
+    description: "时间范围起始日期（YYYY-MM-DD）"
+  - name: timeRangeEnd
+    type: string
+    required: false
+    description: "时间范围结束日期（YYYY-MM-DD）"
 steps:
   - "广域扫描：多维度搜索（学术论文、技术新闻、GitHub、产业报告）"
   - "深度追踪：分析 Phase 1 结果中的具体技术/产品/竞品"
@@ -47,6 +55,7 @@ steps:
 - 关注组织：{{organizations}}
 - 主题 ID：{{topicId}}
 - 最大采集数量：{{maxResults}}
+- 时间范围：{{timeRangeStart}} ~ {{timeRangeEnd}}（如为空则不限时间）
 
 ## 执行步骤
 
@@ -54,14 +63,16 @@ steps:
 
 解析 keywords 和 organizations，生成**成对查询**（关键词独立 + 关键词×组织组合）。
 
+**时间范围约束**：如果 timeRangeStart/timeRangeEnd 已提供，所有搜索查询必须包含时间限定（如 `after:{{timeRangeStart}} before:{{timeRangeEnd}}`）。未提供时使用当前年份。
+
 对每个关键词和关注组织，搜索以下维度：
 
-- **学术论文**: `[keyword] arxiv paper 2025 2026` 和 `[keyword] [org] arxiv`
-- **技术新闻**: `[keyword] technology news breakthrough 2025 2026` 和 `[keyword] [org] announcement`
+- **学术论文**: `[keyword] arxiv paper {{timeRangeStart}} {{timeRangeEnd}}` 和 `[keyword] [org] arxiv`
+- **技术新闻**: `[keyword] technology news breakthrough {{timeRangeStart}} {{timeRangeEnd}}` 和 `[keyword] [org] announcement`
 - **GitHub 项目**: `[keyword] github open source` 和 `[org] [keyword] github`
-- **产业报告**: `[keyword] industry report market analysis`
+- **产业报告**: `[keyword] industry report market analysis {{timeRangeStart}} {{timeRangeEnd}}`
 
-**双语查询**：当组织名称暗示非英语区域时（如中文组织），额外生成该语言的查询（如 `[keyword] 技术突破 2025`）。
+**双语查询**：当组织名称暗示非英语区域时（如中文组织），额外生成该语言的查询（如 `[keyword] 技术突破 {{timeRangeStart}}`）。
 
 **查询优先级**：每类最多 3 个查询，优先执行 keyword+org 组合查询。
 

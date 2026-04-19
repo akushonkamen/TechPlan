@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ──────────────────────────────────────────────────────────
-   PROSE STYLES (Markdown rendering)
+   PROSE STYLES (Markdown rendering) — MNEMOSYNE
    ────────────────────────────────────────────────────────── */
 
 .prose {
@@ -11,15 +11,16 @@
 
 .prose h1 {
   font-size: 1.5rem;
-  font-weight: 700;
+  font-weight: 800;
   margin-top: 1.5em;
   margin-bottom: 0.5em;
   line-height: 1.2;
+  letter-spacing: -0.5px;
 }
 
 .prose h2 {
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 700;
   margin-top: 1.25em;
   margin-bottom: 0.5em;
   line-height: 1.3;
@@ -27,7 +28,7 @@
 
 .prose h3 {
   font-size: 1.1rem;
-  font-weight: 600;
+  font-weight: 700;
   margin-top: 1em;
   margin-bottom: 0.5em;
   line-height: 1.4;
@@ -39,7 +40,7 @@
 }
 
 .prose strong {
-  font-weight: 600;
+  font-weight: 700;
   color: #1d1d1f;
 }
 
@@ -49,8 +50,9 @@
 
 .prose code {
   font-size: 0.875em;
-  padding: 0.125rem 0.25rem;
-  background: #f5f5f7;
+  padding: 0.125rem 0.375rem;
+  background: #E8E8E8;
+  border: 1px solid #1d1d1f/20;
   border-radius: 0.25rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -58,15 +60,19 @@
 .prose pre {
   padding: 1rem;
   overflow-x: auto;
-  background: #f5f5f7;
-  border-radius: 0.5rem;
+  background: #1d1d1f;
+  color: #F7F7F7;
+  border: 1px solid #1d1d1f;
+  border-radius: 1rem;
   margin-bottom: 1em;
 }
 
 .prose pre code {
   padding: 0;
   background: transparent;
+  border: none;
   font-size: 0.875rem;
+  color: #F7F7F7;
 }
 
 .prose ul, .prose ol {
@@ -79,9 +85,9 @@
 }
 
 .prose blockquote {
-  border-left: 3px solid #d2d2d7;
+  border-left: 3px solid #1d1d1f;
   padding-left: 1em;
-  color: #6b7280;
+  color: #888;
   font-style: italic;
 }
 
@@ -93,41 +99,46 @@
 
 .prose th, .prose td {
   padding: 0.5rem;
-  border: 1px solid #e5e5ea;
+  border: 1px solid #1d1d1f/20;
   text-align: left;
 }
 
 .prose th {
-  background: #f9fafb;
-  font-weight: 600;
+  background: #E8E8E8;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
 }
 
 .prose a {
-  color: #0071e3;
+  color: #1d1d1f;
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .prose a:hover {
-  color: #0055b3;
+  color: #888;
 }
 
 :root {
-  /* Apple Design Tokens */
-  --color-bg-page: #f5f5f7;
-  --color-bg-surface: #ffffff;
-  --color-bg-elevated: #fafafa;
+  /* MNEMOSYNE Design Tokens — macOS Cool Gray */
+  --color-bg-page: #F7F7F7;
+  --color-bg-surface: #F7F7F7;
+  --color-bg-elevated: #FAFAFA;
   --color-text-primary: #1d1d1f;
-  --color-text-secondary: #86868b;
-  --color-text-muted: #aeaeb5;
-  --color-accent: #0071e3;
-  --color-accent-hover: #0062cc;
-  --color-accent-active: #0055b3;
-  --color-success: #34c759;
-  --color-error: #ff3b30;
-  --color-warning: #ff9f0a;
-  --color-border: #d2d2d7;
-  --color-border-light: #e5e5ea;
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --color-text-secondary: #888;
+  --color-text-muted: #aaa;
+  --color-accent: #1d1d1f;
+  --color-accent-hover: #1a1a1a;
+  --color-accent-active: #2a2a2a;
+  --color-beige: #D1D1D1;
+  --color-beige-hover: #b8b8b8;
+  --color-success: #5B7553;
+  --color-error: #A0453A;
+  --color-warning: #9C7B3C;
+  --color-border: #1d1d1f;
+  --color-border-light: #1d1d1f;
 
   /* Spacing */
   --spacing-xs: 4px;
@@ -142,10 +153,12 @@
   --radius-lg: 16px;
   --radius-xl: 20px;
   --radius-2xl: 24px;
+  --radius-3xl: 28px;
   --radius-full: 9999px;
 
   /* Font Family */
-  --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'SF Pro Icons', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Monaco, Consolas, monospace;
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -155,11 +168,11 @@
 * {
   font-family: var(--font-family);
   box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
 }
 
 html {
   scroll-behavior: smooth;
-  /* Force hardware acceleration */
   transform: translateZ(0);
   -webkit-transform: translateZ(0);
 }
@@ -172,67 +185,60 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  /* Subtle text rendering improvement */
   font-feature-settings: "kern" 1, "liga" 1;
 }
 
 /* ──────────────────────────────────────────────────────────
-   FOCUS STYLES (Apple HIG)
+   FOCUS STYLES — MNEMOSYNE
    ────────────────────────────────────────────────────────── */
 
 input:focus, select:focus, textarea:focus, button:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.12);
   transition: box-shadow 0.15s ease-out;
 }
 
 a:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.12);
   border-radius: 4px;
 }
 
 /* ──────────────────────────────────────────────────────────
-   CUSTOM SCROLLBAR (Apple style)
+   CUSTOM SCROLLBAR — MNEMOSYNE
    ────────────────────────────────────────────────────────── */
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: #F7F7F7;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 4px;
-  border: 2px solid transparent;
-  background-clip: content-box;
+  background: #1d1d1f;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
-  border: 2px solid transparent;
-  background-clip: content-box;
+  background: #1a1a1a;
 }
 
-/* Firefox scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  scrollbar-color: #1d1d1f #F7F7F7;
 }
 
 /* ──────────────────────────────────────────────────────────
-   ANIMATIONS (Apple style)
+   ANIMATIONS
    ────────────────────────────────────────────────────────── */
 
-/* Fade in with subtle slide up */
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -240,7 +246,6 @@ a:focus-visible {
   }
 }
 
-/* Scale in from center */
 @keyframes scaleIn {
   from {
     opacity: 0;
@@ -252,7 +257,6 @@ a:focus-visible {
   }
 }
 
-/* Slide in from right */
 @keyframes slideInRight {
   from {
     opacity: 0;
@@ -264,41 +268,25 @@ a:focus-visible {
   }
 }
 
-/* Subtle pulse */
 @keyframes subtlePulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.8;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
 }
 
-/* Shimmer loading effect */
 @keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
-/* Slow spin for auto-refresh indicator */
 @keyframes spinSlow {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .animate-spin-slow {
   animation: spinSlow 3s linear infinite;
 }
 
-/* Animation utilities */
 .animate-fade-in {
   animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -311,139 +299,31 @@ a:focus-visible {
   animation: slideInRight 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.animate-delay-100 {
-  animation-delay: 100ms;
-}
-
-.animate-delay-200 {
-  animation-delay: 200ms;
-}
-
-.animate-delay-300 {
-  animation-delay: 300ms;
-}
-
 /* ──────────────────────────────────────────────────────────
    UTILITY CLASSES
    ────────────────────────────────────────────────────────── */
 
-/* Glassmorphism effect */
-.glass {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
-
-.glass-dark {
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
-
-/* Smooth transitions for interactive elements */
 button, a, input, select, textarea {
   transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Disable user select for buttons */
 button {
   user-select: none;
   -webkit-user-select: none;
 }
 
 /* ──────────────────────────────────────────────────────────
-   SELECTION STYLING
+   SELECTION STYLING — MNEMOSYNE
    ────────────────────────────────────────────────────────── */
 
 ::selection {
-  background-color: rgba(0, 113, 227, 0.2);
+  background-color: rgba(0, 0, 0, 0.15);
   color: var(--color-text-primary);
 }
 
 ::-moz-selection {
-  background-color: rgba(0, 113, 227, 0.2);
+  background-color: rgba(0, 0, 0, 0.15);
   color: var(--color-text-primary);
-}
-
-/* ──────────────────────────────────────────────────────────
-   LOADING SKELETON
-   ────────────────────────────────────────────────────────── */
-
-@keyframes skeletonLoading {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-.skeleton {
-  background: linear-gradient(
-    90deg,
-    #e8e8ed 0%,
-    #f5f5f7 25%,
-    #e8e8ed 50%,
-    #f5f5f7 75%,
-    #e8e8ed 100%
-  );
-  background-size: 200% 100%;
-  animation: skeletonLoading 1.5s ease-in-out infinite;
-}
-
-/* ──────────────────────────────────────────────────────────
-   MODAL OVERLAY
-   ────────────────────────────────────────────────────────── */
-
-@keyframes modalBackdrop {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes modalContent {
-  from {
-    opacity: 0;
-    transform: scale(0.96) translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-.modal-backdrop {
-  animation: modalBackdrop 0.2s ease-out;
-}
-
-.modal-content {
-  animation: modalContent 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* ──────────────────────────────────────────────────────────
-   HOVER EFFECTS
-   ────────────────────────────────────────────────────────── */
-
-.hover-lift {
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.hover-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-}
-
-.hover-glow {
-  transition: box-shadow 0.2s ease-out;
-}
-
-.hover-glow:hover {
-  box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.15),
-              0 4px 12px rgba(0, 113, 227, 0.1);
 }
 
 /* ──────────────────────────────────────────────────────────

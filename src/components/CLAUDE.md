@@ -12,7 +12,6 @@ UI components built with React 19, TypeScript, and Tailwind CSS v4. Uses lucide-
 |-----------|---------|-------|
 | `Layout.tsx` | App shell with sidebar | `children: ReactNode` |
 | `PageHeader.tsx` | Page title with actions | `title`, `description`, `stats`, `children` |
-| `SkillTaskBar.tsx` | Global skill status bar | - |
 
 ### Form Components
 
@@ -26,7 +25,6 @@ UI components built with React 19, TypeScript, and Tailwind CSS v4. Uses lucide-
 | Component | Purpose | Props |
 |-----------|---------|-------|
 | `SkillButton.tsx` | Execute skill button | `onClick`, `status`, `children`, `disabled`, `variant` |
-| `SkillStatusPanel.tsx` | Live skill progress | `executionId`, `onClose` |
 | `SkillDetailPanel.tsx` | Skill execution details | `execution`, `onClose` |
 | `ExecutionHistory.tsx` | Past executions list | `skillName`, `limit` |
 | `SkillVersionHistory.tsx` | Skill version history | `skillName` |

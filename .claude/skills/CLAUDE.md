@@ -15,7 +15,6 @@ Skills are markdown files with YAML frontmatter that define AI-powered workflows
 ├── track-competitor.md  # Competitor tracking
 ├── report.md            # Generic report generation
 ├── report-daily.md      # Daily reports
-├── report-weekly.md     # Weekly reports
 ├── report-monthly.md    # Monthly reports
 ├── report-quarterly.md  # Quarterly reports
 ├── report-tech-topic.md # Technical topic reports

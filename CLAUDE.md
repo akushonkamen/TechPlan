@@ -43,8 +43,10 @@ TechPlan/
 │   ├── main.tsx          # React render root
 │   ├── components/       # UI components
 │   ├── pages/           # Route pages
+│   │   └── Tasks.tsx     # Task execution center
 │   ├── services/        # API client functions
 │   ├── hooks/           # Custom React hooks
+│   ├── schemas/         # Validation schemas
 │   ├── db/              # Database client (Neo4j)
 │   ├── skillExecutor.ts  # Claude CLI execution engine
 │   ├── skillRegistry.ts  # Skill loader from markdown
@@ -209,7 +211,7 @@ No custom API needed - LLMs can query directly.
 
 ### Reports
 - `GET /api/reports` - List reports
-- `POST /api/reports` - Generate report
+- `POST /api/reports/generate` - Generate report
 - `GET /api/reports/:id` - Get report
 
 ## Frontend Routes
@@ -223,6 +225,7 @@ No custom API needed - LLMs can query directly.
 | `/review` | Review Console |
 | `/decision` | Decision Support |
 | `/settings` | Settings |
+| `/tasks` | Tasks |
 
 ## Creating a New Skill
 

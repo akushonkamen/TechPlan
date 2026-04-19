@@ -156,11 +156,11 @@ export default function ReviewConsole() {
   function getTypeStyle(type: string) {
     switch (type) {
       case 'conflict_resolve':
-        return 'bg-[#ff3b30]/5 text-[#ff3b30] border border-[#ff3b30]/10';
+        return 'bg-[#A0453A]/5 text-[#A0453A] border border-[#A0453A]/10';
       case 'entity_disambig':
-        return 'bg-[#0071e3]/5 text-[#0071e3] border border-[#0071e3]/10';
+        return 'bg-[#1d1d1f]/5 border border-[#1d1d1f]/20 text-[#1d1d1f]';
       default:
-        return 'bg-[#ff9f0a]/5 text-[#ff9f0a] border border-[#ff9f0a]/10';
+        return 'bg-[#9C7B3C]/5 text-[#9C7B3C] border border-[#9C7B3C]/10';
     }
   }
 
@@ -168,12 +168,12 @@ export default function ReviewConsole() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader title="审核台" description="人工复核低置信度抽取结果、实体消歧与矛盾证据">
         <div className="flex items-center gap-3">
-          <span className="text-sm text-[#86868b]">待处理 <span className="bg-[#ff3b30]/10 text-[#ff3b30] font-semibold px-2 py-0.5 rounded-full">{stats?.total || 0}</span></span>
-          <button onClick={fetchData} className="flex items-center gap-1.5 px-4 py-2 bg-[#f5f5f7] rounded-[980px] text-sm font-medium hover:bg-[#e8e8ed] transition-all">
+          <span className="text-sm text-[#888]">待处理 <span className="bg-[#A0453A]/10 text-[#A0453A] font-semibold px-2 py-0.5 rounded-full">{stats?.total || 0}</span></span>
+          <button onClick={fetchData} className="flex items-center gap-1.5 px-4 py-2 bg-[#F7F7F7] rounded-[980px] text-sm font-medium hover:bg-[#1d1d1f]/5 transition-all">
             <RefreshCw className="w-3.5 h-3.5" /> 刷新
           </button>
           {reviews.length > 0 && (
-            <button onClick={handleApproveAll} disabled={processingId === 'batch'} className="flex items-center gap-1.5 px-4 py-2 bg-[#34c759] text-white rounded-[980px] text-sm font-semibold hover:bg-[#2fb550] transition-all disabled:opacity-50">
+            <button onClick={handleApproveAll} disabled={processingId === 'batch'} className="flex items-center gap-1.5 px-4 py-2 bg-[#5B7553] text-white rounded-[980px] text-sm font-semibold hover:bg-[#5B7553] transition-all disabled:opacity-50">
               <CheckCheck className="w-3.5 h-3.5" /> 全部通过 ({reviews.length})
             </button>
           )}
@@ -181,7 +181,7 @@ export default function ReviewConsole() {
       </PageHeader>
 
       <div className={`${CARD} overflow-hidden`}>
-        <div className="p-4 border-b border-[#f5f5f7]">
+        <div className="p-4 border-b border-[#1d1d1f]/20">
           <div className={`inline-flex items-center gap-1 ${SEGMENT_TRACK}`}>
             {[
               { key: null as string | null, label: '全部待办' },
@@ -201,40 +201,40 @@ export default function ReviewConsole() {
         </div>
 
         {loading ? (
-          <div className="p-12 text-center text-[#aeaeb5]">
+          <div className="p-12 text-center text-[#aaa]">
             加载中...
           </div>
         ) : reviews.length === 0 ? (
-          <div className="p-12 text-center text-[#aeaeb5]">
-            <Check className="w-12 h-12 mx-auto mb-4 text-[#34c759]" />
+          <div className="p-12 text-center text-[#aaa]">
+            <Check className="w-12 h-12 mx-auto mb-4 text-[#5B7553]" />
             <p>暂无待审核任务</p>
           </div>
         ) : (
-          <div className="divide-y divide-[#f5f5f7]">
+          <div className="divide-y divide-[#1d1d1f]/20">
             {reviews.map((review) => (
-              <div key={review.id} className="p-6 hover:bg-[#f5f5f7]/50 transition-colors">
+              <div key={review.id} className="p-6 hover:bg-[#1d1d1f]/5 transition-colors">
                 <div className="flex justify-between items-start mb-4">
                   <div className="flex items-center gap-3">
                     <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${getTypeStyle(review.type)}`}>
                       {typeLabels[review.type] || review.type}
                     </span>
                     <span className="text-sm font-medium text-[#1d1d1f]">{review.topic_name || '未分类'}</span>
-                    <span className="text-xs text-[#86868b]">{review.time}</span>
+                    <span className="text-xs text-[#888]">{review.time}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     {rejectingId === review.id ? (
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-[#ff3b30]">确认拒绝？</span>
+                        <span className="text-xs text-[#A0453A]">确认拒绝？</span>
                         <button
                           onClick={() => { handleReject(review.id); setRejectingId(null); }}
                           disabled={processingId === review.id}
-                          className="flex items-center gap-1 px-2.5 py-1.5 bg-[#ff3b30] text-white rounded-[980px] text-xs font-semibold hover:bg-[#ff453a] transition-all disabled:opacity-50"
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-[#A0453A] text-white rounded-[980px] text-xs font-semibold hover:bg-[#A0453A] transition-all disabled:opacity-50"
                         >
                           确认
                         </button>
                         <button
                           onClick={() => setRejectingId(null)}
-                          className="px-2.5 py-1.5 bg-[#f5f5f7] text-[#1d1d1f] rounded-[980px] text-xs font-medium hover:bg-[#e8e8ed] transition-all"
+                          className="px-2.5 py-1.5 bg-[#F7F7F7] text-[#1d1d1f] rounded-[980px] text-xs font-medium hover:bg-[#1d1d1f]/5 transition-all"
                         >
                           取消
                         </button>
@@ -243,7 +243,7 @@ export default function ReviewConsole() {
                       <button
                         onClick={() => setRejectingId(review.id)}
                         disabled={processingId === review.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#d2d2d7] text-[#1d1d1f] rounded-full hover:bg-[#ff3b30]/5 hover:text-[#ff3b30] hover:border-[#ff3b30]/20 transition-colors text-sm font-medium disabled:opacity-50"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F7F7F7] border border-[#1d1d1f]/30 text-[#1d1d1f] rounded-full hover:bg-[#A0453A]/5 hover:text-[#A0453A] hover:border-[#A0453A]/20 transition-colors text-sm font-medium disabled:opacity-50"
                       >
                         <X className="w-4 h-4" /> 拒绝/修正
                       </button>
@@ -251,24 +251,24 @@ export default function ReviewConsole() {
                     <button
                       onClick={() => handleApprove(review.id)}
                       disabled={processingId === review.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0071e3] text-white rounded-[980px] hover:bg-[#0062cc] transition-colors text-sm font-medium disabled:opacity-50"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1d1d1f] text-white rounded-[980px] hover:bg-[#1a1a1a] transition-colors text-sm font-medium disabled:opacity-50"
                     >
                       <Check className="w-4 h-4" /> 通过并入库
                     </button>
                   </div>
                 </div>
 
-                <div className="bg-[#f5f5f7] border border-[#d2d2d7] rounded-xl p-4 mb-3">
+                <div className="bg-[#F7F7F7] border border-[#1d1d1f]/30 rounded-xl p-4 mb-3">
                   <p className="text-sm text-[#1d1d1f] font-medium">{review.content}</p>
                   <div className="mt-3 flex items-center gap-4 text-xs">
-                    <span className="text-[#86868b] flex items-center gap-1">
+                    <span className="text-[#888] flex items-center gap-1">
                       来源:
                       {review.source_url ? (
                         <a
                           href={review.source_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[#0071e3] hover:text-[#0062cc] hover:underline flex items-center gap-0.5"
+                          className="text-[#2A5A6B] hover:text-[#1E4A58] hover:underline flex items-center gap-0.5"
                         >
                           {review.source} <ExternalLink className="w-3 h-3" />
                         </a>
@@ -276,9 +276,9 @@ export default function ReviewConsole() {
                         <span className="text-[#1d1d1f]">{review.source || '未知'}</span>
                       )}
                     </span>
-                    <span className="text-[#86868b]">
+                    <span className="text-[#888]">
                       模型置信度:{' '}
-                      <span className={review.confidence < 0.7 ? 'text-[#ff9f0a] font-medium' : 'text-[#34c759] font-medium'}>
+                      <span className={review.confidence < 0.7 ? 'text-[#9C7B3C] font-medium' : 'text-[#5B7553] font-medium'}>
                         {(review.confidence * 100).toFixed(0)}%
                       </span>
                     </span>
@@ -286,7 +286,7 @@ export default function ReviewConsole() {
                 </div>
 
                 {review.reason && (
-                  <div className="flex items-start gap-2 text-sm text-[#ff9f0a] bg-[#ff9f0a]/5 p-3 rounded-xl border border-[#ff9f0a]/10">
+                  <div className="flex items-start gap-2 text-sm text-[#9C7B3C] bg-[#9C7B3C]/5 p-3 rounded-xl border border-[#9C7B3C]/10">
                     {review.type === 'conflict_resolve' ? (
                       <MessageSquareWarning className="w-4 h-4 mt-0.5" />
                     ) : (
@@ -303,15 +303,15 @@ export default function ReviewConsole() {
 
       {archivedActions.length > 0 && (
         <div className={`${CARD} p-5`}>
-          <h4 className="text-[13px] font-semibold text-[#86868b] mb-3">最近操作</h4>
+          <h4 className="text-[13px] font-semibold text-[#888] mb-3">最近操作</h4>
           <div className="space-y-2">
             {archivedActions.map((a, i) => (
               <div key={i} className="flex items-center gap-2 text-sm">
-                {a.action === 'approve' ? <Check className="w-3.5 h-3.5 text-[#34c759]" /> : <X className="w-3.5 h-3.5 text-[#ff3b30]" />}
-                <span className="text-[#86868b]">{a.time}</span>
+                {a.action === 'approve' ? <Check className="w-3.5 h-3.5 text-[#5B7553]" /> : <X className="w-3.5 h-3.5 text-[#A0453A]" />}
+                <span className="text-[#888]">{a.time}</span>
                 <span className="text-[#1d1d1f]">{a.action === 'approve' ? '通过' : '拒绝'}了</span>
-                <span className="text-[#86868b] truncate">"{a.content}"</span>
-                <span className="text-xs text-[#aeaeb5]">{a.type}</span>
+                <span className="text-[#888] truncate">"{a.content}"</span>
+                <span className="text-xs text-[#aaa]">{a.type}</span>
               </div>
             ))}
           </div>

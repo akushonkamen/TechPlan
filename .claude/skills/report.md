@@ -5,7 +5,9 @@ description: |
   六阶段生成标准化技术情报周报：数据收集→信号识别→分析框架→内容生成→质量检查→图谱关联。
   输出严格 JSON，符合 ReportContent v2 schema。
 category: reporting
-timeout: 600
+timeout: 1200
+allowedTools:
+  - Bash
 params:
   - name: topicId
     type: string
@@ -61,60 +63,52 @@ const Database = require('better-sqlite3');
 const db = new Database('database.sqlite');
 
 const topicId = '{{topicId}}';
+const startDate = '{{timeRangeStart}}';
+const endDate = '{{timeRangeEnd}}';
+const hasDate = startDate && endDate;
 
 // 1. 获取文档
-const docs = db.prepare(\`
-  SELECT id, title, source, published_date, substr(content, 1, 500) as excerpt 
-  FROM documents WHERE topic_id = ? ORDER BY published_date DESC LIMIT 30
-\`).all(topicId);
+const docs = hasDate
+  ? db.prepare(\`SELECT id, title, source, published_date, substr(content, 1, 500) as excerpt FROM documents WHERE topic_id = ? AND published_date >= ? AND published_date <= ? ORDER BY published_date DESC LIMIT 30\`).all(topicId, startDate, endDate)
+  : db.prepare(\`SELECT id, title, source, published_date, substr(content, 1, 500) as excerpt FROM documents WHERE topic_id = ? ORDER BY published_date DESC LIMIT 30\`).all(topicId);
 
 // 2. 获取实体
-const entities = db.prepare(\`
-  SELECT e.text, e.type, e.confidence, COUNT(*) as mentions 
-  FROM entities e JOIN documents d ON e.document_id = d.id 
-  WHERE d.topic_id = ? GROUP BY e.text ORDER BY mentions DESC LIMIT 30
-\`).all(topicId);
+const entities = hasDate
+  ? db.prepare(\`SELECT e.text, e.type, e.confidence, COUNT(*) as mentions FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.published_date >= ? AND d.published_date <= ? GROUP BY e.text ORDER BY mentions DESC LIMIT 30\`).all(topicId, startDate, endDate)
+  : db.prepare(\`SELECT e.text, e.type, e.confidence, COUNT(*) as mentions FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? GROUP BY e.text ORDER BY mentions DESC LIMIT 30\`).all(topicId);
 
 // 3. 获取关系
-const relations = db.prepare(\`
-  SELECT r.source_text, r.relation, r.target_text, r.confidence 
-  FROM relations r JOIN documents d ON r.document_id = d.id 
-  WHERE d.topic_id = ? ORDER BY r.confidence DESC LIMIT 30
-\`).all(topicId);
+const relations = hasDate
+  ? db.prepare(\`SELECT r.source_text, r.relation, r.target_text, r.confidence FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = ? AND d.published_date >= ? AND d.published_date <= ? ORDER BY r.confidence DESC LIMIT 30\`).all(topicId, startDate, endDate)
+  : db.prepare(\`SELECT r.source_text, r.relation, r.target_text, r.confidence FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = ? ORDER BY r.confidence DESC LIMIT 30\`).all(topicId);
 
 // 4. 获取事件
-const events = db.prepare(\`
-  SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants 
-  FROM events ev JOIN documents d ON ev.document_id = d.id 
-  WHERE d.topic_id = ? ORDER BY ev.event_time DESC LIMIT 20
-\`).all(topicId);
+const events = hasDate
+  ? db.prepare(\`SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.published_date >= ? AND d.published_date <= ? ORDER BY ev.event_time DESC LIMIT 20\`).all(topicId, startDate, endDate)
+  : db.prepare(\`SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? ORDER BY ev.event_time DESC LIMIT 20\`).all(topicId);
 
 // 5. 获取主张
-const claims = db.prepare(\`
-  SELECT c.text, c.polarity, c.confidence 
-  FROM claims c JOIN documents d ON c.document_id = d.id 
-  WHERE d.topic_id = ? ORDER BY c.confidence DESC LIMIT 20
-\`).all(topicId);
+const claims = hasDate
+  ? db.prepare(\`SELECT c.text, c.polarity, c.confidence FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ? AND d.published_date >= ? AND d.published_date <= ? ORDER BY c.confidence DESC LIMIT 20\`).all(topicId, startDate, endDate)
+  : db.prepare(\`SELECT c.text, c.polarity, c.confidence FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ? ORDER BY c.confidence DESC LIMIT 20\`).all(topicId);
 
 // 6. 时间分布
-const timeDist = db.prepare(\`
-  SELECT date(ev.event_time) as d, count(*) as cnt 
-  FROM events ev JOIN documents d ON ev.document_id = d.id 
-  WHERE d.topic_id = ? AND ev.event_time >= date('now', '-30 days') 
-  GROUP BY d ORDER BY d
-\`).all(topicId);
+const timeDist = hasDate
+  ? db.prepare(\`SELECT date(ev.event_time) as d, count(*) as cnt FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND d.published_date >= ? AND d.published_date <= ? GROUP BY d ORDER BY d\`).all(topicId, startDate, endDate)
+  : db.prepare(\`SELECT date(ev.event_time) as d, count(*) as cnt FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? AND ev.event_time >= date('now', '-30 days') GROUP BY d ORDER BY d\`).all(topicId);
 
 // 7. 组织活跃度
-const orgActivity = db.prepare(\`
-  SELECT e.text, e.type, COUNT(*) as cnt 
-  FROM entities e JOIN documents d ON e.document_id = d.id 
-  WHERE d.topic_id = ? AND e.type = 'Organization' 
-  GROUP BY e.text ORDER BY cnt DESC LIMIT 15
-\`).all(topicId);
+const orgActivity = hasDate
+  ? db.prepare(\`SELECT e.text, e.type, COUNT(*) as cnt FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.published_date >= ? AND d.published_date <= ? AND e.type = 'Organization' GROUP BY e.text ORDER BY cnt DESC LIMIT 15\`).all(topicId, startDate, endDate)
+  : db.prepare(\`SELECT e.text, e.type, COUNT(*) as cnt FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND e.type = 'Organization' GROUP BY e.text ORDER BY cnt DESC LIMIT 15\`).all(topicId);
 
 // 8. 统计
-const docCount = db.prepare('SELECT COUNT(*) as count FROM documents WHERE topic_id = ?').get(topicId);
-const entityCount = db.prepare('SELECT COUNT(DISTINCT e.text) as count FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ?').get(topicId);
+const docCount = hasDate
+  ? db.prepare('SELECT COUNT(*) as count FROM documents WHERE topic_id = ? AND published_date >= ? AND published_date <= ?').get(topicId, startDate, endDate)
+  : db.prepare('SELECT COUNT(*) as count FROM documents WHERE topic_id = ?').get(topicId);
+const entityCount = hasDate
+  ? db.prepare('SELECT COUNT(DISTINCT e.text) as count FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ? AND d.published_date >= ? AND d.published_date <= ?').get(topicId, startDate, endDate)
+  : db.prepare('SELECT COUNT(DISTINCT e.text) as count FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ?').get(topicId);
 
 console.log(JSON.stringify({ docs, entities, relations, events, claims, timeDist, orgActivity, docCount, entityCount }, null, 2));
 "
@@ -128,18 +122,24 @@ const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('database.sqlite');
 
 const topicId = '{{topicId}}';
+const startDate = '{{timeRangeStart}}';
+const endDate = '{{timeRangeEnd}}';
+const hasDate = startDate && endDate;
 const results = {};
 
+const docFilter = hasDate ? 'AND published_date >= ? AND published_date <= ?' : '';
+const docParams = hasDate ? [topicId, startDate, endDate] : [topicId];
+
 db.serialize(() => {
-  db.all('SELECT id, title, source, published_date FROM documents WHERE topic_id = ? ORDER BY published_date DESC LIMIT 30', [topicId], (err, rows) => {
+  db.all('SELECT id, title, source, published_date FROM documents WHERE topic_id = ? ' + docFilter + ' ORDER BY published_date DESC LIMIT 30', docParams, (err, rows) => {
     results.docs = rows || [];
-    db.all('SELECT text, type, confidence FROM entities WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ?) LIMIT 30', [topicId], (err, rows) => {
+    db.all('SELECT text, type, confidence FROM entities WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ? ' + docFilter + ') LIMIT 30', docParams, (err, rows) => {
       results.entities = rows || [];
-      db.all('SELECT source_text, relation, target_text FROM relations WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ?) LIMIT 30', [topicId], (err, rows) => {
+      db.all('SELECT source_text, relation, target_text FROM relations WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ? ' + docFilter + ') LIMIT 30', docParams, (err, rows) => {
         results.relations = rows || [];
-        db.all('SELECT type, title, description, event_time FROM events WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ?) ORDER BY event_time DESC LIMIT 20', [topicId], (err, rows) => {
+        db.all('SELECT type, title, description, event_time FROM events WHERE document_id IN (SELECT id FROM documents WHERE topic_id = ? ' + docFilter + ') ORDER BY event_time DESC LIMIT 20', docParams, (err, rows) => {
           results.events = rows || [];
-          db.get('SELECT COUNT(*) as count FROM documents WHERE topic_id = ?', [topicId], (err, row) => {
+          db.get('SELECT COUNT(*) as count FROM documents WHERE topic_id = ? ' + docFilter, docParams, (err, row) => {
             results.docCount = row?.count || 0;
             db.close();
             console.log(JSON.stringify(results, null, 2));
@@ -250,7 +250,7 @@ db.serialize(() => {
 
 ```json
 {
-  "title": "{{topicName}} 技术情报周报 · YYYY-MM-DD",
+  "title": "{{topicName}} 技术情报周报 · {{timeRangeStart}} ~ {{timeRangeEnd}}",
   "summary": "执行摘要的 overview 内容（1-2 段核心判断）",
   "content": {
     "version": "2.0",
@@ -425,13 +425,14 @@ db.serialize(() => {
 
 ## 重要约束
 
-1. **只输出 JSON**，不要包裹在 markdown 代码块中
-2. **不要执行数据库写入操作**，由 server.ts 后处理负责写入数据库
-3. 如果某个章节数据不足，仍保留章节但标注"数据不足，待后续采集补充"
-4. 日期使用 YYYY-MM-DD 格式
-5. 使用中文输出所有内容
-6. `entityRefs` 必须是数据库中真实存在的实体名称
-7. 每个信号必须有明确的类型和置信度
+1. **禁止网络搜索**：本 skill 只使用 SQLite 中已有的数据生成报告，不要进行任何网络搜索、网页抓取或信息采集。如果数据不足，在报告中标注数据缺口即可。
+2. **只输出 JSON**，不要包裹在 markdown 代码块中
+3. **不要执行数据库写入操作**，由 server.ts 后处理负责写入数据库
+4. 如果某个章节数据不足，仍保留章节但标注"数据不足，待后续采集补充"
+5. 日期使用 YYYY-MM-DD 格式
+6. 使用中文输出所有内容
+7. `entityRefs` 必须是数据库中真实存在的实体名称
+8. 每个信号必须有明确的类型和置信度
 
 ---
 

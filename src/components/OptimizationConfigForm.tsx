@@ -22,7 +22,7 @@ export default function OptimizationConfigForm({
 }: OptimizationConfigFormProps) {
   if (!config) {
     return (
-      <div className={`${CARD_FLAT} p-6 text-center text-sm text-[#86868b]`}>
+      <div className={`${CARD_FLAT} p-6 text-center text-sm text-[#888]`}>
         请选择一个技能以配置优化参数
       </div>
     );
@@ -51,7 +51,7 @@ export default function OptimizationConfigForm({
           placeholder="relevance,depth,accuracy"
           className={INPUT}
         />
-        <p className="text-xs text-[#86868b] mt-1">用逗号分隔多个评估维度</p>
+        <p className="text-xs text-[#888] mt-1">用逗号分隔多个评估维度</p>
       </div>
 
       <div className="grid grid-cols-2 gap-4">

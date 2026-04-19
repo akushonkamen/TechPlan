@@ -132,12 +132,12 @@ export default function Dashboard() {
                 <AreaChart data={trendData} margin={{ top: 8, right: 8, bottom: 8, left: 0 }}>
                   <defs>
                     <linearGradient id="colorPapers" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0071e3" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#0071e3" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#2A5A6B" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#2A5A6B" stopOpacity={0}/>
                     </linearGradient>
                     <linearGradient id="colorNews" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#34c759" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#34c759" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#5B7553" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#5B7553" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <XAxis
@@ -149,27 +149,27 @@ export default function Dashboard() {
                     {...axisStyle}
                     dx={-5}
                   />
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e5ea" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1d1d1f/20" vertical={false} />
                   <Tooltip content={<ChartTooltip />} />
                   <Area
                     type="monotone"
                     dataKey="papers"
                     name="论文"
-                    stroke="#0071e3"
+                    stroke="#2A5A6B"
                     strokeWidth={2.5}
                     fill="url(#colorPapers)"
                     dot={false}
-                    activeDot={{ r: 5, stroke: '#ffffff', strokeWidth: 2 }}
+                    activeDot={{ r: 5, stroke: '#F7F7F7', strokeWidth: 2 }}
                   />
                   <Area
                     type="monotone"
                     dataKey="news"
                     name="新闻"
-                    stroke="#34c759"
+                    stroke="#5B7553"
                     strokeWidth={2.5}
                     fill="url(#colorNews)"
                     dot={false}
-                    activeDot={{ r: 5, stroke: '#ffffff', strokeWidth: 2 }}
+                    activeDot={{ r: 5, stroke: '#F7F7F7', strokeWidth: 2 }}
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -188,21 +188,20 @@ export default function Dashboard() {
                 <BarChart data={topicDistribution} layout="vertical" margin={{ top: 8, right: 8, bottom: 8, left: 50 }}>
                   <XAxis type="number" {...axisStyle} />
                   <YAxis dataKey="name" type="category" {...axisStyle} tick={{ fill: '#1d1d1f', fontSize: 13, fontWeight: 500 }} width={50} />
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e5ea" horizontal={true} vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1d1d1f/20" horizontal={true} vertical={false} />
                   <Tooltip
-                    cursor={{ fill: '#f5f5f7' }}
+                    cursor={{ fill: '#F7F7F7' }}
                     contentStyle={{
                       borderRadius: '12px',
-                      border: '1px solid #e5e5ea',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                      border: '1px solid #1d1d1f/30',
                       fontSize: 12,
                     }}
                   />
-                  <Bar dataKey="value" name="证据数量" fill="#0071e3" radius={[0, 8, 8, 0]} barSize={24} />
+                  <Bar dataKey="value" name="证据数量" fill="#2A5A6B" radius={[0, 8, 8, 0]} barSize={24} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex flex-col items-center justify-center h-full text-[#aeaeb5] text-sm">
+              <div className="flex flex-col items-center justify-center h-full text-[#888] text-sm">
                 暂无数据
               </div>
             )}
@@ -212,65 +211,65 @@ export default function Dashboard() {
 
       {/* Recent Activity - NYTimes Style */}
       <div className={`${CARD} overflow-hidden`}>
-        <div className="px-8 py-5 flex justify-between items-center border-b border-[#f5f5f7]">
+        <div className="px-8 py-5 flex justify-between items-center border-b border-[#1d1d1f]/20">
           <h3 className={SECTION_TITLE}>活动动态</h3>
           <div className="flex gap-4 text-xs">
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#ff3b30]" />
+              <span className="w-2 h-2 rounded-full bg-[#A0453A]" />
               突发
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#ff9f0a]" />
+              <span className="w-2 h-2 rounded-full bg-[#9C7B3C]" />
               发展中
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#0071e3]" />
+              <span className="w-2 h-2 rounded-full bg-[#2A5A6B]" />
               热门
             </span>
           </div>
         </div>
         {alerts.length > 0 ? (
-          <div className="divide-y divide-[#f5f5f7]">
+          <div className="divide-y divide-[#1d1d1f]/20">
             {alerts.map((alert) => (
               <div
                 key={alert.id}
-                className={`px-8 py-4 flex items-center gap-4 hover:bg-[#f5f5f7] transition-colors ${
-                  alert.category === 'breaking' ? 'bg-[#fff5f5]' : ''
+                className={`px-8 py-4 flex items-center gap-4 hover:bg-[#F7F7F7] transition-colors ${
+                  alert.category === 'breaking' ? 'bg-[#A0453A]/5' : ''
                 }`}
               >
                 {/* Category indicator */}
                 <div
                   className={`w-2 h-2 rounded-full shrink-0 ${
                     alert.category === 'breaking'
-                      ? 'bg-[#ff3b30]'
+                      ? 'bg-[#A0453A]'
                       : alert.category === 'developing'
-                      ? 'bg-[#ff9f0a]'
-                      : 'bg-[#0071e3]'
+                      ? 'bg-[#9C7B3C]'
+                      : 'bg-[#2A5A6B]'
                   }`}
                 />
                 <div className="flex-1 min-w-0">
                   {/* Category badge for breaking news */}
                   <div className="flex items-center gap-2 mb-1">
                     {alert.category === 'breaking' && (
-                      <span className="px-2 py-0.5 text-[10px] font-semibold bg-[#ff3b30] text-white rounded">
+                      <span className="px-2 py-0.5 text-[10px] font-semibold bg-[#A0453A] text-white rounded">
                         突发
                       </span>
                     )}
                     {alert.category === 'developing' && (
-                      <span className="px-2 py-0.5 text-[10px] font-medium bg-[#ff9f0a] text-white rounded">
+                      <span className="px-2 py-0.5 text-[10px] font-medium bg-[#9C7B3C] text-white rounded">
                         发展中
                       </span>
                     )}
                     <p className="text-sm text-[#1d1d1f] truncate font-medium">{alert.title}</p>
                   </div>
-                  <div className="mt-1 flex items-center gap-3 text-xs text-[#86868b]">
+                  <div className="mt-1 flex items-center gap-3 text-xs text-[#888]">
                     <span className="font-medium">{alert.topic}</span>
                     <span>·</span>
                     <span>{alert.type}</span>
                     <span>·</span>
                     <span>{alert.time}</span>
                     {/* Relevance score indicator */}
-                    <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#f5f5f7] rounded">
+                    <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#F7F7F7] rounded">
                       {Math.round(alert.relevanceScore * 100)}% 相关
                     </span>
                   </div>
@@ -280,7 +279,7 @@ export default function Dashboard() {
                     href={alert.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[#aeaeb5] hover:text-[#0071e3] transition-colors shrink-0"
+                    className="text-[#888] hover:text-[#1d1d1f] transition-colors shrink-0"
                   >
                     <ArrowRight className="w-4 h-4" />
                   </a>
@@ -289,7 +288,7 @@ export default function Dashboard() {
             ))}
           </div>
         ) : (
-          <div className="px-8 py-12 text-center text-[#86868b] text-sm">
+          <div className="px-8 py-12 text-center text-[#888] text-sm">
             暂无活动
           </div>
         )}

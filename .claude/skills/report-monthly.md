@@ -6,6 +6,8 @@ description: |
   包含月环比对比、趋势分析、竞争格局、风险评估，输出标准化月报 JSON。
 category: reporting
 timeout: 600
+allowedTools:
+  - Bash
 params:
   - name: topicId
     type: string
@@ -299,10 +301,10 @@ console.log(JSON.stringify({
 
 ```json
 {
-  "title": "{{topicName}} 技术情报月报 · YYYY-MM",
+  "title": "{{topicName}} 技术情报月报 · {{timeRangeStart}} ~ {{timeRangeEnd}}",
   "summary": "月度核心判断（200-300字）：本月最重要的趋势、变化和结论",
   "content": {
-    "version": "1.0",
+    "version": "2.0",
     "meta": {
       "reportId": "MONTHLY-{topicId}-{YYYYMM}-{随机8位}",
       "topicId": "{{topicId}}",
@@ -321,98 +323,93 @@ console.log(JSON.stringify({
       },
       "confidence": "high|medium|low"
     },
-    "monthlyOverview": "月度概述（300-500字）：本月整体态势总结",
-    "keyAchievements": [
-      {
-        "achievement": "关键成就描述",
-        "significance": "重要性说明"
-      }
-    ],
-    "technologyTrends": [
-      {
-        "trend": "趋势名称",
-        "direction": "rising|stable|declining|emerging",
-        "changeRate": "变化率（与上月对比）",
-        "keyDrivers": ["驱动因素1", "驱动因素2"],
-        "entities": ["相关实体1", "相关实体2"]
-      }
-    ],
-    "marketTrends": [
-      {
-        "market": "市场领域",
-        "trendDirection": "growing|stable|shrinking",
-        "keyPlayers": ["主要玩家1", "主要玩家2"],
-        "notableEvents": ["事件1", "事件2"]
-      }
-    ],
-    "competitiveLandscape": {
-      "landscapeChanges": [
+    "executiveSummary": {
+      "overview": "月度概述（300-500字）：本月整体态势总结，包括最重要的趋势变化和战略判断",
+      "keyPoints": [
         {
-          "changeType": "new_entrant|exit|merger|pivot",
-          "entity": "组织名称",
-          "description": "变化描述",
-          "impact": "影响评估"
+          "point": "月度关键发现",
+          "evidence": ["支撑证据1", "支撑证据2"],
+          "impact": "影响描述"
         }
       ],
-      "competitorRanking": [
-        {
-          "rank": 1,
-          "entity": "组织名称",
-          "activityScore": 数字,
-          "change": "↑|↓|→",
-          "keyMoves": ["关键行动1", "关键行动2"]
-        }
-      ]
+      "confidence": 0.85
     },
-    "investmentReview": {
-      "totalDeals": 数字,
-      "hotSectors": ["热门领域1", "热门领域2"],
-      "notableDeals": [
-        {
-          "deal": "交易描述",
-          "amount": "金额（如有）",
-          "significance": "重要性"
-        }
-      ]
-    },
-    "partnershipReview": {
-      "newPartnerships": ["新合作1", "新合作2"],
-      "strategicAlliances": ["战略联盟1"],
-      "notableCollaborations": [
-        {
-          "partners": ["合作方A", "合作方B"],
-          "area": "合作领域",
-          "significance": "重要性"
-        }
-      ]
-    },
-    "riskAssessment": [
+    "sections": [
       {
-        "risk": "风险描述",
-        "category": "technology|market|regulatory|operational",
-        "probability": "高|中|低",
-        "impact": "高|中|低",
-        "mitigation": "缓解措施建议"
+        "id": "exec_overview",
+        "title": "月度概述",
+        "thesis": "本月整体态势一句话总结",
+        "content": "Markdown 格式的月度概述（300-500字）：包括关键成就、整体态势变化、月环比对比",
+        "highlights": ["关键成就1", "关键成就2", "整体态势变化"],
+        "signals": [
+          {
+            "type": "trend|opportunity|threat|milestone|breakthrough",
+            "title": "月度核心信号",
+            "description": "信号描述",
+            "confidence": 0.85
+          }
+        ],
+        "entityRefs": ["核心实体1", "核心实体2"]
+      },
+      {
+        "id": "tech_trends",
+        "title": "技术趋势",
+        "thesis": "技术发展趋势一句话总结",
+        "content": "Markdown 格式的技术趋势分析：每个趋势包括方向（rising/stable/declining/emerging）、变化率、关键驱动因素、相关实体。与上月数据对比分析",
+        "highlights": ["上升趋势1", "下降趋势1", "新兴趋势1"],
+        "signals": [],
+        "entityRefs": ["技术实体1", "技术实体2"]
+      },
+      {
+        "id": "competitive_landscape",
+        "title": "竞争格局",
+        "thesis": "竞争格局变化一句话总结",
+        "content": "Markdown 格式的竞争格局分析：格局变化（新进入者/退出/并购/转型）、竞争者排名、主要玩家动向、策略意图推断",
+        "highlights": ["格局变化1", "头部玩家动向1", "竞争格局变化趋势"],
+        "signals": [],
+        "entityRefs": ["组织名1", "组织名2"]
+      },
+      {
+        "id": "investment_review",
+        "title": "投资与合作",
+        "thesis": "投资合作动态一句话总结",
+        "content": "Markdown 格式的投资合作分析：投资热度（交易数量、热门领域）、重要交易详情、新合作伙伴关系、战略联盟动态",
+        "highlights": ["投资热点1", "重要交易1", "新合作1"],
+        "signals": [],
+        "entityRefs": ["投资方1", "被投方1"]
+      },
+      {
+        "id": "risk_assessment",
+        "title": "风险评估",
+        "thesis": "风险态势一句话总结",
+        "content": "Markdown 格式的风险分析：技术风险、市场风险、监管风险、运营风险，每个风险包括概率、影响和缓解措施建议",
+        "highlights": ["高风险1", "中风险1", "风险缓解建议"],
+        "signals": [],
+        "entityRefs": ["风险相关实体1"]
+      },
+      {
+        "id": "next_month_outlook",
+        "title": "下月展望",
+        "thesis": "下月预期一句话总结",
+        "content": "Markdown 格式的下月展望：关注重点、预期事件、信息缺口、建议行动（含优先级）",
+        "highlights": ["关注重点1", "预期事件1", "建议行动1"],
+        "signals": [],
+        "entityRefs": []
       }
     ],
-    "nextMonthOutlook": {
-      "focusAreas": ["关注重点1", "关注重点2"],
-      "expectedEvents": ["预期事件1", "预期事件2"],
-      "informationGaps": ["信息缺口1"],
-      "recommendedActions": [
-        {
-          "action": "建议行动",
-          "priority": "high|medium|low"
-        }
-      ]
-    },
     "timeline": [
       {
         "date": "YYYY-MM-DD",
         "event": "事件描述",
-        "significance": "重要性说明"
+        "significance": "重要性说明",
+        "entityRefs": ["相关实体"]
       }
-    ]
+    ],
+    "metrics": {
+      "documentsAnalyzed": 数字,
+      "entitiesCovered": 数字,
+      "monthOverMonthGrowth": "百分比"
+    }
   },
   "metadata": {
     "documentsAnalyzed": 数字,
@@ -434,20 +431,19 @@ console.log(JSON.stringify({
 输出 JSON 前确认：
 
 ### 5a. 数据完整性检查
-- [ ] `technologyTrends` 至少有 1 条
-- [ ] `competitiveLandscape` 非空（landscapeChanges 或 competitorRanking）
-- [ ] `riskAssessment` 至少有 1 条
-- [ ] `timeline` 至少有 3 条事件
+- [ ] `sections` 包含全部 6 个章节
+- [ ] 每个 section 至少有 1 个 highlight
+- [ ] `timeline` 至少有 3 条事件（如果数据充足）
 
 ### 5b. 格式规范性检查
 - [ ] `summary` 字数 200-300 字
-- [ ] `monthlyOverview` 字数 300-500 字
 - [ ] `direction` 值合法：rising|stable|declining|emerging
+- [ ] 日期使用 YYYY-MM-DD 格式
 
 ### 5c. 逻辑一致性检查
-- [ ] `changeRate` 与 `direction` 逻辑一致
-- [ ] `change` 符号与活跃度变化一致
 - [ ] 月环比数据准确
+- [ ] 竞争格局变化有证据支撑
+- [ ] 建议行动与风险评估对应
 
 ---
 
@@ -462,7 +458,8 @@ console.log(JSON.stringify({
 
 ## 重要约束
 
-1. **只输出 JSON**，不要包裹在 markdown 代码块中
+1. **禁止网络搜索**：只使用 SQLite 中已有数据，不要进行网络搜索或信息采集。数据不足时在 `metadata.dataGaps` 中标注。
+2. **只输出 JSON**，不要包裹在 markdown 代码块中
 2. **不要执行数据库写入操作**
 3. **月环比对比**：必须包含与上月数据的对比分析
 4. **中文输出**：所有内容使用中文
