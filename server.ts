@@ -203,11 +203,61 @@ async function startServer() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Skill version tracking
+    CREATE TABLE IF NOT EXISTS skill_versions (
+      id TEXT PRIMARY KEY,
+      skill_name TEXT NOT NULL,
+      version TEXT NOT NULL,
+      content TEXT NOT NULL,
+      changelog TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(skill_name, version)
+    );
+
+    -- Optimization configs
+    CREATE TABLE IF NOT EXISTS optimization_configs (
+      id TEXT PRIMARY KEY,
+      skill_name TEXT NOT NULL UNIQUE,
+      evaluation_criteria TEXT DEFAULT 'relevance,depth,accuracy',
+      max_iterations INTEGER DEFAULT 10,
+      convergence_threshold REAL DEFAULT 8.0,
+      focus_area TEXT DEFAULT 'general',
+      custom_params TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Optimization history
+    CREATE TABLE IF NOT EXISTS optimization_history (
+      id TEXT PRIMARY KEY,
+      skill_name TEXT NOT NULL,
+      iterations_completed INTEGER,
+      converged INTEGER DEFAULT 0,
+      peak_score REAL,
+      final_score REAL,
+      lessons_extracted INTEGER DEFAULT 0,
+      result_summary TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_skill_executions_name ON skill_executions(skill_name);
     CREATE INDEX IF NOT EXISTS idx_skill_executions_status ON skill_executions(status);
     CREATE INDEX IF NOT EXISTS idx_bilevel_lessons_skill ON bilevel_lessons(skill_name);
     CREATE INDEX IF NOT EXISTS idx_bilevel_skills_skill ON bilevel_skills(skill_name);
+    CREATE INDEX IF NOT EXISTS idx_skill_versions_skill ON skill_versions(skill_name);
+    CREATE INDEX IF NOT EXISTS idx_optimization_history_skill ON optimization_history(skill_name);
   `);
+
+  // Add skill_version column to skill_executions if not exists
+  try {
+    await db.exec(`
+      ALTER TABLE skill_executions ADD COLUMN skill_version TEXT DEFAULT '0.0.0'
+    `);
+  } catch (err: any) {
+    // Column might already exist - ignore duplicate column error
+    if (!err.message.includes('duplicate column')) {
+      console.warn('[Server] Warning adding skill_version column:', err.message);
+    }
+  }
 
   // Seed data if empty
   const count = await db.get("SELECT COUNT(*) as count FROM topics");
@@ -1231,6 +1281,30 @@ async function startServer() {
   const skillRegistry = new SkillRegistry();
   skillRegistry.loadAll(path.resolve(process.cwd(), '.claude/skills'));
 
+  // Startup version auto-registration
+  const skillsDir = path.resolve(process.cwd(), '.claude/skills');
+  for (const skill of skillRegistry.listDetailed()) {
+    // Check if current version exists in skill_versions
+    const existing = await db.get(
+      "SELECT id FROM skill_versions WHERE skill_name = ? AND version = ?",
+      [skill.name, skill.version]
+    );
+
+    if (!existing) {
+      // Read the current file content
+      const filePath = path.join(skillsDir, `${skill.name}.md`);
+      const content = fs.readFileSync(filePath, 'utf-8');
+
+      // Insert initial version record
+      await db.run(
+        `INSERT INTO skill_versions (id, skill_name, version, content, changelog, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [`sv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, skill.name, skill.version, content, 'Initial version', new Date().toISOString()]
+      );
+      console.log(`[SkillRegistry] Auto-registered version ${skill.version} for skill: ${skill.name}`);
+    }
+  }
+
   const skillExecutor = new SkillExecutor(skillRegistry, db);
   const httpServer = createHttpServer(app);
   const ws = new SkillWebSocket(httpServer);
@@ -1238,9 +1312,210 @@ async function startServer() {
   // Clean up stale "running" executions from previous server session
   await skillExecutor.cleanupStale();
 
-  // List available skills
+  // List available skills (enriched with displayName, version, category)
   app.get("/api/skills", (_req, res) => {
-    res.json(skillRegistry.list());
+    const skills = skillRegistry.listDetailed();
+    res.json(skills.map(s => ({
+      name: s.name,
+      displayName: s.displayName,
+      description: s.description,
+      category: s.category,
+      version: s.version,
+    })));
+  });
+
+  // Get full skill detail
+  app.get("/api/skills/:name", (req, res) => {
+    const { name } = req.params;
+    const skill = skillRegistry.getDetail(name);
+    if (!skill) {
+      return res.status(404).json({ error: `Skill not found: ${name}` });
+    }
+    res.json(skill);
+  });
+
+  // Get skill version history
+  app.get("/api/skills/:name/versions", async (req, res) => {
+    try {
+      const { name } = req.params;
+      const versions = await db.all(
+        "SELECT * FROM skill_versions WHERE skill_name = ? ORDER BY created_at DESC",
+        [name]
+      );
+      res.json(versions);
+    } catch (error) {
+      console.error("Failed to fetch skill versions:", error);
+      res.status(500).json({ error: "Failed to fetch skill versions" });
+    }
+  });
+
+  // Create new skill version
+  app.post("/api/skills/:name/versions", async (req, res) => {
+    try {
+      const { name } = req.params;
+      const { changelog } = req.body;
+
+      const skill = skillRegistry.getDetail(name);
+      if (!skill) {
+        return res.status(404).json({ error: `Skill not found: ${name}` });
+      }
+
+      // Get latest version number and increment
+      const latest = await db.get(
+        "SELECT version FROM skill_versions WHERE skill_name = ? ORDER BY created_at DESC LIMIT 1",
+        [name]
+      );
+
+      let newVersion = "1.0.0";
+      if (latest) {
+        // Simple patch version increment
+        const parts = latest.version.split('.');
+        if (parts.length === 3) {
+          const patch = parseInt(parts[2]) + 1;
+          newVersion = `${parts[0]}.${parts[1]}.${patch}`;
+        }
+      }
+
+      // Read current file content
+      const filePath = path.join(skillsDir, `${name}.md`);
+      const content = fs.readFileSync(filePath, 'utf-8');
+
+      const id = `sv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      await db.run(
+        `INSERT INTO skill_versions (id, skill_name, version, content, changelog, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, name, newVersion, content, changelog || '', new Date().toISOString()]
+      );
+
+      res.status(201).json({ id, skill_name: name, version: newVersion });
+    } catch (error) {
+      console.error("Failed to create skill version:", error);
+      res.status(500).json({ error: "Failed to create skill version" });
+    }
+  });
+
+  // Restore skill from version
+  app.post("/api/skills/:name/restore/:version", async (req, res) => {
+    try {
+      const { name, version } = req.params;
+
+      const versionRecord = await db.get(
+        "SELECT * FROM skill_versions WHERE skill_name = ? AND version = ?",
+        [name, version]
+      );
+
+      if (!versionRecord) {
+        return res.status(404).json({ error: "Version not found" });
+      }
+
+      // Write content to file
+      const filePath = path.join(skillsDir, `${name}.md`);
+      fs.writeFileSync(filePath, versionRecord.content, 'utf-8');
+
+      // Reload the skill registry
+      skillRegistry.loadAll(skillsDir);
+
+      res.json({ success: true, message: `Restored ${name} to version ${version}` });
+    } catch (error) {
+      console.error("Failed to restore skill version:", error);
+      res.status(500).json({ error: "Failed to restore skill version" });
+    }
+  });
+
+  // Get optimization config
+  app.get("/api/skills/:name/optimization/config", async (req, res) => {
+    try {
+      const { name } = req.params;
+      const config = await db.get(
+        "SELECT * FROM optimization_configs WHERE skill_name = ?",
+        [name]
+      );
+
+      if (!config) {
+        // Return defaults
+        return res.json({
+          skill_name: name,
+          evaluation_criteria: 'relevance,depth,accuracy',
+          max_iterations: 10,
+          convergence_threshold: 8.0,
+          focus_area: 'general',
+          custom_params: null,
+        });
+      }
+
+      res.json(config);
+    } catch (error) {
+      console.error("Failed to get optimization config:", error);
+      res.status(500).json({ error: "Failed to get optimization config" });
+    }
+  });
+
+  // Update optimization config
+  app.put("/api/skills/:name/optimization/config", async (req, res) => {
+    try {
+      const { name } = req.params;
+      const { evaluation_criteria, max_iterations, convergence_threshold, focus_area, custom_params } = req.body;
+
+      const existing = await db.get(
+        "SELECT id FROM optimization_configs WHERE skill_name = ?",
+        [name]
+      );
+
+      const now = new Date().toISOString();
+      if (existing) {
+        await db.run(
+          `UPDATE optimization_configs
+           SET evaluation_criteria = ?, max_iterations = ?, convergence_threshold = ?,
+               focus_area = ?, custom_params = ?, updated_at = ?
+           WHERE skill_name = ?`,
+          [
+            evaluation_criteria ?? 'relevance,depth,accuracy',
+            max_iterations ?? 10,
+            convergence_threshold ?? 8.0,
+            focus_area ?? 'general',
+            custom_params ? JSON.stringify(custom_params) : null,
+            now,
+            name
+          ]
+        );
+      } else {
+        const id = `optcfg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        await db.run(
+          `INSERT INTO optimization_configs (id, skill_name, evaluation_criteria, max_iterations, convergence_threshold, focus_area, custom_params, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            name,
+            evaluation_criteria ?? 'relevance,depth,accuracy',
+            max_iterations ?? 10,
+            convergence_threshold ?? 8.0,
+            focus_area ?? 'general',
+            custom_params ? JSON.stringify(custom_params) : null,
+            now
+          ]
+        );
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Failed to update optimization config:", error);
+      res.status(500).json({ error: "Failed to update optimization config" });
+    }
+  });
+
+  // Get optimization history
+  app.get("/api/skills/:name/optimization/history", async (req, res) => {
+    try {
+      const { name } = req.params;
+      const history = await db.all(
+        "SELECT * FROM optimization_history WHERE skill_name = ? ORDER BY created_at DESC",
+        [name]
+      );
+      res.json(history);
+    } catch (error) {
+      console.error("Failed to fetch optimization history:", error);
+      res.status(500).json({ error: "Failed to fetch optimization history" });
+    }
   });
 
   // Trigger a skill execution

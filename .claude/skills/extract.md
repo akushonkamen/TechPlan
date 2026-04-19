@@ -1,3 +1,32 @@
+---
+version: "1.0.0"
+display_name: "知识抽取"
+description: |
+  从文档中抽取结构化知识（实体、关系、主张、事件），
+  存入 SQLite 和 Neo4j 图数据库。
+category: extraction
+timeout: 900
+params:
+  - name: topicId
+    type: string
+    required: true
+    description: "主题 ID"
+  - name: documentIds
+    type: string
+    required: false
+    description: "文档 ID 列表（JSON 数组字符串，为空则处理全部）"
+  - name: extractTypes
+    type: string
+    required: false
+    default: "entities,relations,claims,events"
+    description: "抽取类型"
+steps:
+  - "从 SQLite 获取待处理文档"
+  - "逐文档抽取实体、关系、主张、事件"
+  - "存入 SQLite 数据库"
+  - "同步到 Neo4j（如可用）"
+---
+
 # NLP 知识抽取
 
 你是一个知识图谱构建专家。请从文档中抽取结构化知识（实体、关系、主张、事件），并存入数据库和图数据库。

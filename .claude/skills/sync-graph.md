@@ -1,3 +1,24 @@
+---
+version: "1.0.0"
+display_name: "图谱同步"
+description: |
+  将 SQLite 中的结构化数据同步到 Neo4j 知识图谱，
+  创建节点、关系和事件节点。
+category: sync
+timeout: 300
+params:
+  - name: topicId
+    type: string
+    required: true
+    description: "主题 ID"
+steps:
+  - "从 SQLite 获取实体、关系、事件、主张数据"
+  - "创建/更新 Neo4j 节点（按实体类型分标签）"
+  - "创建 Neo4j 关系（类型映射：develops→DEVELOPS 等）"
+  - "创建事件和主张节点"
+  - "创建主题关联"
+---
+
 # 知识图谱同步
 
 你是一个图数据库专家。请将 SQLite 中的结构化数据同步到 Neo4j 知识图谱中。
