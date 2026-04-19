@@ -24,7 +24,7 @@ export default function SkillCard({ skill, onClick, isExpanded }: SkillCardProps
     <div
       onClick={onClick}
       className={`${CARD} p-5 cursor-pointer transition-all ${
-        isExpanded ? 'ring-2 ring-[#0071e3]' : 'hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)]'
+        isExpanded ? 'ring-2 ring-[#0071e3]' : 'hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]'
       }`}
     >
       <div className="flex items-start justify-between gap-3">

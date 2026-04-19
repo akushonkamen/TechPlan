@@ -1,7 +1,8 @@
 // Global floating skill task bar — Apple aesthetic
+// Supports task archiving and result presentation
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, X, Terminal } from 'lucide-react';
+import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, X, Terminal, Archive, Clock } from 'lucide-react';
 
 interface SkillExecution {
   id: string;
@@ -10,6 +11,17 @@ interface SkillExecution {
   started_at: string;
   completed_at: string | null;
   error: string | null;
+}
+
+interface ArchivedTask {
+  id: string;
+  skillName: string;
+  status: 'completed' | 'failed';
+  startedAt: string;
+  completedAt: string;
+  duration: string;
+  resultSummary: string;
+  logs: string[];
 }
 
 function formatDuration(start: string, end?: string | null): string {
@@ -33,6 +45,26 @@ function skillLabel(name: string): string {
   return map[name] || name;
 }
 
+function getResultSummary(skillName: string, logs: string[]): string {
+  // Try to extract result summary from logs
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const line = logs[i];
+    if (line.includes('完成') || line.includes('采集') || line.includes('抽取') || line.includes('同步') || line.includes('生成')) {
+      return line.slice(0, 80);
+    }
+  }
+  // Default summaries by skill type
+  const defaults: Record<string, string> = {
+    research: '情报采集完成',
+    extract: '知识抽取完成',
+    report: '报告生成完成',
+    'track-competitor': '友商追踪完成',
+    'sync-graph': '图谱同步完成',
+    optimize: '优化循环完成',
+  };
+  return defaults[skillName] || '执行完成';
+}
+
 function getLogColor(line: string): string {
   if (line.startsWith('思考')) return 'text-purple-300';
   if (line.startsWith('调用')) return 'text-cyan-300';
@@ -50,8 +82,12 @@ export default function SkillTaskBar() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(new Set<string>());
   const [progress, setProgress] = useState<Record<string, string[]>>({});
+  const [archivedTasks, setArchivedTasks] = useState<ArchivedTask[]>([]);
+  const [showArchive, setShowArchive] = useState(false);
+  const [expandedArchiveId, setExpandedArchiveId] = useState<string | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const autoSelected = useRef(false);
+  const archivedIds = useRef(new Set<string>());
 
   const fetchExecutions = useCallback(async () => {
     try {
@@ -66,6 +102,40 @@ export default function SkillTaskBar() {
     return () => clearInterval(id);
   }, [fetchExecutions]);
 
+  // Auto-archive completed tasks after 5 seconds
+  useEffect(() => {
+    const completedExecs = executions.filter(e =>
+      (e.status === 'completed' || e.status === 'failed') &&
+      !archivedIds.current.has(e.id)
+    );
+
+    if (completedExecs.length === 0) return;
+
+    const timers = completedExecs.map(exec => {
+      archivedIds.current.add(exec.id);
+      return setTimeout(() => {
+        const logs = progress[exec.id] || [];
+        setArchivedTasks(prev => {
+          const entry: ArchivedTask = {
+            id: exec.id,
+            skillName: exec.skill_name,
+            status: exec.status as 'completed' | 'failed',
+            startedAt: exec.started_at,
+            completedAt: exec.completed_at || new Date().toISOString(),
+            duration: formatDuration(exec.started_at, exec.completed_at),
+            resultSummary: exec.status === 'completed'
+              ? getResultSummary(exec.skill_name, logs)
+              : exec.error || '执行失败',
+            logs: logs.slice(-20), // Keep last 20 log lines
+          };
+          return [entry, ...prev].slice(0, 10); // Max 10 archived
+        });
+      }, 5000);
+    });
+
+    return () => timers.forEach(t => clearTimeout(t));
+  }, [executions, progress]);
+
   useEffect(() => {
     const running = executions.filter(e => e.status === 'running');
     if (running.length > 0 && !autoSelected.current) {
@@ -79,7 +149,7 @@ export default function SkillTaskBar() {
         setActiveId(running[0].id);
       }
     }
-  }, [executions]);
+  }, [executions, activeId]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -103,7 +173,9 @@ export default function SkillTaskBar() {
             totalKnown = data.total || totalKnown;
           }
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        console.error('Failed to poll progress:', err);
+      }
     };
 
     poll();
@@ -124,7 +196,9 @@ export default function SkillTaskBar() {
   const completed = visible.filter(e => e.status !== 'running');
   const hasRunning = running.length > 0;
 
-  if (visible.length === 0) return null;
+  const showBar = visible.length > 0 || archivedTasks.length > 0;
+
+  if (!showBar) return null;
 
   const displayId = activeId || running[0]?.id || completed[0]?.id;
   const displayExec = executions.find(e => e.id === displayId);
@@ -142,7 +216,7 @@ export default function SkillTaskBar() {
   return (
     <div className="fixed bottom-4 right-4 z-50" style={{ width: 460 }}>
       {expanded && (
-        <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden border border-[#d2d2d7] animate-slide-up">
+        <div className="bg-white/95 backdrop-blur-xl rounded-[18px] shadow-2xl overflow-hidden border border-[#d2d2d7] animate-slide-up">
           {/* Terminal header */}
           <div className="flex items-center justify-between px-4 py-2.5 bg-[#1d1d1f] text-[#e8e8ed]">
             <div className="flex items-center gap-2 min-w-0">
@@ -177,7 +251,7 @@ export default function SkillTaskBar() {
                       fetchExecutions();
                     }
                   }}
-                  className="text-xs text-[#ff3b30] hover:text-[#ff3b30]/80 px-2 py-0.5 rounded-full border border-[#ff3b30]/30 transition-colors"
+                  className="text-xs text-[#ff3b30] hover:text-[#ff3b30]/80 px-2 py-0.5 rounded-[980px] border border-[#ff3b30]/30 transition-colors"
                 >
                   取消
                 </button>
@@ -219,7 +293,7 @@ export default function SkillTaskBar() {
                 <button
                   key={exec.id}
                   onClick={() => handleTabClick(exec.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs whitespace-nowrap transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-[980px] text-xs whitespace-nowrap transition-all ${
                     displayId === exec.id
                       ? 'bg-[#0071e3] text-white font-medium'
                       : 'bg-white text-[#86868b] hover:bg-white/80'
@@ -233,7 +307,7 @@ export default function SkillTaskBar() {
                 <button
                   key={exec.id}
                   onClick={() => handleTabClick(exec.id)}
-                  className={`group flex items-center gap-1 px-3 py-1 rounded-full text-xs whitespace-nowrap transition-all ${
+                  className={`group flex items-center gap-1 px-3 py-1 rounded-[980px] text-xs whitespace-nowrap transition-all ${
                     displayId === exec.id
                       ? 'bg-[#d2d2d7] text-[#1d1d1f] font-medium'
                       : 'bg-white text-[#86868b] hover:bg-white/80'
@@ -266,6 +340,64 @@ export default function SkillTaskBar() {
               </button>
             </div>
           )}
+
+          {/* Archived tasks section */}
+          {archivedTasks.length > 0 && (
+            <div className="border-t border-[#f5f5f7]">
+              <button
+                onClick={() => setShowArchive(!showArchive)}
+                className="w-full flex items-center justify-between px-4 py-2 text-xs font-medium text-[#86868b] hover:text-[#1d1d1f] transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Archive className="w-3.5 h-3.5" />
+                  已归档 ({archivedTasks.length})
+                </span>
+                {showArchive ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+              </button>
+              {showArchive && (
+                <div className="px-4 pb-3 max-h-48 overflow-y-auto">
+                  <div className="space-y-2">
+                    {archivedTasks.map(task => (
+                      <div key={task.id} className="group">
+                        <button
+                          onClick={() => setExpandedArchiveId(expandedArchiveId === task.id ? null : task.id)}
+                          className="w-full flex items-center gap-2 px-3 py-2 bg-[#f5f5f7] rounded-xl text-left hover:bg-[#e8e8ed] transition-colors"
+                        >
+                          {task.status === 'completed' ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-[#34c759] shrink-0" />
+                          ) : (
+                            <XCircle className="w-3.5 h-3.5 text-[#ff3b30] shrink-0" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium text-[#1d1d1f]">{skillLabel(task.skillName)}</span>
+                              <span className="flex items-center gap-1 text-[10px] text-[#aeaeb5]">
+                                <Clock className="w-2.5 h-2.5" />
+                                {task.duration}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-[#86868b] truncate mt-0.5">{task.resultSummary}</p>
+                          </div>
+                          <span className="text-[10px] text-[#aeaeb5] shrink-0">
+                            {new Date(task.completedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </button>
+                        {expandedArchiveId === task.id && task.logs.length > 0 && (
+                          <div className="mt-1 bg-[#1d1d1f] text-[#e8e8ed] rounded-xl p-2 max-h-32 overflow-y-auto">
+                            {task.logs.map((line, i) => (
+                              <div key={i} className={`text-[10px] py-0.5 font-mono ${getLogColor(line)}`}>
+                                {line}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -275,7 +407,7 @@ export default function SkillTaskBar() {
         className={`
           w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium
           transition-all duration-200
-          ${expanded ? 'rounded-b-2xl' : 'rounded-2xl'}
+          ${expanded ? 'rounded-b-[18px]' : 'rounded-[18px]'}
           ${hasRunning
             ? 'bg-[#0071e3] text-white shadow-lg shadow-[#0071e3]/20'
             : 'bg-white/95 backdrop-blur-xl text-[#1d1d1f] shadow-lg border border-[#d2d2d7]'
@@ -291,7 +423,7 @@ export default function SkillTaskBar() {
           <span className="truncate">
             {hasRunning
               ? `${running.length} 个任务执行中`
-              : completed.length > 0 ? '任务已完成' : '任务'}
+              : completed.length > 0 ? '任务已完成' : archivedTasks.length > 0 ? `${archivedTasks.length} 个已归档` : '任务'}
           </span>
           {hasRunning && running[0] && (
             <span className="text-xs opacity-75 shrink-0">

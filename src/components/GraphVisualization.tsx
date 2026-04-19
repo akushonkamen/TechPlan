@@ -1,5 +1,5 @@
 import type { FC, MouseEvent } from 'react';
-import { useCallback, useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -25,6 +25,7 @@ export interface GraphNodeData {
   url?: string;
   metadata?: Record<string, any>;
   topicId?: string;
+  highlighted?: boolean; // true=emphasized, false=dimmed, undefined=normal
 }
 
 export interface GraphEdgeData {
@@ -40,46 +41,55 @@ export interface GraphVisualizationProps {
   edges: GraphEdge[];
   onNodeClick?: (node: GraphNode) => void;
   onNodeDoubleClick?: (node: GraphNode) => void;
+  focusNodeIds?: string[];
 }
 
 // Custom Node Component
 const CustomNode: FC<{ data: GraphNodeData }> = ({ data }) => {
+  // Highlight context: undefined=normal, true=emphasized, false=dimmed
+  const hasHighlightContext = data.highlighted !== undefined;
+  const isHighlighted = data.highlighted === true;
+
   const getNodeStyle = () => {
+    if (hasHighlightContext && !isHighlighted) {
+      // Dimmed node: thin gray border, faded
+      return 'bg-[#e8e8ed] border-[#d2d2d7] border';
+    }
     switch (data.type) {
       case 'topic':
-        return 'bg-[#0071e3] border-[#0071e3]/30';
+        return isHighlighted ? 'bg-[#0071e3] border-[#0071e3] border-[3px]' : 'bg-[#0071e3] border-[#0071e3]/30 border-2';
       case 'entity':
-        return 'bg-blue-500 border-blue-200';
+        return isHighlighted ? 'bg-blue-500 border-[#0071e3] border-[3px]' : 'bg-blue-500 border-blue-200 border-2';
       case 'event':
-        return 'bg-purple-500 border-purple-200';
+        return isHighlighted ? 'bg-purple-500 border-[#0071e3] border-[3px]' : 'bg-purple-500 border-purple-200 border-2';
       case 'claim':
-        return 'bg-amber-500 border-amber-200';
+        return isHighlighted ? 'bg-amber-500 border-[#0071e3] border-[3px]' : 'bg-amber-500 border-amber-200 border-2';
       case 'document':
-        return 'bg-emerald-500 border-emerald-200';
+        return isHighlighted ? 'bg-emerald-500 border-[#0071e3] border-[3px]' : 'bg-emerald-500 border-emerald-200 border-2';
       default:
-        return 'bg-[#86868b] border-[#d2d2d7]';
+        return 'bg-[#86868b] border-[#d2d2d7] border-2';
     }
   };
 
   const getIcon = () => {
     switch (data.type) {
-      case 'topic':
-        return '🎯';
-      case 'entity':
-        return '🏢';
-      case 'event':
-        return '📅';
-      case 'claim':
-        return '💡';
-      case 'document':
-        return '📄';
-      default:
-        return '📦';
+      case 'topic': return '🎯';
+      case 'entity': return '🏢';
+      case 'event': return '📅';
+      case 'claim': return '💡';
+      case 'document': return '📄';
+      default: return '📦';
     }
   };
 
+  const dimClasses = hasHighlightContext && !isHighlighted
+    ? 'opacity-40 scale-[0.7]'
+    : '';
+
   return (
-    <div className={`px-4 py-2 rounded-full border-2 shadow-md ${getNodeStyle()} text-white text-sm font-medium min-w-[80px] text-center`}>
+    <div className={`px-4 py-2 rounded-full shadow-md ${getNodeStyle()} ${dimClasses} text-sm font-medium min-w-[80px] text-center transition-all duration-300 ${
+      hasHighlightContext && !isHighlighted ? 'text-[#86868b]' : 'text-white'
+    }`}>
       <span className="mr-1">{getIcon()}</span>
       <span>{data.label}</span>
     </div>
@@ -181,9 +191,25 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
   edges: initialEdges,
   onNodeClick,
   onNodeDoubleClick,
+  focusNodeIds,
 }) => {
   const [layout, setLayout] = useState<'force' | 'hierarchical' | 'circular' | 'grid'>('force');
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const rfInstance = useRef<any>(null);
+
+  // Auto-focus on highlighted nodes when focusNodeIds changes
+  useEffect(() => {
+    if (focusNodeIds?.length && rfInstance.current) {
+      const timer = setTimeout(() => {
+        rfInstance.current?.fitView({
+          nodes: focusNodeIds.map(id => ({ id })),
+          padding: 0.3,
+          duration: 600,
+        });
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [focusNodeIds]);
 
   // Transform nodes to ReactFlow format
   const transformedNodes = useMemo(() => {
@@ -267,6 +293,7 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
         onConnect={onConnect}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
+        onInit={(instance) => { rfInstance.current = instance; }}
         nodeTypes={nodeTypes}
         fitView
         attributionPosition="bottom-left"

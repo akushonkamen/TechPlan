@@ -1,6 +1,7 @@
 import { X, RotateCcw, Loader2 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { SkillVersion } from '../hooks/useSkillApi';
+import { MODAL_BACKDROP, MODAL_CONTAINER } from '../lib/design';
 
 interface SkillVersionHistoryProps {
   skillName: string;
@@ -20,17 +21,22 @@ export default function SkillVersionHistory({
   const [versions, setVersions] = useState<SkillVersion[]>([]);
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const fetchVersions = async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/skills/${encodeURIComponent(skillName)}/versions`);
-      if (res.ok) {
+      if (res.ok && mountedRef.current) {
         const data = await res.json();
         setVersions(data);
       }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -52,33 +58,27 @@ export default function SkillVersionHistory({
       const res = await fetch(`/api/skills/${encodeURIComponent(skillName)}/restore/${version}`, {
         method: 'POST',
       });
-      if (res.ok) {
+      if (res.ok && mountedRef.current) {
         onRestored();
         onClose();
       }
     } finally {
-      setRestoring(null);
+      if (mountedRef.current) setRestoring(null);
     }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/20 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
+    <div className={`fixed inset-0 z-50 flex items-center justify-center ${MODAL_BACKDROP}`}>
       {/* Modal */}
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 animate-fade-in">
+      <div className={`${MODAL_CONTAINER} w-full max-w-lg mx-4 animate-scale-in`}>
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-[#f5f5f7]">
           <h2 className="text-lg font-semibold text-[#1d1d1f]">版本历史 — {displayName}</h2>
           <button
             onClick={onClose}
-            className="p-1.5 text-[#86868b] hover:text-[#1d1d1f] hover:bg-[#f5f5f7] rounded-lg transition-all"
+            className="p-1.5 text-[#86868b] hover:text-[#1d1d1f] hover:bg-[#f5f5f7] rounded-full transition-all"
           >
             <X className="w-5 h-5" />
           </button>
@@ -113,7 +113,7 @@ export default function SkillVersionHistory({
                   <button
                     onClick={() => handleRestore(v.version)}
                     disabled={restoring === v.version}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-[#0071e3] hover:bg-[#0071e3]/5 rounded-lg transition-all disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-[#0071e3] hover:bg-[#0071e3]/5 rounded-full transition-all disabled:opacity-50"
                   >
                     {restoring === v.version ? (
                       <Loader2 className="w-4 h-4 animate-spin" />

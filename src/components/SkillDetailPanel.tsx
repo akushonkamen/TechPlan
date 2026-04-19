@@ -1,5 +1,6 @@
 import { History } from 'lucide-react';
 import type { SkillConfig } from '../hooks/useSkillApi';
+import { CARD } from '../lib/design';
 
 interface SkillDetailPanelProps {
   skill: SkillConfig;
@@ -11,7 +12,7 @@ export default function SkillDetailPanel({ skill, onShowVersionHistory }: SkillD
   const steps = skill.steps ?? [];
 
   return (
-    <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-6 animate-fade-in">
+    <div className={`${CARD} p-6 animate-fade-in`}>
       <h3 className="text-lg font-semibold text-[#1d1d1f] mb-4">{skill.displayName}</h3>
 
       <p className="text-sm text-[#86868b] mb-6">{skill.description}</p>
@@ -72,7 +73,7 @@ export default function SkillDetailPanel({ skill, onShowVersionHistory }: SkillD
 
       <button
         onClick={onShowVersionHistory}
-        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[#0071e3] hover:bg-[#0071e3]/5 rounded-lg transition-all"
+        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[#0071e3] hover:bg-[#0071e3]/5 rounded-full transition-all"
       >
         <History className="w-4 h-4" />
         版本历史

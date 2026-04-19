@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, L
 import { Activity, FileText, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import StatCard from '../components/StatCard';
+import { CARD, SPINNER, SECTION_TITLE } from '../lib/design';
 
 interface DashboardStats {
   activeTopics: number;
@@ -64,13 +65,13 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-[#d2d2d7] border-t-[#0071e3] rounded-full animate-spin" />
+        <div className={SPINNER} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div className="space-y-5 animate-fade-in">
       <PageHeader
         title="概览"
         description="技术情报追踪全景视图"
@@ -84,7 +85,7 @@ export default function Dashboard() {
 
       {/* Stat Cards */}
       {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             label="活跃主题"
             value={stats.activeTopics}
@@ -113,10 +114,10 @@ export default function Dashboard() {
       )}
 
       {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Trend Chart */}
-        <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
-          <h3 className="text-sm font-medium text-[#86868b] mb-6">采集趋势</h3>
+        <div className={`${CARD} p-8`}>
+          <h3 className={`${SECTION_TITLE} mb-6`}>采集趋势</h3>
           <div className="h-64">
             {trendData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -137,8 +138,8 @@ export default function Dashboard() {
                   <Tooltip
                     contentStyle={{
                       borderRadius: '12px',
-                      border: 'none',
-                      boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
+                      border: '1px solid #d2d2d7',
+                      boxShadow: 'none',
                       fontSize: 12,
                     }}
                   />
@@ -163,7 +164,7 @@ export default function Dashboard() {
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-full text-[#aeaeb5] text-sm">
+              <div className="flex flex-col items-center justify-center h-full text-[#aeaeb5] text-sm">
                 暂无数据
               </div>
             )}
@@ -171,8 +172,8 @@ export default function Dashboard() {
         </div>
 
         {/* Topic Distribution */}
-        <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
-          <h3 className="text-sm font-medium text-[#86868b] mb-6">主题证据分布</h3>
+        <div className={`${CARD} p-8`}>
+          <h3 className={`${SECTION_TITLE} mb-6`}>主题证据分布</h3>
           <div className="h-64">
             {topicDistribution.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -183,8 +184,8 @@ export default function Dashboard() {
                     cursor={{ fill: '#f5f5f7' }}
                     contentStyle={{
                       borderRadius: '12px',
-                      border: 'none',
-                      boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
+                      border: '1px solid #d2d2d7',
+                      boxShadow: 'none',
                       fontSize: 12,
                     }}
                   />
@@ -192,7 +193,7 @@ export default function Dashboard() {
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-full text-[#aeaeb5] text-sm">
+              <div className="flex flex-col items-center justify-center h-full text-[#aeaeb5] text-sm">
                 暂无数据
               </div>
             )}
@@ -201,14 +202,14 @@ export default function Dashboard() {
       </div>
 
       {/* Recent Activity */}
-      <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className={`${CARD} overflow-hidden`}>
         <div className="px-8 py-5 flex justify-between items-center">
-          <h3 className="text-sm font-medium text-[#86868b]">最近活动</h3>
+          <h3 className={SECTION_TITLE}>最近活动</h3>
         </div>
         {alerts.length > 0 ? (
           <div className="divide-y divide-[#f5f5f7]">
             {alerts.map((alert) => (
-              <div key={alert.id} className="px-8 py-4 flex items-center gap-4 hover:bg-[#f5f5f7]/50 transition-colors">
+              <div key={alert.id} className="px-8 py-4 flex items-center gap-4 hover:bg-[#f5f5f7] transition-colors">
                 <div className="w-2 h-2 rounded-full bg-[#ff9f0a] shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-[#1d1d1f] truncate">{alert.title}</p>
@@ -232,7 +233,7 @@ export default function Dashboard() {
             ))}
           </div>
         ) : (
-          <div className="px-8 py-12 text-center text-[#aeaeb5] text-sm">
+          <div className="px-8 py-12 text-center text-[#86868b] text-sm">
             暂无活动
           </div>
         )}

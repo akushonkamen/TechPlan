@@ -33,6 +33,20 @@ export default function Topics() {
   const [uploadError, setUploadError] = useState('');
   const [uploadTopicId, setUploadTopicId] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      timeoutsRef.current.forEach(clearTimeout);
+    };
+  }, []);
+
+  const safeTimeout = (fn: () => void, ms: number) => {
+    const id = setTimeout(() => { if (mountedRef.current) fn(); }, ms);
+    timeoutsRef.current.push(id);
+  };
 
   // Form state
   const [formData, setFormData] = useState({
@@ -179,7 +193,12 @@ export default function Topics() {
 
       // Poll until research completes
       await new Promise<void>((resolve, reject) => {
+        let attempts = 0;
+        const MAX_ATTEMPTS = 120;
         const poll = async () => {
+          if (!mountedRef.current) { reject(new Error('unmounted')); return; }
+          attempts++;
+          if (attempts > MAX_ATTEMPTS) { reject(new Error('采集超时')); return; }
           try {
             const res = await fetch(`/api/skill/${researchId}/status`);
             if (res.ok) {
@@ -208,7 +227,12 @@ export default function Topics() {
       const { executionId: extractId } = await extractRes.json();
 
       await new Promise<void>((resolve, reject) => {
+        let attempts = 0;
+        const MAX_ATTEMPTS = 120;
         const poll = async () => {
+          if (!mountedRef.current) { reject(new Error('unmounted')); return; }
+          attempts++;
+          if (attempts > MAX_ATTEMPTS) { reject(new Error('抽取超时')); return; }
           try {
             const res = await fetch(`/api/skill/${extractId}/status`);
             if (res.ok) {
@@ -233,7 +257,12 @@ export default function Topics() {
       if (syncRes.ok) {
         const { executionId: syncId } = await syncRes.json();
         await new Promise<void>((resolve) => {
+          let attempts = 0;
+          const MAX_ATTEMPTS = 120;
           const poll = async () => {
+            if (!mountedRef.current) { resolve(); return; }
+            attempts++;
+            if (attempts > MAX_ATTEMPTS) { resolve(); return; }
             try {
               const res = await fetch(`/api/skill/${syncId}/status`);
               if (res.ok) {
@@ -250,12 +279,12 @@ export default function Topics() {
       setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'completed' }));
       await fetchTopics();
       if (expandedTopicId === topic.id) await fetchTopicDocs(topic.id);
-      setTimeout(() => {
+      safeTimeout(() => {
         setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'idle' }));
       }, 3000);
     } catch (error) {
       setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'failed' }));
-      setTimeout(() => {
+      safeTimeout(() => {
         setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'idle' }));
       }, 3000);
     }
@@ -280,7 +309,7 @@ export default function Topics() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('topicId', uploadTopicId);
-      const endpoint = analyze ? '/api/upload-and-analyze' : '/api/upload';
+      const endpoint = '/api/upload';
       const res = await fetch(endpoint, { method: 'POST', body: formData });
       if (!res.ok) throw new Error((await res.json()).error || '上传失败');
       setUploadedFile(null);
@@ -329,8 +358,8 @@ export default function Topics() {
         setTopicSkillStatus(prev => ({ ...prev, [uploadTopicId]: 'completed' }));
         setTimeout(() => setTopicSkillStatus(prev => ({ ...prev, [uploadTopicId]: 'idle' })), 3000);
       }
-    } catch (error: any) {
-      setUploadError(`上传失败: ${error.message}`);
+    } catch (error: unknown) {
+      setUploadError(`上传失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setUploadingFile(null);
     }
@@ -411,7 +440,7 @@ export default function Topics() {
           title="暂无主题"
           description="创建一个技术追踪主题，开始自动化情报采集"
           action={
-            <button onClick={openCreateModal} className="flex items-center gap-2 px-5 py-2 bg-[#0071e3] text-white rounded-full text-sm font-medium hover:bg-[#0062cc] transition-all">
+            <button onClick={openCreateModal} className="flex items-center gap-2 px-5 py-2 bg-[#0071e3] text-white rounded-[980px] text-sm font-medium hover:bg-[#0062cc] transition-all">
               <Plus className="w-4 h-4" />新建主题
             </button>
           }
@@ -422,7 +451,7 @@ export default function Topics() {
             const isExpanded = expandedTopicId === topic.id;
             const docCount = topicDocCounts[topic.id] ?? 0;
             return (
-              <div key={topic.id} className={`${CARD} overflow-hidden hover:shadow-md transition-all group ${isExpanded ? 'md:col-span-2 lg:col-span-3' : ''}`}>
+              <div key={topic.id} className={`${CARD} overflow-hidden hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all group ${isExpanded ? 'md:col-span-2 lg:col-span-3' : ''}`}>
                 <div className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div className="min-w-0 flex-1">
@@ -438,7 +467,7 @@ export default function Topics() {
                   {topic.keywords.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-3">
                       {topic.keywords.slice(0, 3).map(kw => (
-                        <span key={kw} className="px-2 py-0.5 bg-[#f5f5f7] rounded-full text-[10px] text-[#86868b]">{kw}</span>
+                        <span key={kw} className="px-2 py-0.5 bg-[#f5f5f7] border border-[#f5f5f7] rounded-full text-[10px] text-[#86868b]">{kw}</span>
                       ))}
                       {topic.keywords.length > 3 && (
                         <span className="px-2 py-0.5 bg-[#f5f5f7] rounded-full text-[10px] text-[#aeaeb5]">+{topic.keywords.length - 3}</span>
@@ -450,13 +479,13 @@ export default function Topics() {
                   {topic.organizations.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-3">
                       {topic.organizations.slice(0, 2).map(org => (
-                        <span key={org} className="px-2 py-0.5 bg-[#0071e3]/5 rounded-full text-[10px] text-[#0071e3]">{org}</span>
+                        <span key={org} className="px-2 py-0.5 bg-[#0071e3]/5 border border-[#f5f5f7] rounded-full text-[10px] text-[#0071e3]">{org}</span>
                       ))}
                     </div>
                   )}
 
                   {/* Actions */}
-                  <div className="flex items-center justify-between pt-3 border-t border-[#d2d2d7]">
+                  <div className="flex items-center justify-between pt-3 border-t border-[#f5f5f7]">
                     <div className="flex items-center gap-2">
                       <SkillButton
                         onClick={() => handleCollect(topic)}
@@ -478,7 +507,7 @@ export default function Topics() {
                       <button onClick={() => openEditModal(topic)} className="p-2 text-[#aeaeb5] hover:text-[#0071e3] rounded-full hover:bg-[#0071e3]/5 transition-all" title="编辑">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => handleDelete(topic.id)} className="p-2 text-[#aeaeb5] hover:text-[#ff3b30] rounded-full hover:bg-[#ff3b30]/5 transition-all" title="删除">
+                      <button onClick={() => handleDelete(topic.id)} className="p-2 text-[#aeaeb5] hover:text-[#ff3b30] rounded-full hover:bg-[#ff3b30]/5 transition-all" title="删除" aria-label="删除主题">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -487,7 +516,7 @@ export default function Topics() {
 
                 {/* Expanded: Document list + Upload */}
                 {isExpanded && (
-                  <div className="border-t border-[#d2d2d7] px-5 pb-5 pt-4 animate-fade-in">
+                  <div className="border-t border-[#f5f5f7] px-5 pb-5 pt-4 animate-fade-in">
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                       {/* Document list */}
                       <div>
@@ -512,7 +541,7 @@ export default function Topics() {
                                       <ExternalLink className="w-3 h-3" />
                                     </a>
                                   )}
-                                  <button onClick={() => handleDeleteDocument(doc.id)} className="p-1 text-[#aeaeb5] hover:text-[#ff3b30] transition-colors">
+                                  <button onClick={() => handleDeleteDocument(doc.id)} className="p-1 text-[#aeaeb5] hover:text-[#ff3b30] transition-colors" aria-label="删除文档">
                                     <Trash2 className="w-3 h-3" />
                                   </button>
                                 </div>
@@ -526,7 +555,7 @@ export default function Topics() {
                       <div>
                         <h4 className="text-xs font-medium text-[#86868b] mb-3">上传文档</h4>
                         <div
-                          className="border-2 border-dashed border-[#d2d2d7] rounded-xl p-5 text-center hover:border-[#0071e3]/30 transition-colors cursor-pointer"
+                          className="border-2 border-dashed border-[#aeaeb5] rounded-xl p-5 text-center hover:border-[#0071e3] transition-colors cursor-pointer"
                           onClick={() => fileInputRef.current?.click()}
                         >
                           <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt,.md" onChange={handleFileSelect} className="hidden" />
@@ -546,10 +575,10 @@ export default function Topics() {
                               </button>
                             </div>
                             <div className="mt-2 flex gap-2">
-                              <button onClick={() => handleFileUpload(false)} disabled={uploadingFile !== null} className="flex-1 py-1.5 text-xs font-medium bg-white rounded-lg hover:bg-[#e8e8ed] transition-all disabled:opacity-40">
+                              <button onClick={() => handleFileUpload(false)} disabled={uploadingFile !== null} className="flex-1 py-1.5 text-xs font-medium bg-white rounded-full hover:bg-[#e8e8ed] transition-all disabled:opacity-40">
                                 上传
                               </button>
-                              <button onClick={() => handleFileUpload(true)} disabled={uploadingFile !== null} className="flex-1 py-1.5 text-xs font-medium bg-[#0071e3] text-white rounded-lg hover:bg-[#0062cc] transition-all disabled:opacity-40">
+                              <button onClick={() => handleFileUpload(true)} disabled={uploadingFile !== null} className="flex-1 py-1.5 text-xs font-medium bg-[#0071e3] text-white rounded-full hover:bg-[#0062cc] transition-all disabled:opacity-40">
                                 上传并分析
                               </button>
                             </div>

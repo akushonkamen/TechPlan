@@ -69,8 +69,8 @@ export function useSkillsList() {
       if (!res.ok) throw new Error('Failed to fetch skills');
       const data = await res.json();
       setSkills(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -128,8 +128,8 @@ export function useSkillVersions(name: string) {
       if (!res.ok) throw new Error('Failed to fetch versions');
       const data = await res.json();
       setVersions(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -158,8 +158,8 @@ export function useOptimizationConfig(name: string) {
       if (!res.ok) throw new Error('Failed to fetch optimization config');
       const data = await res.json();
       setConfig(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -186,8 +186,8 @@ export function useOptimizationConfig(name: string) {
       } else {
         await fetchConfig();
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
       throw err;
     } finally {
       setSaving(false);

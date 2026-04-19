@@ -181,11 +181,11 @@ export function useSkillExecutor() {
           return prev;
         });
       }, 1000);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setState(prev => ({
         ...prev,
         status: 'failed',
-        error: err.message,
+        error: err instanceof Error ? err.message : String(err),
       }));
     }
   }, [connectWebSocket]);

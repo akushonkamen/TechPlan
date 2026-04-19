@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { TrendingUp, TrendingDown } from 'lucide-react';
+import { CARD } from '../lib/design';
 
 interface StatCardProps {
   label: string;
@@ -10,11 +11,11 @@ interface StatCardProps {
 
 export default function StatCard({ label, value, trend, icon }: StatCardProps) {
   return (
-    <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8 animate-fade-in">
+    <div className={`${CARD} p-6 animate-fade-in`}>
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm text-[#86868b]">{label}</p>
-          <p className="mt-2 text-4xl font-bold tracking-tight text-[#1d1d1f]">{value}</p>
+          <p className="mt-2 text-[40px] font-semibold tracking-tight text-[#1d1d1f] leading-none">{value}</p>
         </div>
         {icon && (
           <div className="p-2.5 bg-[#f5f5f7] rounded-xl text-[#86868b]">

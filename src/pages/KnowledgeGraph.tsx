@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Search, Info, ExternalLink } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { CARD, INPUT, SPINNER } from '../lib/design';
 import PageHeader from '../components/PageHeader';
 import GraphVisualization, {
   GraphNode,
@@ -52,6 +53,10 @@ const NODE_TYPE_OPTIONS: Array<{ value: GraphNodeType; label: string; color: str
 ];
 
 export default function KnowledgeGraph() {
+  const location = useLocation();
+  const highlightParam = new URLSearchParams(location.search).get('highlight') ?? '';
+  const highlightEntities = highlightParam ? highlightParam.split(',').map(e => e.trim().toLowerCase()) : [];
+
   const [searchQuery, setSearchQuery] = useState('');
   const [nodeFilters, setNodeFilters] = useState<Set<GraphNodeType>>(new Set(['topic', 'entity', 'event', 'claim', 'document']));
   const [nodes, setNodes] = useState<GraphNode[]>([]);
@@ -61,10 +66,14 @@ export default function KnowledgeGraph() {
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [topics, setTopics] = useState<Array<{ id: string; name: string }>>([]);
   const [showHelp, setShowHelp] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchGraphStatus();
     fetchTopics();
+    // Read topicId from URL params for report-graph integration
+    const urlTopicId = new URLSearchParams(location.search).get('topicId');
+    if (urlTopicId) setSelectedTopic(urlTopicId);
   }, []);
 
   useEffect(() => {
@@ -75,7 +84,10 @@ export default function KnowledgeGraph() {
     try {
       const res = await fetch('/api/graph/status');
       if (res.ok) setGraphStatus(await res.json());
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('Failed to fetch graph status:', err);
+      setFetchError('图谱状态加载失败');
+    }
   }
 
   async function fetchTopics() {
@@ -86,7 +98,10 @@ export default function KnowledgeGraph() {
         setTopics(data);
         if (data.length > 0 && !selectedTopic) setSelectedTopic(data[0].id);
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('Failed to fetch topics:', err);
+      setFetchError('主题列表加载失败');
+    }
   }
 
   function mapNodeType(type: string): GraphNodeType {
@@ -107,18 +122,24 @@ export default function KnowledgeGraph() {
         const apiNodes: ApiNode[] = data.nodes || [];
         const apiLinks: ApiLink[] = data.links || [];
 
-        setNodes(apiNodes.map((n, index) => ({
-          id: n.id,
-          type: 'custom' as const,
-          position: { x: 400 + (index % 5) * 150, y: 200 + Math.floor(index / 5) * 100 },
-          data: {
-            label: n.label.length > 25 ? n.label.substring(0, 25) + '...' : n.label,
-            type: mapNodeType(n.type),
-            description: n.properties?.description || n.properties?.title || n.label,
-            url: n.properties?.url,
-            topicId: topicId,
-          },
-        })));
+        setNodes(apiNodes.map((n, index) => {
+          const label = n.label.length > 25 ? n.label.substring(0, 25) + '...' : n.label;
+          const isHighlighted = highlightEntities.length > 0 &&
+            highlightEntities.some(h => n.label.toLowerCase().includes(h));
+          return {
+            id: n.id,
+            type: 'custom' as const,
+            position: { x: 400 + (index % 5) * 150, y: 200 + Math.floor(index / 5) * 100 },
+            data: {
+              label,
+              type: mapNodeType(n.type),
+              description: n.properties?.description || n.properties?.title || n.label,
+              url: n.properties?.url,
+              topicId: topicId,
+              highlighted: highlightEntities.length > 0 ? isHighlighted : undefined,
+            },
+          };
+        }));
 
         setEdges(apiLinks.map(e => ({
           id: e.id,
@@ -159,6 +180,12 @@ export default function KnowledgeGraph() {
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col space-y-4 animate-fade-in">
+      {fetchError && (
+        <div className="bg-[#ff3b30]/10 text-[#ff3b30] text-sm px-4 py-2 rounded-xl flex items-center justify-between">
+          <span>{fetchError}</span>
+          <button onClick={() => setFetchError(null)} className="text-[#ff3b30]/60 hover:text-[#ff3b30]">✕</button>
+        </div>
+      )}
       <div className="flex items-end justify-between gap-4">
         <PageHeader
           title="知识图谱"
@@ -172,13 +199,13 @@ export default function KnowledgeGraph() {
           <select
             value={selectedTopic || ''}
             onChange={e => setSelectedTopic(e.target.value)}
-            className="px-3.5 py-2 bg-[#f5f5f7] rounded-xl text-sm focus:bg-white transition-all"
+            className={INPUT}
           >
             {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <button
             onClick={() => setShowHelp(!showHelp)}
-            className={`px-3.5 py-2 rounded-full text-sm font-medium transition-all ${showHelp ? 'bg-[#0071e3]/10 text-[#0071e3]' : 'bg-[#f5f5f7] text-[#86868b] hover:text-[#1d1d1f]'}`}
+            className={`px-3.5 py-2 rounded-[980px] text-sm font-medium transition-all ${showHelp ? 'bg-[#0071e3]/10 text-[#0071e3]' : 'bg-[#f5f5f7] text-[#86868b] hover:text-[#1d1d1f]'}`}
           >
             <Info className="w-4 h-4" />
           </button>
@@ -186,7 +213,7 @@ export default function KnowledgeGraph() {
       </div>
 
       {showHelp && (
-        <div className="bg-[#0071e3]/5 rounded-2xl p-5 text-sm text-[#1d1d1f] animate-fade-in">
+        <div className="bg-[#0071e3]/5 rounded-[18px] p-5 text-sm text-[#1d1d1f] animate-fade-in">
           <div className="grid grid-cols-3 gap-6">
             <div>
               <h4 className="font-medium mb-2">图谱含义</h4>
@@ -217,7 +244,7 @@ export default function KnowledgeGraph() {
       )}
 
       {/* Graph Container */}
-      <div className="flex-1 bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden flex flex-col">
+      <div className={`flex-1 ${CARD} overflow-hidden flex flex-col`}>
         {/* Toolbar */}
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -226,7 +253,7 @@ export default function KnowledgeGraph() {
               <input
                 type="text"
                 placeholder="搜索实体、组织或文献..."
-                className="pl-9 pr-3 py-2 bg-[#f5f5f7] rounded-xl text-sm w-64 focus:bg-white transition-all"
+                className={`${INPUT} pl-9 pr-3 w-64`}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
               />
@@ -255,7 +282,7 @@ export default function KnowledgeGraph() {
         <div className="flex-1 relative">
           {loading ? (
             <div className="flex items-center justify-center h-full text-[#aeaeb5]">
-              <div className="w-6 h-6 border-2 border-[#d2d2d7] border-t-[#0071e3] rounded-full animate-spin mr-3" />
+              <div className={`${SPINNER} mr-3`} />
               加载中...
             </div>
           ) : filteredNodes.length === 0 ? (
@@ -264,7 +291,7 @@ export default function KnowledgeGraph() {
               <p className="mb-4 text-sm">请先在「主题追踪」采集文档，图谱将自动同步</p>
               <Link
                 to="/topics"
-                className="px-5 py-2 bg-[#0071e3] text-white rounded-full text-sm font-medium hover:bg-[#0062cc] transition-all"
+                className="px-5 py-2 bg-[#0071e3] text-white rounded-[980px] text-sm font-medium hover:bg-[#0062cc] transition-all"
               >
                 前往主题追踪
               </Link>
@@ -275,6 +302,7 @@ export default function KnowledgeGraph() {
               edges={filteredEdges}
               onNodeClick={node => console.log('Node clicked:', node)}
               onNodeDoubleClick={node => { if (node.data.url) window.open(node.data.url, '_blank'); }}
+              focusNodeIds={highlightEntities.length > 0 ? nodes.filter(n => n.data.highlighted).map(n => n.id) : undefined}
             />
           )}
         </div>
