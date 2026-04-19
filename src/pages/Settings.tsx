@@ -596,7 +596,7 @@ export default function Settings() {
           <div className={`${CARD} p-5 sm:p-8 space-y-5`}>
             <div>
               <h3 className="text-base font-medium text-[#1d1d1f]">定时任务调度器</h3>
-              <p className="text-sm text-[#888] mt-1">按主题的采集频率自动触发周报生成</p>
+              <p className="text-sm text-[#888] mt-1">按主题的采集频率自动采集数据并生成报告。每个主题可在编辑时设置「每日 / 每日仅采集 / 每周 / 每月」频率。也可在主题列表点击刷新按钮手动触发采集。</p>
             </div>
 
             {/* Enable/Disable Toggle */}

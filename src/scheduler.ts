@@ -19,7 +19,7 @@ interface SchedulerStatus {
 interface PendingTopic {
   topicId: string;
   topicName: string;
-  schedule: 'daily' | 'weekly' | 'monthly' | 'quarterly';
+  schedule: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'collect-daily';
   lastReportAt: string | null;
   dueInMinutes: number;
 }
@@ -34,6 +34,7 @@ interface RecentTrigger {
 
 const SCHEDULE_DAYS: Record<string, number> = {
   daily: 1,
+  'collect-daily': 1,
   weekly: 7,
   monthly: 30,
   quarterly: 90,
@@ -148,8 +149,9 @@ export class SchedulerService {
       const toTrigger = pending.slice(0, this.maxTriggers);
 
       for (const topic of toTrigger) {
-        const skillName = SCHEDULE_TO_SKILL[topic.schedule] ?? 'report';
-        console.log(`[Scheduler] Triggering ${topic.schedule} report for topic "${topic.topicName}" via ${skillName}`);
+        const isCollectOnly = topic.schedule === 'collect-daily';
+        const skillName = isCollectOnly ? null : (SCHEDULE_TO_SKILL[topic.schedule] ?? 'report');
+        console.log(`[Scheduler] ${isCollectOnly ? 'Collecting data' : `Triggering ${topic.schedule} report`} for topic "${topic.topicName}"`);
 
         const now = new Date();
         const pad = (n: number) => String(n).padStart(2, '0');
@@ -157,6 +159,9 @@ export class SchedulerService {
         let timeRangeStart: string, timeRangeEnd: string;
         switch (topic.schedule) {
           case 'daily':
+          case 'collect-daily':
+            timeRangeStart = fmt(now);
+            timeRangeEnd = fmt(now);
             timeRangeStart = fmt(now);
             timeRangeEnd = fmt(now);
             break;
@@ -187,15 +192,21 @@ export class SchedulerService {
         };
 
         try {
-          // Collect fresh data before generating report
+          // Collect fresh data
           if (this.collectFn) {
             try {
               console.log(`[Scheduler] Collecting data for "${topic.topicName}" (${timeRangeStart} - ${timeRangeEnd})`);
               await this.collectFn(topic.topicId, topic.topicName, timeRangeStart, timeRangeEnd);
             } catch (collectErr) {
               console.warn(`[Scheduler] Collection failed for "${topic.topicName}":`, collectErr);
-              // Continue with existing data
             }
+          }
+
+          // collect-daily mode: only collect, skip report generation
+          if (isCollectOnly) {
+            console.log(`[Scheduler] Collection-only mode for "${topic.topicName}", skipping report`);
+            this.addTrigger(topic, `collect-${Date.now()}`, 'completed');
+            continue;
           }
 
           // Check if we have enough data to generate a meaningful report
@@ -233,7 +244,7 @@ export class SchedulerService {
         COALESCE(daily_report_enabled, CASE WHEN schedule = 'daily' THEN 1 ELSE 0 END) as daily_enabled,
         COALESCE(monthly_report_enabled, CASE WHEN schedule = 'monthly' THEN 1 ELSE 0 END) as monthly_enabled,
         COALESCE(quarterly_report_enabled, CASE WHEN schedule = 'quarterly' THEN 1 ELSE 0 END) as quarterly_enabled
-       FROM topics WHERE schedule IS NOT NULL AND schedule != 'disabled'
+       FROM topics WHERE (schedule IS NOT NULL AND schedule != 'disabled')
        OR daily_report_enabled = 1 OR monthly_report_enabled = 1 OR quarterly_report_enabled = 1`
     );
     if (!topics || topics.length === 0) return [];
@@ -274,9 +285,9 @@ export class SchedulerService {
 
     for (const topic of topics) {
       // Determine which schedules to check for this topic
-      const schedules: Array<'daily' | 'weekly' | 'monthly' | 'quarterly'> = [];
+      const schedules: Array<'daily' | 'weekly' | 'monthly' | 'quarterly' | 'collect-daily'> = [];
       if (topic.schedule && topic.schedule !== 'disabled') {
-        schedules.push(topic.schedule as 'daily' | 'weekly' | 'monthly' | 'quarterly');
+        schedules.push(topic.schedule as 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'collect-daily');
       }
       if (topic.daily_enabled && !schedules.includes('daily')) schedules.push('daily');
       if (topic.monthly_enabled && !schedules.includes('monthly')) schedules.push('monthly');

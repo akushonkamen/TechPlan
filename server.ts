@@ -159,7 +159,10 @@ async function startServer() {
       createdAt TEXT,
       keywords TEXT,
       organizations TEXT,
-      schedule TEXT
+      schedule TEXT,
+      daily_report_enabled INTEGER DEFAULT 0,
+      monthly_report_enabled INTEGER DEFAULT 0,
+      quarterly_report_enabled INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS documents (
@@ -751,6 +754,44 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to update topic:", error);
       res.status(500).json({ error: "Failed to update topic" });
+    }
+  });
+
+  // Trigger data collection for a topic
+  app.post("/api/topics/:id/collect", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const topic = await db.get("SELECT * FROM topics WHERE id = ?", [id]);
+      if (!topic) return res.status(404).json({ error: "Topic not found" });
+
+      const keywords = topic.keywords ? JSON.parse(topic.keywords) : [];
+      const organizations = topic.organizations ? JSON.parse(topic.organizations) : [];
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+      // Default: collect from 7 days ago to today
+      const weekAgo = new Date(now.getTime() - 7 * 86400000);
+      const periodStart = req.body?.periodStart || fmt(weekAgo);
+      const periodEnd = req.body?.periodEnd || fmt(now);
+
+      const researchParams = {
+        topicId: id,
+        topicName: topic.name,
+        keywords: JSON.stringify(keywords),
+        organizations: JSON.stringify(organizations),
+        timeRangeStart: periodStart,
+        timeRangeEnd: periodEnd,
+        maxResults: req.body?.maxResults || 20,
+      };
+
+      const { executionId } = skillExecutor.startExecution('research', researchParams);
+      console.log(`[Collection] Started collection for topic "${topic.name}" (${periodStart} - ${periodEnd}), execution ${executionId}`);
+
+      res.json({ executionId, topicName: topic.name, periodStart, periodEnd });
+    } catch (error) {
+      console.error("Failed to start collection:", error);
+      res.status(500).json({ error: "Failed to start collection" });
     }
   });
 

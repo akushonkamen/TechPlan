@@ -9,5 +9,5 @@ export interface Topic {
   createdAt: string;
   keywords: string[];
   organizations: string[];
-  schedule: 'daily' | 'weekly' | 'monthly' | 'disabled';
+  schedule: 'daily' | 'weekly' | 'monthly' | 'collect-daily' | 'disabled';
 }

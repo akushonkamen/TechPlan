@@ -1,6 +1,6 @@
 import type { FormEvent, ChangeEvent } from 'react';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Edit2, Trash2, Tags, Upload, FileText, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Tags, Upload, FileText, X, ExternalLink, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import type { Topic } from '../types';
 import TopicForm from '../components/TopicForm';
 import PageHeader from '../components/PageHeader';
@@ -28,6 +28,7 @@ export default function Topics() {
   const [uploadedFile, setUploadedFile] = useState<{ name: string; title: string; size: number } | null>(null);
   const [uploadError, setUploadError] = useState('');
   const [uploadTopicId, setUploadTopicId] = useState<string>('');
+  const [collectingTopicId, setCollectingTopicId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -158,6 +159,37 @@ export default function Topics() {
       fetchTopics();
     } catch {
       alert('删除文档失败');
+    }
+  };
+
+  const handleCollect = async (topicId: string) => {
+    setCollectingTopicId(topicId);
+    try {
+      const res = await fetch(`/api/topics/${topicId}/collect`, { method: 'POST' });
+      if (!res.ok) throw new Error();
+      const { executionId } = await res.json();
+      // Poll for completion
+      const poll = async () => {
+        try {
+          const statusRes = await fetch(`/api/skill/${executionId}/status`);
+          const data = await statusRes.json();
+          if (data.status === 'completed' || data.status === 'failed') {
+            setCollectingTopicId(null);
+            if (data.status === 'completed') {
+              fetchTopics();
+              if (expandedTopicId === topicId) fetchTopicDocs(topicId);
+            }
+          } else {
+            setTimeout(poll, 3000);
+          }
+        } catch {
+          setCollectingTopicId(null);
+        }
+      };
+      setTimeout(poll, 2000);
+    } catch {
+      alert('启动采集失败');
+      setCollectingTopicId(null);
     }
   };
 
@@ -306,6 +338,14 @@ export default function Topics() {
                       {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                     </button>
                     <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleCollect(topic.id)}
+                        disabled={collectingTopicId === topic.id}
+                        className={`p-2 rounded-full transition-all ${collectingTopicId === topic.id ? 'text-[#2A5A6B] animate-spin' : 'text-[#888] hover:text-[#2A5A6B] hover:bg-[#2A5A6B]/5'}`}
+                        title={collectingTopicId === topic.id ? '采集中...' : '采集数据'}
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </button>
                       <button onClick={() => openEditModal(topic)} className="p-2 text-[#888] hover:text-[#1d1d1f] rounded-full hover:bg-[#1d1d1f]/5 transition-all" title="编辑">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>

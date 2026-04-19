@@ -12,7 +12,7 @@ interface TopicFormProps {
     priority: 'high' | 'medium' | 'low';
     keywords: string;
     organizations: string;
-    schedule: 'daily' | 'weekly' | 'monthly' | 'disabled';
+    schedule: 'daily' | 'weekly' | 'monthly' | 'collect-daily' | 'disabled';
   };
   onFormDataChange: (data: TopicFormProps['formData']) => void;
   isSubmitting?: boolean;
@@ -92,10 +92,11 @@ export default function TopicForm({
               <select
                 className={INPUT}
                 value={formData.schedule}
-                onChange={(e) => onFormDataChange({ ...formData, schedule: e.target.value as 'daily' | 'weekly' | 'monthly' | 'disabled' })}
+                onChange={(e) => onFormDataChange({ ...formData, schedule: e.target.value as 'daily' | 'weekly' | 'monthly' | 'collect-daily' | 'disabled' })}
                 disabled={isSubmitting}
               >
-                <option value="daily">每日</option>
+                <option value="daily">每日（采集+报告）</option>
+                <option value="collect-daily">每日仅采集</option>
                 <option value="weekly">每周</option>
                 <option value="monthly">每月</option>
                 <option value="disabled">禁用</option>
