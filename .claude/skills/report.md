@@ -1,6 +1,6 @@
 ---
 version: "3.1.0"
-display_name: "咨询级报告生成"
+display_name: "技术情报周报"
 description: |
   六阶段生成标准化技术情报周报：数据收集→信号识别→分析框架→内容生成→质量检查→图谱关联。
   输出严格 JSON，符合 ReportContent v2 schema。
@@ -17,8 +17,9 @@ params:
     description: "主题名称"
   - name: reportType
     type: string
-    required: true
-    description: "报告类型（weekly/special/alert）"
+    required: false
+    default: "weekly"
+    description: "报告类型"
   - name: timeRangeStart
     type: string
     required: false
@@ -431,6 +432,55 @@ db.serialize(() => {
 5. 使用中文输出所有内容
 6. `entityRefs` 必须是数据库中真实存在的实体名称
 7. 每个信号必须有明确的类型和置信度
+
+---
+
+## McKinsey 方法论指引
+
+### SCQA 框架（执行摘要）
+
+在撰写 `executiveSummary` 时使用 SCQA 结构，按 S→C→Q→A 顺序组织 `overview`：
+- **S (Situation/情境)**：当前技术领域的基本态势（1-2 句）
+  - 示例："过去 6 个月，大模型推理成本持续下降，开源生态快速扩张。"
+- **C (Complication/冲突)**：引发关注的关键变化或矛盾（1-2 句）
+  - 示例："但本周 X 公司发布的新架构将推理效率提升 5 倍，可能打破现有成本竞争格局。"
+- **Q (Question/疑问)**：由此产生的核心问题（1 句）
+  - 示例："这一突破是否标志着推理成本竞赛进入新阶段？"
+- **A (Answer/回答)**：基于数据的明确判断（1-2 句）
+  - 示例："基于多源数据交叉验证，该技术尚处早期，但 6 个月内可能被大规模采用。"
+
+### 金字塔原理（章节结构）
+
+每个 section 遵循金字塔原理的纵向与横向逻辑：
+1. **结论先行（纵向）**：`thesis` 放置该章节的核心论点，读者无需读完全文即可理解结论
+2. **分组论证（横向）**：`highlights` 列出 3-5 个支撑论点，彼此独立（MECE）、共同支撑结论
+3. **数据支撑（纵向深化）**：`content` 中引用具体数据作为证据，每条 highlight 至少有 1 个数据点支撑
+4. **逻辑递进（章节间）**：sections 保持因果或递进关系（概览→技术→竞争→投资→风险→展望）
+
+### 假设驱动分析（信号识别）
+
+在第二阶段信号识别中，采用假设驱动方法：
+1. **提出假设**：基于初步数据快速形成 1-3 个可验证假设
+   - 示例假设："X 公司正在从消费级 AI 转向企业级 AI 战略"
+2. **收集证据**：从 documents/claims/events 中寻找支持与反驳证据
+3. **验证/修正**：基于证据强度调整置信度
+   - 支持 ≥ 2 条 → confidence ≥ 0.8
+   - 支持 1 条 → confidence 0.5-0.7
+   - 无证据/矛盾 → 标注为 `metadata.dataGaps`
+
+### 80/20 法则（内容聚焦）
+
+周报应聚焦 20% 信号驱动 80% 价值判断：
+- **优先覆盖**：breakthrough 信号、组织战略动作、投资流向变化
+- **适当精简**：常规性 trend 信号、低影响 milestone、已知衰减信号的重复描述
+- 在 `keyPoints` 中体现：每条 point 应解释"为什么这件事在 7 天内值得关注"
+
+### MECE 验证（章节一致性）
+
+生成各 section 后，验证 `highlights` 是否满足 MECE：
+- **互斥性**：不同 highlights 之间不描述同一件事（避免"技术突破"和"性能提升"指向同一事件）
+- **完备性**：highlights 共同覆盖该章节的核心发现（无遗漏重要信号）
+- 实操：在脑海中反向检查——去掉任一条 highlight，结论是否仍完整？
 
 ---
 

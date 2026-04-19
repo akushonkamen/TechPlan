@@ -7,7 +7,7 @@
  */
 
 import neo4j, { Driver, Session, Record as NeoRecord } from 'neo4j-driver';
-import { promises as fs } from 'fs';
+import { promises as fs, writeFileSync, renameSync } from 'fs';
 import path from 'path';
 import {
   GraphNode,
@@ -535,7 +535,8 @@ class Neo4jClient {
         { id }
       );
       return true;
-    } catch {
+    } catch (error) {
+      console.error('[Neo4j] Failed to delete node:', id, error);
       return false;
     } finally {
       await session.close();
@@ -829,7 +830,10 @@ class Neo4jClient {
       lastUpdated: new Date().toISOString(),
     };
 
-    await fs.writeFile(this.jsonStoragePath, JSON.stringify(data, null, 2), 'utf-8');
+    // Atomic write: use temp file then rename
+    const tmpPath = this.jsonStoragePath + '.tmp';
+    writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
+    renameSync(tmpPath, this.jsonStoragePath);
   }
 
   private rebuildMapSet(data: Array<[string, string[]]>): Map<string, Set<string>> {

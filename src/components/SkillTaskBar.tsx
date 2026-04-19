@@ -88,6 +88,8 @@ export default function SkillTaskBar() {
   const logContainerRef = useRef<HTMLDivElement>(null);
   const autoSelected = useRef(false);
   const archivedIds = useRef(new Set<string>());
+  const archiveTimerRef = useRef<NodeJS.Timeout[]>([]);
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchExecutions = useCallback(async () => {
     try {
@@ -111,9 +113,9 @@ export default function SkillTaskBar() {
 
     if (completedExecs.length === 0) return;
 
-    const timers = completedExecs.map(exec => {
+    completedExecs.forEach(exec => {
       archivedIds.current.add(exec.id);
-      return setTimeout(() => {
+      const timer = setTimeout(() => {
         const logs = progress[exec.id] || [];
         setArchivedTasks(prev => {
           const entry: ArchivedTask = {
@@ -131,9 +133,13 @@ export default function SkillTaskBar() {
           return [entry, ...prev].slice(0, 10); // Max 10 archived
         });
       }, 5000);
+      archiveTimerRef.current.push(timer);
     });
 
-    return () => timers.forEach(t => clearTimeout(t));
+    return () => {
+      archiveTimerRef.current.forEach(t => clearTimeout(t));
+      archiveTimerRef.current = [];
+    };
   }, [executions, progress]);
 
   useEffect(() => {
@@ -157,10 +163,22 @@ export default function SkillTaskBar() {
     let totalKnown = 0;
 
     const poll = async () => {
-      if (cancelled) return;
+      if (cancelled) {
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current);
+          progressIntervalRef.current = null;
+        }
+        return;
+      }
       try {
         const res = await fetch(`/api/skill/${activeId}/progress?after=${totalKnown}`);
-        if (cancelled) return;
+        if (cancelled) {
+          if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
+            progressIntervalRef.current = null;
+          }
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           if (data.lines && data.lines.length > 0) {
@@ -179,8 +197,15 @@ export default function SkillTaskBar() {
     };
 
     poll();
-    const interval = setInterval(poll, 1000);
-    return () => { cancelled = true; clearInterval(interval); };
+    progressIntervalRef.current = setInterval(poll, 1000);
+
+    return () => {
+      cancelled = true;
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    };
   }, [activeId]);
 
   useEffect(() => {

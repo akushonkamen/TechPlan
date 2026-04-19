@@ -39,6 +39,12 @@ const SKILL_TIMEOUTS: Record<string, number> = {
   'track-competitor': 900, // 15 min
   'sync-graph': 300,      // 5 min
   optimize: 1200,         // 20 min
+  'report-daily': 300,     // 5 min — daily is lightweight
+  'report-monthly': 600,   // 10 min
+  'report-quarterly': 600, // 10 min
+  'report-tech-topic': 600, // 10 min
+  'report-competitor': 600, // 10 min
+  'report-alert': 300,     // 5 min
 };
 
 interface FrontmatterData {

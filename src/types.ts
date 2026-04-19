@@ -267,7 +267,7 @@ export interface Report {
   id: string;
   topicId: string;
   topicName: string;
-  type: 'weekly' | 'special' | 'alert' | 'executive_summary';
+  type: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'tech_topic' | 'competitor' | 'alert';
   title: string;
   content: string;
   summary?: string;
@@ -290,7 +290,7 @@ export interface Report {
  */
 export interface ReportGenerationRequest {
   topicId: string;
-  type: 'weekly' | 'special' | 'alert' | 'executive_summary';
+  type: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'tech_topic' | 'competitor' | 'alert';
   period?: {
     start: string;
     end: string;

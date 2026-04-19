@@ -61,20 +61,17 @@ export function useSkillExecutor() {
               progress: progressRef.current,
             }));
           } else if (msg.type === 'result') {
+            let parsedResult = null;
             try {
-              const result = JSON.parse(msg.data);
-              setState(prev => ({
-                ...prev,
-                status: 'completed',
-                result,
-              }));
+              parsedResult = JSON.parse(msg.data);
             } catch {
-              setState(prev => ({
-                ...prev,
-                status: 'completed',
-                result: { raw: msg.data },
-              }));
+              // Malformed JSON, keep as raw data
             }
+            setState(prev => ({
+              ...prev,
+              status: 'completed',
+              result: parsedResult ?? { raw: msg.data },
+            }));
             ws.close();
           } else if (msg.type === 'error') {
             setState(prev => ({
@@ -145,10 +142,16 @@ export function useSkillExecutor() {
           if (statusRes.ok) {
             const statusData = await statusRes.json();
             if (statusData.status === 'completed' || statusData.status === 'failed') {
+              let parsedResult = null;
+              try {
+                if (statusData.result) parsedResult = JSON.parse(statusData.result);
+              } catch {
+                // Ignore malformed JSON
+              }
               setState(prev => ({
                 ...prev,
                 status: statusData.status,
-                result: statusData.result ? JSON.parse(statusData.result) : null,
+                result: parsedResult,
                 error: statusData.error,
               }));
             }
