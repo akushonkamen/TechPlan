@@ -414,4 +414,105 @@ export class SkillExecutor {
   isRunning(executionId: string): boolean {
     return this.activeProcesses.has(executionId);
   }
+
+  /**
+   * Get execution history from database.
+   * Supports filtering by skill name, status, and pagination.
+   */
+  async getHistory(options: {
+    skillName?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<SkillExecution[]> {
+    const { skillName, status, limit = 50, offset = 0 } = options;
+
+    let query = 'SELECT * FROM skill_executions WHERE 1=1';
+    const params: any[] = [];
+
+    if (skillName) {
+      query += ' AND skill_name = ?';
+      params.push(skillName);
+    }
+
+    if (status) {
+      query += ' AND status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY started_at DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    try {
+      const rows = await this.db.all(query, params);
+      return rows.map((row: any) => ({
+        id: row.id,
+        skillName: row.skill_name,
+        params: row.params ? JSON.parse(row.params) : {},
+        status: row.status,
+        result: row.result ? JSON.parse(row.result) : undefined,
+        error: row.error,
+        stdout: row.stdout ?? '',
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+      }));
+    } catch (err) {
+      console.error('[SkillExecutor] Failed to fetch history:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Get execution statistics by skill name.
+   */
+  async getStats(skillName?: string): Promise<{
+    total: number;
+    completed: number;
+    failed: number;
+    running: number;
+    avgDuration?: number;
+  }> {
+    let query = 'SELECT status, COUNT(*) as count FROM skill_executions';
+    const params: any[] = [];
+
+    if (skillName) {
+      query += ' WHERE skill_name = ?';
+      params.push(skillName);
+    }
+
+    query += ' GROUP BY status';
+
+    try {
+      const rows = await this.db.all(query, params);
+      const stats: { total: number; completed: number; failed: number; running: number; avgDuration?: number } = {
+        total: 0,
+        completed: 0,
+        failed: 0,
+        running: 0,
+      };
+
+      for (const row of rows) {
+        stats.total += row.count;
+        if (row.status === 'completed') stats.completed = row.count;
+        if (row.status === 'failed') stats.failed = row.count;
+        if (row.status === 'running') stats.running = row.count;
+      }
+
+      // Calculate average duration for completed executions
+      const durationQuery = skillName
+        ? 'SELECT AVG(julianday(completed_at) - julianday(started_at)) * 86400 as avg_duration FROM skill_executions WHERE skill_name = ? AND status = "completed" AND completed_at IS NOT NULL'
+        : 'SELECT AVG(julianday(completed_at) - julianday(started_at)) * 86400 as avg_duration FROM skill_executions WHERE status = "completed" AND completed_at IS NOT NULL';
+
+      const durationParams = skillName ? [skillName] : [];
+      const durationRow = await this.db.get(durationQuery, durationParams);
+      if (durationRow?.avg_duration) {
+        stats.avgDuration = Math.round(durationRow.avg_duration);
+      }
+
+      return stats;
+    } catch (err) {
+      console.error('[SkillExecutor] Failed to fetch stats:', err);
+      return { total: 0, completed: 0, failed: 0, running: 0 };
+    }
+  }
 }

@@ -19,7 +19,7 @@ export interface SchedulerStatus {
 export interface PendingTopic {
   topicId: string;
   topicName: string;
-  schedule: 'daily' | 'weekly' | 'monthly';
+  schedule: 'daily' | 'weekly' | 'monthly' | 'quarterly';
   lastReportAt: string | null;
   dueInMinutes: number;
 }
@@ -246,8 +246,10 @@ export class SchedulerService {
 
     for (const topic of topics) {
       // Determine which schedules to check for this topic
-      const schedules: string[] = [];
-      if (topic.schedule && topic.schedule !== 'disabled') schedules.push(topic.schedule);
+      const schedules: Array<'daily' | 'weekly' | 'monthly' | 'quarterly'> = [];
+      if (topic.schedule && topic.schedule !== 'disabled') {
+        schedules.push(topic.schedule as 'daily' | 'weekly' | 'monthly' | 'quarterly');
+      }
       if (topic.daily_enabled && !schedules.includes('daily')) schedules.push('daily');
       if (topic.monthly_enabled && !schedules.includes('monthly')) schedules.push('monthly');
       if (topic.quarterly_enabled && !schedules.includes('quarterly')) schedules.push('quarterly');
