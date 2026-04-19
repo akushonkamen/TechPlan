@@ -101,7 +101,7 @@ export interface Relation {
   document_id?: string;
 }
 
-export interface Claim {
+export interface ExtractionClaim {
   id: string;
   text: string;
   type: 'prediction' | 'opinion' | 'assertion' | 'finding' | 'announcement';
@@ -111,7 +111,7 @@ export interface Claim {
   document_id?: string;
 }
 
-export interface Event {
+export interface ExtractionEvent {
   id: string;
   type: string;
   title: string;
@@ -126,14 +126,19 @@ export interface Event {
 export interface ExtractionResult {
   entities: Entity[];
   relations: Relation[];
-  claims: Claim[];
-  events: Event[];
+  claims: ExtractionClaim[];
+  events: ExtractionEvent[];
   metadata: {
     textLength: number;
     extractedAt: string;
     model: string;
   };
 }
+
+// ===== 图数据库类型 =====
+
+// Re-export from graph types
+export * from './types/graph.js';
 
 export interface GraphData {
   nodes: Array<{
