@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, Area, AreaChart, CartesianGrid } from 'recharts';
 import { Activity, FileText, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import StatCard from '../components/StatCard';
 import { CARD, SPINNER, SECTION_TITLE } from '../lib/design';
+import { axisStyle, CHART_COLORS, ChartTooltip, CHART_TITLE, EmptyChart } from '../lib/charts.tsx';
 
 interface DashboardStats {
   activeTopics: number;
@@ -25,12 +26,15 @@ interface TopicDistribution {
 }
 
 interface Alert {
-  id: number;
+  id: string;
   title: string;
   topic: string;
   time: string;
   type: string;
   url?: string;
+  category: 'breaking' | 'developing' | 'trending';
+  relevanceScore: number;
+  urgency: string;
 }
 
 export default function Dashboard() {
@@ -74,7 +78,7 @@ export default function Dashboard() {
     <div className="space-y-5 animate-fade-in">
       <PageHeader
         title="概览"
-        description="技术情报追踪全景视图"
+        description="技术情报追踪 - 突发优先，时效相关"
         stats={stats ? [
           { label: '活跃主题', value: stats.activeTopics },
           { label: '本周文献', value: stats.weekDocs },
@@ -85,15 +89,17 @@ export default function Dashboard() {
 
       {/* Stat Cards */}
       {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
           <StatCard
             label="活跃主题"
             value={stats.activeTopics}
+            color="blue"
             icon={<Activity className="w-5 h-5" />}
           />
           <StatCard
             label="本周新增文献"
             value={stats.weekDocs.toLocaleString()}
+            color="green"
             trend={stats.docsChange !== 0 ? {
               value: `${stats.docsChange >= 0 ? '+' : ''}${stats.docsChange}%`,
               positive: stats.docsChange >= 0,
@@ -103,93 +109,96 @@ export default function Dashboard() {
           <StatCard
             label="待审核事实"
             value={stats.pendingReviews}
+            color="purple"
             icon={<CheckCircle2 className="w-5 h-5" />}
           />
           <StatCard
             label="高危预警"
             value={stats.highPriorityAlerts}
+            color="red"
             icon={<AlertTriangle className="w-5 h-5" />}
           />
         </div>
       )}
 
       {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Trend Chart */}
-        <div className={`${CARD} p-8`}>
-          <h3 className={`${SECTION_TITLE} mb-6`}>采集趋势</h3>
+        <div className={`${CARD} p-6`}>
+          <h3 className={`${CHART_TITLE}`}>采集趋势</h3>
           <div className="h-64">
             {trendData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                <AreaChart data={trendData} margin={{ top: 8, right: 8, bottom: 8, left: 0 }}>
+                  <defs>
+                    <linearGradient id="colorPapers" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0071e3" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#0071e3" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorNews" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#34c759" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#34c759" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
                   <XAxis
                     dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#86868b', fontSize: 11 }}
+                    {...axisStyle}
                     dy={8}
                   />
                   <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#86868b', fontSize: 11 }}
+                    {...axisStyle}
                     dx={-5}
                   />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: '12px',
-                      border: '1px solid #d2d2d7',
-                      boxShadow: 'none',
-                      fontSize: 12,
-                    }}
-                  />
-                  <Line
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e5ea" vertical={false} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Area
                     type="monotone"
                     dataKey="papers"
                     name="论文"
                     stroke="#0071e3"
                     strokeWidth={2.5}
+                    fill="url(#colorPapers)"
                     dot={false}
-                    activeDot={{ r: 4, strokeWidth: 0 }}
+                    activeDot={{ r: 5, stroke: '#ffffff', strokeWidth: 2 }}
                   />
-                  <Line
+                  <Area
                     type="monotone"
                     dataKey="news"
                     name="新闻"
                     stroke="#34c759"
                     strokeWidth={2.5}
+                    fill="url(#colorNews)"
                     dot={false}
-                    activeDot={{ r: 4, strokeWidth: 0 }}
+                    activeDot={{ r: 5, stroke: '#ffffff', strokeWidth: 2 }}
                   />
-                </LineChart>
+                </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex flex-col items-center justify-center h-full text-[#aeaeb5] text-sm">
-                暂无数据
-              </div>
+              <EmptyChart />
             )}
           </div>
         </div>
 
         {/* Topic Distribution */}
-        <div className={`${CARD} p-8`}>
-          <h3 className={`${SECTION_TITLE} mb-6`}>主题证据分布</h3>
+        <div className={`${CARD} p-6`}>
+          <h3 className={`${CHART_TITLE}`}>主题证据分布</h3>
           <div className="h-64">
             {topicDistribution.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topicDistribution} layout="vertical" margin={{ top: 5, right: 20, bottom: 5, left: 40 }}>
-                  <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#86868b', fontSize: 11 }} />
-                  <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#1d1d1f', fontSize: 12, fontWeight: 500 }} />
+                <BarChart data={topicDistribution} layout="vertical" margin={{ top: 8, right: 8, bottom: 8, left: 50 }}>
+                  <XAxis type="number" {...axisStyle} />
+                  <YAxis dataKey="name" type="category" {...axisStyle} tick={{ fill: '#1d1d1f', fontSize: 13, fontWeight: 500 }} width={50} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e5ea" horizontal={true} vertical={false} />
                   <Tooltip
                     cursor={{ fill: '#f5f5f7' }}
                     contentStyle={{
                       borderRadius: '12px',
-                      border: '1px solid #d2d2d7',
-                      boxShadow: 'none',
+                      border: '1px solid #e5e5ea',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
                       fontSize: 12,
                     }}
                   />
-                  <Bar dataKey="value" name="证据数量" fill="#0071e3" radius={[0, 6, 6, 0]} barSize={20} />
+                  <Bar dataKey="value" name="证据数量" fill="#0071e3" radius={[0, 8, 8, 0]} barSize={24} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -201,22 +210,69 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Recent Activity */}
+      {/* Recent Activity - NYTimes Style */}
       <div className={`${CARD} overflow-hidden`}>
-        <div className="px-8 py-5 flex justify-between items-center">
-          <h3 className={SECTION_TITLE}>最近活动</h3>
+        <div className="px-8 py-5 flex justify-between items-center border-b border-[#f5f5f7]">
+          <h3 className={SECTION_TITLE}>活动动态</h3>
+          <div className="flex gap-4 text-xs">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#ff3b30]" />
+              突发
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#ff9f0a]" />
+              发展中
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#0071e3]" />
+              热门
+            </span>
+          </div>
         </div>
         {alerts.length > 0 ? (
           <div className="divide-y divide-[#f5f5f7]">
             {alerts.map((alert) => (
-              <div key={alert.id} className="px-8 py-4 flex items-center gap-4 hover:bg-[#f5f5f7] transition-colors">
-                <div className="w-2 h-2 rounded-full bg-[#ff9f0a] shrink-0" />
+              <div
+                key={alert.id}
+                className={`px-8 py-4 flex items-center gap-4 hover:bg-[#f5f5f7] transition-colors ${
+                  alert.category === 'breaking' ? 'bg-[#fff5f5]' : ''
+                }`}
+              >
+                {/* Category indicator */}
+                <div
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    alert.category === 'breaking'
+                      ? 'bg-[#ff3b30]'
+                      : alert.category === 'developing'
+                      ? 'bg-[#ff9f0a]'
+                      : 'bg-[#0071e3]'
+                  }`}
+                />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-[#1d1d1f] truncate">{alert.title}</p>
+                  {/* Category badge for breaking news */}
+                  <div className="flex items-center gap-2 mb-1">
+                    {alert.category === 'breaking' && (
+                      <span className="px-2 py-0.5 text-[10px] font-semibold bg-[#ff3b30] text-white rounded">
+                        突发
+                      </span>
+                    )}
+                    {alert.category === 'developing' && (
+                      <span className="px-2 py-0.5 text-[10px] font-medium bg-[#ff9f0a] text-white rounded">
+                        发展中
+                      </span>
+                    )}
+                    <p className="text-sm text-[#1d1d1f] truncate font-medium">{alert.title}</p>
+                  </div>
                   <div className="mt-1 flex items-center gap-3 text-xs text-[#86868b]">
-                    <span>{alert.topic}</span>
+                    <span className="font-medium">{alert.topic}</span>
+                    <span>·</span>
                     <span>{alert.type}</span>
+                    <span>·</span>
                     <span>{alert.time}</span>
+                    {/* Relevance score indicator */}
+                    <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#f5f5f7] rounded">
+                      {Math.round(alert.relevanceScore * 100)}% 相关
+                    </span>
                   </div>
                 </div>
                 {alert.url && (
@@ -224,7 +280,7 @@ export default function Dashboard() {
                     href={alert.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[#aeaeb5] hover:text-[#0071e3] transition-colors"
+                    className="text-[#aeaeb5] hover:text-[#0071e3] transition-colors shrink-0"
                   >
                     <ArrowRight className="w-4 h-4" />
                   </a>

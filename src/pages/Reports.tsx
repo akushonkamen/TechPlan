@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, type FC } from 'react';
-import { FileText, Calendar, Trash2, ChevronDown, ChevronUp, Network, TrendingUp, AlertTriangle, Zap, Flag } from 'lucide-react';
+import { FileText, Calendar, Trash2, ChevronDown, ChevronUp, Network, TrendingUp, AlertTriangle, Zap, Flag, Clock, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
 import EmptyState from '../components/EmptyState';
@@ -102,6 +104,88 @@ const ConfidenceBadge: FC<{ level: string }> = ({ level }) => {
   );
 }
 
+// ── Freshness Badge ──
+
+type FreshnessLevel = 'fresh' | 'ok' | 'stale';
+
+interface FreshnessInfo {
+  level: FreshnessLevel;
+  hoursAgo: number;
+  label: string;
+  timeHorizon: string;
+}
+
+// Calculate freshness based on report generation time and type
+function calculateFreshness(generatedAt: string | undefined, reportType: string): FreshnessInfo {
+  if (!generatedAt) {
+    return { level: 'stale', hoursAgo: Infinity, label: '未知时间', timeHorizon: 'Unknown' };
+  }
+
+  const generatedTime = new Date(generatedAt).getTime();
+  const now = Date.now();
+  const hoursAgo = (now - generatedTime) / (1000 * 60 * 60);
+
+  // Define freshness thresholds based on report type
+  const thresholds: Record<string, { fresh: number; ok: number }> = {
+    daily: { fresh: 4, ok: 24 },      // Daily: fresh < 4h, ok < 24h
+    weekly: { fresh: 12, ok: 72 },    // Weekly: fresh < 12h, ok < 3 days
+    alert: { fresh: 2, ok: 12 },      // Alert: fresh < 2h, ok < 12h
+    monthly: { fresh: 24, ok: 168 },  // Monthly: fresh < 1 day, ok < 1 week
+    quarterly: { fresh: 48, ok: 336 }, // Quarterly: fresh < 2 days, ok < 2 weeks
+    tech_topic: { fresh: 24, ok: 168 }, // Tech topic: fresh < 1 day, ok < 1 week
+    competitor: { fresh: 24, ok: 168 }, // Competitor: fresh < 1 day, ok < 1 week
+  };
+
+  const threshold = thresholds[reportType] || thresholds.weekly;
+
+  let level: FreshnessLevel;
+  let label: string;
+
+  if (hoursAgo <= threshold.fresh) {
+    level = 'fresh';
+    label = '最新';
+  } else if (hoursAgo <= threshold.ok) {
+    level = 'ok';
+    label = '正常';
+  } else {
+    level = 'stale';
+    label = '过期';
+  }
+
+  // Calculate time horizon label
+  let timeHorizon: string;
+  if (hoursAgo < 1) {
+    timeHorizon = 'Past 24h';
+  } else if (hoursAgo < 24) {
+    timeHorizon = `Past 24h (${Math.round(hoursAgo)}h ago)`;
+  } else if (hoursAgo < 168) {
+    timeHorizon = `Past 7 days (${Math.round(hoursAgo / 24)}d ago)`;
+  } else if (hoursAgo < 720) {
+    timeHorizon = `Past 30 days (${Math.round(hoursAgo / 24)}d ago)`;
+  } else {
+    timeHorizon = `Older (${Math.round(hoursAgo / 24)}d ago)`;
+  }
+
+  return { level, hoursAgo, label, timeHorizon };
+}
+
+const FRESHNESS_STYLES: Record<FreshnessLevel, { bg: string; text: string; icon: typeof CheckCircle }> = {
+  fresh: { bg: 'bg-[#34c759]/10', text: 'text-[#34c759]', icon: CheckCircle },
+  ok: { bg: 'bg-[#ff9f0a]/10', text: 'text-[#ff9f0a]', icon: Clock },
+  stale: { bg: 'bg-[#ff3b30]/10', text: 'text-[#ff3b30]', icon: AlertCircle },
+};
+
+const FreshnessBadge: FC<{ freshness: FreshnessInfo }> = ({ freshness }) => {
+  const style = FRESHNESS_STYLES[freshness.level];
+  const Icon = style.icon;
+  return (
+    <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${style.bg} ${style.text}`}>
+      <Icon className="w-3 h-3" />
+      <span>{freshness.label}</span>
+    </div>
+  );
+}
+
 // ── Timeline ──
 
 const Timeline: FC<{ entries: TimelineEntry[] }> = ({ entries }) => {
@@ -167,8 +251,10 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
         <div className="px-5 pb-5 space-y-4 animate-fade-in border-t border-[#f5f5f7] pt-4">
           {/* Markdown content */}
           {section.content && (
-            <div className="text-sm text-[#1d1d1f] leading-relaxed whitespace-pre-line">
-              {section.content}
+            <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f]">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {section.content}
+              </ReactMarkdown>
             </div>
           )}
 
@@ -229,18 +315,45 @@ export default function Reports() {
   const [topics, setTopics] = useState<{ id: string; name: string }[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
   const [reportType, setReportType] = useState<string>('weekly');
+  const [timeRangePreset, setTimeRangePreset] = useState<string>('auto'); // auto, 24h, 7d, 30d, custom
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [skillStatus, setSkillStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
   const [isLoading, setIsLoading] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
+  const [refreshInterval, setRefreshInterval] = useState<number>(60); // seconds
   const mountedRef = useRef(true);
-  const pollTimeoutRef = useRef<NodeJS.Timeout>();
+  const pollTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   useEffect(() => {
     return () => {
       mountedRef.current = false;
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
+      if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
     };
   }, []);
+
+  // Auto-refresh effect
+  useEffect(() => {
+    if (!autoRefresh) {
+      if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
+      return;
+    }
+
+    const scheduleRefresh = () => {
+      if (!mountedRef.current) return;
+      refreshTimeoutRef.current = setTimeout(() => {
+        if (mountedRef.current && autoRefresh) {
+          loadData();
+          scheduleRefresh();
+        }
+      }, refreshInterval * 1000);
+    };
+
+    scheduleRefresh();
+  }, [autoRefresh, refreshInterval]);
 
   useEffect(() => { loadData(); }, []);
 
@@ -279,6 +392,31 @@ export default function Reports() {
     const topic = topics.find(t => t.id === selectedTopicId);
     if (!topic) return;
 
+    // Build period parameter based on selection
+    let period: { start: string; end: string } | undefined;
+    if (timeRangePreset === 'custom' && customStartDate && customEndDate) {
+      period = { start: customStartDate, end: customEndDate };
+    } else if (timeRangePreset !== 'auto') {
+      // Calculate preset ranges
+      const now = new Date();
+      const end = now.toISOString().split('T')[0];
+      let start: string;
+      switch (timeRangePreset) {
+        case '24h':
+          start = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          break;
+        case '7d':
+          start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          break;
+        case '30d':
+          start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          break;
+        default:
+          start = end;
+      }
+      period = { start, end };
+    }
+
     setSkillStatus('running');
     try {
       const res = await fetch('/api/reports/generate', {
@@ -287,6 +425,7 @@ export default function Reports() {
         body: JSON.stringify({
           topicId: selectedTopicId,
           reportType,
+          period,
         }),
       });
 
@@ -361,7 +500,10 @@ export default function Reports() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <PageHeader title="分析报告" description="基于采集文档自动生成技术情报分析报告">
+      <PageHeader
+        title="分析报告"
+        description="选择时间范围和主题，系统将自动采集数据并生成报告（已自动去重）"
+      >
         <select
           value={selectedTopicId}
           onChange={e => setSelectedTopicId(e.target.value)}
@@ -377,9 +519,71 @@ export default function Reports() {
         >
           {reportTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
+        <select
+          value={timeRangePreset}
+          onChange={e => {
+            setTimeRangePreset(e.target.value);
+            if (e.target.value !== 'custom') {
+              setCustomStartDate('');
+              setCustomEndDate('');
+            }
+          }}
+          className={`${INPUT} w-auto`}
+        >
+          <option value="auto">自动（根据报告类型）</option>
+          <option value="24h">过去24小时</option>
+          <option value="7d">过去7天</option>
+          <option value="30d">过去30天</option>
+          <option value="custom">自定义</option>
+        </select>
+        {timeRangePreset === 'custom' && (
+          <>
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={e => setCustomStartDate(e.target.value)}
+              className={INPUT}
+              placeholder="开始日期"
+            />
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={e => setCustomEndDate(e.target.value)}
+              className={INPUT}
+              placeholder="结束日期"
+            />
+          </>
+        )}
         <SkillButton onClick={handleGenerateReport} status={skillStatus} disabled={!selectedTopicId}>
-          生成{getTypeLabel(reportType)}
+          {skillStatus === 'running' ? '采集中...' : `生成${getTypeLabel(reportType)}`}
         </SkillButton>
+        <div className="w-px h-8 bg-[#d2d2d7] mx-2" />
+        {/* Auto-refresh controls */}
+        <button
+          onClick={() => setAutoRefresh(!autoRefresh)}
+          className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+            autoRefresh
+              ? 'bg-[#0071e3]/10 text-[#0071e3]'
+              : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e5e5e7]'
+          }`}
+          title={autoRefresh ? '关闭自动刷新' : '开启自动刷新'}
+        >
+          <RefreshCw className={`w-4 h-4 ${autoRefresh ? 'animate-spin-slow' : ''}`} />
+          <span>自动刷新</span>
+        </button>
+        {autoRefresh && (
+          <select
+            value={refreshInterval.toString()}
+            onChange={e => setRefreshInterval(Number(e.target.value))}
+            className={`${INPUT} w-auto`}
+            title="刷新间隔"
+          >
+            <option value="30">30秒</option>
+            <option value="60">1分钟</option>
+            <option value="120">2分钟</option>
+            <option value="300">5分钟</option>
+          </select>
+        )}
       </PageHeader>
 
       {isLoading ? (
@@ -390,13 +594,14 @@ export default function Reports() {
         <EmptyState
           icon={<FileText className="w-12 h-12" />}
           title="暂无报告"
-          description="选择主题后点击生成报告按钮，系统将基于采集文档自动生成分析报告"
+          description="选择时间范围和主题后，系统将自动采集最新数据并生成报告（自动去重）"
         />
       ) : (
         <div className="space-y-4">
           {reports.map(report => {
             const isExpanded = expandedId === report.id;
             const content = typeof report.content === 'object' ? report.content as ReportContent : null;
+            const freshness = calculateFreshness(report.generated_at, report.type);
 
             return (
               <div key={report.id} className={`${CARD} overflow-hidden transition-all duration-200`}>
@@ -410,13 +615,18 @@ export default function Reports() {
                       <FileText className="w-5 h-5 text-[#0071e3]" />
                     </div>
                     <div className="min-w-0">
-                      <h4 className="text-sm font-medium text-[#1d1d1f] truncate">{report.title}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-medium text-[#1d1d1f] truncate">{report.title}</h4>
+                        <FreshnessBadge freshness={freshness} />
+                      </div>
                       <div className="mt-1 flex items-center gap-3 text-xs text-[#86868b]">
                         <span className="px-2 py-0.5 bg-[#f5f5f7] rounded-full">{getTypeLabel(report.type)}</span>
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
                           {report.generated_at ? new Date(report.generated_at).toLocaleDateString('zh-CN') : '-'}
                         </span>
+                        <span className="text-[#aeaeb5]">·</span>
+                        <span className="text-[#86868b]">{freshness.timeHorizon}</span>
                         {report.topic_name && <span>{report.topic_name}</span>}
                         {content?.executiveSummary?.confidence && (
                           <ConfidenceBadge level={content.executiveSummary.confidence} />
@@ -479,6 +689,44 @@ export default function Reports() {
                           )}
                         </div>
                       )
+                    )}
+
+                    {/* Data Timestamp & Staleness Warning */}
+                    {report.generated_at && (
+                      <div className={`rounded-xl p-4 ${freshness.level === 'stale' ? 'bg-[#ff3b30]/5 border border-[#ff3b30]/20' : 'bg-[#f5f5f7]'}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Clock className="w-4 h-4 text-[#86868b]" />
+                            <div className="text-xs text-[#86868b]">
+                              <span>数据时间: </span>
+                              <span className="font-medium text-[#1d1d1f]">
+                                {new Date(report.generated_at).toLocaleString('zh-CN')}
+                              </span>
+                              <span className="mx-2">·</span>
+                              <span>{freshness.timeHorizon}</span>
+                            </div>
+                          </div>
+                          <FreshnessBadge freshness={freshness} />
+                        </div>
+                        {freshness.level === 'stale' && (
+                          <div className="mt-3 flex items-start gap-2 text-xs text-[#ff3b30]">
+                            <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                            <span>
+                              数据已过期 (
+                              {freshness.hoursAgo < 24
+                                ? `${Math.round(freshness.hoursAgo)} 小时前`
+                                : `${Math.round(freshness.hoursAgo / 24)} 天前`}
+                              )。建议重新生成报告以获取最新情报。
+                            </span>
+                          </div>
+                        )}
+                        {freshness.level === 'ok' && report.type === 'daily' && freshness.hoursAgo > 12 && (
+                          <div className="mt-2 flex items-start gap-2 text-xs text-[#ff9f0a]">
+                            <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                            <span>日报数据较旧，建议关注最新动态。</span>
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {/* Sections */}
