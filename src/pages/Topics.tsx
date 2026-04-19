@@ -1,16 +1,11 @@
-import type { FormEvent } from 'react';
-import { useState, useEffect } from 'react';
-import { Plus, Search, MoreVertical, Edit2, Trash2, Play, X, Loader2, ExternalLink } from 'lucide-react';
+import type { FormEvent, ChangeEvent } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Plus, Search, Edit2, Trash2, Loader2, Tags, Upload, FileText, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import type { Topic } from '../types';
 import TopicForm from '../components/TopicForm';
-
-interface FetchedDocument {
-  title: string;
-  source: string;
-  type: '新闻' | '论文' | '标准' | '内部文档';
-  date: string;
-  url: string;
-}
+import PageHeader from '../components/PageHeader';
+import SkillButton from '../components/SkillButton';
+import EmptyState from '../components/EmptyState';
 
 export default function Topics() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -23,9 +18,20 @@ export default function Topics() {
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Research state
-  const [researchingTopicId, setResearchingTopicId] = useState<string | null>(null);
-  const [researchResults, setResearchResults] = useState<{ topicName: string; docs: FetchedDocument[] } | null>(null);
+  // Per-topic skill status tracking (3-step pipeline: research→extract→sync-graph)
+  const [topicSkillStatus, setTopicSkillStatus] = useState<Record<string, 'idle' | 'researching' | 'extracting' | 'syncing' | 'completed' | 'failed'>>({});
+
+  // Per-topic document counts + expanded state
+  const [topicDocCounts, setTopicDocCounts] = useState<Record<string, number>>({});
+  const [expandedTopicId, setExpandedTopicId] = useState<string | null>(null);
+  const [topicDocs, setTopicDocs] = useState<any[]>([]);
+
+  // File upload state
+  const [uploadingFile, setUploadingFile] = useState<string | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<{ name: string; title: string; size: number } | null>(null);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadTopicId, setUploadTopicId] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -34,19 +40,29 @@ export default function Topics() {
     priority: 'medium' as 'high' | 'medium' | 'low',
     keywords: '',
     organizations: '',
-    schedule: 'weekly' as 'daily' | 'weekly' | 'monthly'
+    schedule: 'weekly' as 'daily' | 'weekly' | 'monthly',
   });
 
-  useEffect(() => {
-    fetchTopics();
-  }, []);
+  useEffect(() => { fetchTopics(); }, []);
 
   const fetchTopics = async () => {
     try {
-      const response = await fetch('/api/topics');
-      if (response.ok) {
-        const data = await response.json();
+      const res = await fetch('/api/topics');
+      if (res.ok) {
+        const data = await res.json();
         setTopics(data);
+        // Fetch doc counts for each topic
+        const counts: Record<string, number> = {};
+        await Promise.all(data.map(async (t: Topic) => {
+          try {
+            const docRes = await fetch(`/api/documents?topic_id=${t.id}`);
+            if (docRes.ok) {
+              const docs = await docRes.json();
+              counts[t.id] = Array.isArray(docs) ? docs.length : 0;
+            }
+          } catch { counts[t.id] = 0; }
+        }));
+        setTopicDocCounts(counts);
       }
     } catch (error) {
       console.error('Failed to fetch topics:', error);
@@ -55,23 +71,19 @@ export default function Topics() {
     }
   };
 
+  const fetchTopicDocs = async (topicId: string) => {
+    try {
+      const res = await fetch(`/api/documents?topic_id=${topicId}`);
+      if (res.ok) setTopicDocs(await res.json());
+    } catch { /* ignore */ }
+  };
+
   const resetForm = () => {
-    setFormData({
-      name: '',
-      description: '',
-      priority: 'medium',
-      keywords: '',
-      organizations: '',
-      schedule: 'weekly'
-    });
+    setFormData({ name: '', description: '', priority: 'medium', keywords: '', organizations: '', schedule: 'weekly' });
     setEditingTopicId(null);
   };
 
-  const openCreateModal = () => {
-    resetForm();
-    setModalMode('create');
-    setIsModalOpen(true);
-  };
+  const openCreateModal = () => { resetForm(); setModalMode('create'); setIsModalOpen(true); };
 
   const openEditModal = (topic: Topic) => {
     setFormData({
@@ -80,7 +92,7 @@ export default function Topics() {
       priority: topic.priority,
       keywords: topic.keywords.join(', '),
       organizations: topic.organizations.join(', '),
-      schedule: topic.schedule
+      schedule: topic.schedule,
     });
     setEditingTopicId(topic.id);
     setModalMode('edit');
@@ -90,7 +102,6 @@ export default function Topics() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-
     try {
       const topicData = {
         name: formData.name,
@@ -102,86 +113,51 @@ export default function Topics() {
         createdAt: new Date().toISOString().split('T')[0],
         keywords: formData.keywords.split(/[,，]/).map(k => k.trim()).filter(Boolean),
         organizations: formData.organizations.split(/[,，]/).map(o => o.trim()).filter(Boolean),
-        schedule: formData.schedule
+        schedule: formData.schedule,
       };
 
       if (modalMode === 'create') {
-        const newTopic: Topic = {
-          ...topicData,
-          id: Date.now().toString()
-        };
-
-        const response = await fetch('/api/topics', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(newTopic),
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          setTopics([result, ...topics]);
-          setIsModalOpen(false);
-          resetForm();
-        } else {
-          throw new Error('Failed to create topic');
-        }
-      } else {
-        // Edit mode
-        if (!editingTopicId) return;
-
-        const updatedTopic: Topic = {
-          ...topicData,
-          id: editingTopicId
-        };
-
-        const response = await fetch(`/api/topics/${editingTopicId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(updatedTopic),
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          setTopics(topics.map(t => t.id === editingTopicId ? result : t));
-          setIsModalOpen(false);
-          resetForm();
-        } else {
-          throw new Error('Failed to update topic');
-        }
+        const newTopic: Topic = { ...topicData, id: Date.now().toString() };
+        const res = await fetch('/api/topics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newTopic) });
+        if (res.ok) { setTopics([(await res.json()), ...topics]); setIsModalOpen(false); resetForm(); }
+        else throw new Error('Failed to create topic');
+      } else if (editingTopicId) {
+        const res = await fetch(`/api/topics/${editingTopicId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...topicData, id: editingTopicId }) });
+        if (res.ok) { const result = await res.json(); setTopics(topics.map(t => t.id === editingTopicId ? result : t)); setIsModalOpen(false); resetForm(); }
+        else throw new Error('Failed to update topic');
       }
     } catch (error) {
       console.error('Failed to save topic:', error);
-      alert(modalMode === 'create' ? '创建主题失败，请重试。' : '更新主题失败，请重试。');
+      alert(modalMode === 'create' ? '创建主题失败' : '更新主题失败');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定要删除这个主题吗？')) return;
-
+    if (!confirm('确定删除？')) return;
     try {
-      const response = await fetch(`/api/topics/${id}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        setTopics(topics.filter(t => t.id !== id));
-      }
-    } catch (error) {
-      console.error('Failed to delete topic:', error);
-      alert('删除主题失败，请重试。');
-    }
+      await fetch(`/api/topics/${id}`, { method: 'DELETE' });
+      setTopics(topics.filter(t => t.id !== id));
+    } catch { alert('删除失败'); }
   };
 
-  const handleResearch = async (topic: Topic) => {
-    setResearchingTopicId(topic.id);
+  const handleDeleteDocument = async (docId: string) => {
+    if (!confirm('确定删除此文档？')) return;
     try {
-      const response = await fetch('/api/skill/research', {
+      await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
+      if (expandedTopicId) fetchTopicDocs(expandedTopicId);
+      fetchTopics();
+    } catch { /* ignore */ }
+  };
+
+  // Chain: research → extract → sync-graph (three-step pipeline)
+  const handleCollect = useCallback(async (topic: Topic) => {
+    setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'researching' }));
+
+    try {
+      // Step 1: Trigger research
+      const researchRes = await fetch('/api/skill/research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -192,34 +168,179 @@ export default function Topics() {
           maxResults: 10,
         }),
       });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to start research');
-      }
 
-      // Poll until the skill completes, then refresh the topic list
-      const { executionId } = data;
-      if (executionId) {
-        const pollCompletion = async () => {
+      if (!researchRes.ok) throw new Error('启动采集失败');
+      const { executionId: researchId } = await researchRes.json();
+
+      // Poll until research completes
+      await new Promise<void>((resolve, reject) => {
+        const poll = async () => {
           try {
-            const res = await fetch(`/api/skill/${executionId}/status`);
+            const res = await fetch(`/api/skill/${researchId}/status`);
             if (res.ok) {
               const status = await res.json();
-              if (status.status === 'running') {
-                setTimeout(pollCompletion, 3000);
-              } else {
-                fetchTopics();
-              }
+              if (status.status === 'completed') { resolve(); return; }
+              if (status.status === 'failed') { reject(new Error('采集失败')); return; }
             }
-          } catch { /* ignore polling errors */ }
+          } catch { /* ignore */ }
+          setTimeout(poll, 3000);
         };
-        setTimeout(pollCompletion, 3000);
+        setTimeout(poll, 3000);
+      });
+
+      // Step 2: Trigger extract
+      setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'extracting' }));
+      const extractRes = await fetch('/api/skill/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicId: topic.id,
+          extractTypes: 'entities,relations,claims,events',
+        }),
+      });
+
+      if (!extractRes.ok) throw new Error('启动抽取失败');
+      const { executionId: extractId } = await extractRes.json();
+
+      await new Promise<void>((resolve, reject) => {
+        const poll = async () => {
+          try {
+            const res = await fetch(`/api/skill/${extractId}/status`);
+            if (res.ok) {
+              const status = await res.json();
+              if (status.status === 'completed') { resolve(); return; }
+              if (status.status === 'failed') { reject(new Error('抽取失败')); return; }
+            }
+          } catch { /* ignore */ }
+          setTimeout(poll, 3000);
+        };
+        setTimeout(poll, 3000);
+      });
+
+      // Step 3: Auto-trigger sync-graph
+      setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'syncing' }));
+      const syncRes = await fetch('/api/skill/sync-graph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topicId: topic.id }),
+      });
+
+      if (syncRes.ok) {
+        const { executionId: syncId } = await syncRes.json();
+        await new Promise<void>((resolve) => {
+          const poll = async () => {
+            try {
+              const res = await fetch(`/api/skill/${syncId}/status`);
+              if (res.ok) {
+                const status = await res.json();
+                if (status.status === 'completed' || status.status === 'failed') { resolve(); return; }
+              }
+            } catch { /* ignore */ }
+            setTimeout(poll, 3000);
+          };
+          setTimeout(poll, 3000);
+        });
+      }
+
+      setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'completed' }));
+      await fetchTopics();
+      if (expandedTopicId === topic.id) await fetchTopicDocs(topic.id);
+      setTimeout(() => {
+        setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'idle' }));
+      }, 3000);
+    } catch (error) {
+      setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'failed' }));
+      setTimeout(() => {
+        setTopicSkillStatus(prev => ({ ...prev, [topic.id]: 'idle' }));
+      }, 3000);
+    }
+  }, [expandedTopicId]);
+
+  // File upload logic (from DataSources)
+  const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const supported = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'text/plain', 'text/markdown'];
+    if (!supported.includes(file.type)) { setUploadError('不支持的文件类型'); setUploadedFile(null); return; }
+    if (file.size > 10 * 1024 * 1024) { setUploadError('文件大小不能超过 10MB'); setUploadedFile(null); return; }
+    setUploadError('');
+    setUploadedFile({ name: file.name, title: file.name.replace(/\.[^/.]+$/, ''), size: file.size });
+  };
+
+  const handleFileUpload = async (analyze: boolean) => {
+    if (!uploadedFile || !fileInputRef.current?.files?.[0] || !uploadTopicId) return;
+    const file = fileInputRef.current.files[0];
+    setUploadingFile(uploadedFile.name);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('topicId', uploadTopicId);
+      const endpoint = analyze ? '/api/upload-and-analyze' : '/api/upload';
+      const res = await fetch(endpoint, { method: 'POST', body: formData });
+      if (!res.ok) throw new Error((await res.json()).error || '上传失败');
+      setUploadedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      await fetchTopics();
+      if (expandedTopicId) await fetchTopicDocs(expandedTopicId);
+
+      // If analyze, also trigger extract → sync-graph chain
+      if (analyze && uploadTopicId) {
+        setTopicSkillStatus(prev => ({ ...prev, [uploadTopicId]: 'extracting' }));
+        const extractRes = await fetch('/api/skill/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topicId: uploadTopicId, extractTypes: 'entities,relations,claims,events' }),
+        });
+        if (extractRes.ok) {
+          const { executionId } = await extractRes.json();
+          await new Promise<void>(resolve => {
+            const poll = async () => {
+              const s = await fetch(`/api/skill/${executionId}/status`);
+              if (s.ok) { const d = await s.json(); if (d.status === 'completed' || d.status === 'failed') { resolve(); return; } }
+              setTimeout(poll, 3000);
+            };
+            setTimeout(poll, 3000);
+          });
+        }
+
+        // Auto sync-graph
+        const syncRes = await fetch('/api/skill/sync-graph', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topicId: uploadTopicId }),
+        });
+        if (syncRes.ok) {
+          const { executionId } = await syncRes.json();
+          await new Promise<void>(resolve => {
+            const poll = async () => {
+              const s = await fetch(`/api/skill/${executionId}/status`);
+              if (s.ok) { const d = await s.json(); if (d.status === 'completed' || d.status === 'failed') { resolve(); return; } }
+              setTimeout(poll, 3000);
+            };
+            setTimeout(poll, 3000);
+          });
+        }
+
+        setTopicSkillStatus(prev => ({ ...prev, [uploadTopicId]: 'completed' }));
+        setTimeout(() => setTopicSkillStatus(prev => ({ ...prev, [uploadTopicId]: 'idle' })), 3000);
       }
     } catch (error: any) {
-      console.error("Research failed:", error);
-      alert("检索失败：" + (error?.message || "未知错误"));
+      setUploadError(`上传失败: ${error.message}`);
     } finally {
-      setResearchingTopicId(null);
+      setUploadingFile(null);
+    }
+  };
+
+  const formatSize = (b: number) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+
+  const toggleExpand = (topicId: string) => {
+    if (expandedTopicId === topicId) {
+      setExpandedTopicId(null);
+      setTopicDocs([]);
+    } else {
+      setExpandedTopicId(topicId);
+      setUploadTopicId(topicId);
+      fetchTopicDocs(topicId);
     }
   };
 
@@ -229,235 +350,228 @@ export default function Topics() {
     t.organizations.some(o => o.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const priorityColors: Record<string, string> = {
+    high: 'bg-[#ff3b30]/10 text-[#ff3b30]',
+    medium: 'bg-[#ff9f0a]/10 text-[#ff9f0a]',
+    low: 'bg-[#34c759]/10 text-[#34c759]',
+  };
+
+  const getSkillButtonStatus = (topicId: string): 'idle' | 'running' | 'completed' | 'failed' => {
+    const s = topicSkillStatus[topicId];
+    if (s === 'researching' || s === 'extracting' || s === 'syncing') return 'running';
+    if (s === 'completed') return 'completed';
+    if (s === 'failed') return 'failed';
+    return 'idle';
+  };
+
+  const getSkillButtonLabel = (topicId: string): string => {
+    const s = topicSkillStatus[topicId];
+    if (s === 'researching') return '采集中...';
+    if (s === 'extracting') return '抽取中...';
+    if (s === 'syncing') return '同步图谱...';
+    if (s === 'completed') return '已完成';
+    if (s === 'failed') return '重试';
+    return '采集';
+  };
+
   return (
-    <div className="space-y-6 relative">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">主题管理</h2>
-          <p className="mt-1 text-sm text-gray-500">配置和管理需要持续追踪的技术主题台账。</p>
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader title="主题追踪" description="管理技术主题、采集文档、自动提取知识并同步图谱">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#aeaeb5]" />
+          <input
+            type="text"
+            placeholder="搜索主题..."
+            className="pl-9 pr-4 py-2 bg-[#f5f5f7] rounded-full text-sm w-56 focus:bg-white transition-all"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+          />
         </div>
         <button
           onClick={openCreateModal}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm"
+          className="flex items-center gap-2 px-5 py-2 bg-[#0071e3] text-white rounded-full text-sm font-medium hover:bg-[#0062cc] transition-all active:scale-[0.97]"
         >
           <Plus className="w-4 h-4" />
           新建主题
         </button>
-      </div>
+      </PageHeader>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="p-4 border-b border-gray-200 flex gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="搜索主题名称、关键词或机构..."
-              className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-sm"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <select className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-            <option value="">所有优先级</option>
-            <option value="high">高优先级</option>
-            <option value="medium">中优先级</option>
-            <option value="low">低优先级</option>
-          </select>
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="w-6 h-6 border-2 border-[#d2d2d7] border-t-[#0071e3] rounded-full animate-spin" />
         </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-3">主题名称</th>
-                <th className="px-6 py-3">优先级</th>
-                <th className="px-6 py-3">核心关键词</th>
-                <th className="px-6 py-3">关注机构</th>
-                <th className="px-6 py-3">采集频率</th>
-                <th className="px-6 py-3 text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {isLoading ? (
-                <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                    <div className="flex justify-center items-center gap-2">
-                      <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
-                      <span>加载中...</span>
+      ) : filteredTopics.length === 0 ? (
+        <EmptyState
+          icon={<Tags className="w-12 h-12" />}
+          title="暂无主题"
+          description="创建一个技术追踪主题，开始自动化情报采集"
+          action={
+            <button onClick={openCreateModal} className="flex items-center gap-2 px-5 py-2 bg-[#0071e3] text-white rounded-full text-sm font-medium hover:bg-[#0062cc] transition-all">
+              <Plus className="w-4 h-4" />新建主题
+            </button>
+          }
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredTopics.map(topic => {
+            const isExpanded = expandedTopicId === topic.id;
+            const docCount = topicDocCounts[topic.id] ?? 0;
+            return (
+              <div key={topic.id} className={`bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden hover:shadow-md transition-all group ${isExpanded ? 'md:col-span-2 lg:col-span-3' : ''}`}>
+                <div className="p-5">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-sm font-semibold text-[#1d1d1f] truncate">{topic.name}</h3>
+                      <p className="text-xs text-[#86868b] mt-1 line-clamp-2">{topic.description}</p>
                     </div>
-                  </td>
-                </tr>
-              ) : filteredTopics.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                    没有找到匹配的主题
-                  </td>
-                </tr>
-              ) : (
-                filteredTopics.map((topic) => (
-                  <tr key={topic.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-gray-900">{topic.name}</div>
-                      <div className="text-xs text-gray-500 mt-1 line-clamp-1">{topic.description}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${
-                        topic.priority === 'high' ? 'bg-red-50 text-red-700' :
-                        topic.priority === 'medium' ? 'bg-yellow-50 text-yellow-700' :
-                        'bg-green-50 text-green-700'
-                      }`}>
-                        {topic.priority === 'high' ? '高' : topic.priority === 'medium' ? '中' : '低'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-wrap gap-1">
-                        {topic.keywords.slice(0, 2).map(kw => (
-                          <span key={kw} className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">{kw}</span>
-                        ))}
-                        {topic.keywords.length > 2 && (
-                          <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">+{topic.keywords.length - 2}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-wrap gap-1">
-                        {topic.organizations.slice(0, 2).map(org => (
-                          <span key={org} className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs border border-blue-100">{org}</span>
-                        ))}
-                        {topic.organizations.length > 2 && (
-                          <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs border border-blue-100">+{topic.organizations.length - 2}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-gray-600">
-                        {topic.schedule === 'daily' ? '每日' : topic.schedule === 'weekly' ? '每周' : '每月'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => handleResearch(topic)}
-                          disabled={researchingTopicId === topic.id}
-                          className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors disabled:opacity-50"
-                          title="按需采集"
-                        >
-                          {researchingTopicId === topic.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-                          ) : (
-                            <Play className="w-4 h-4" />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => openEditModal(topic)}
-                          className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
-                          title="编辑"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(topic.id)}
-                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                          title="删除"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                    <span className={`shrink-0 ml-2 px-2 py-0.5 rounded-full text-xs font-medium ${priorityColors[topic.priority]}`}>
+                      {topic.priority === 'high' ? '高' : topic.priority === 'medium' ? '中' : '低'}
+                    </span>
+                  </div>
 
-      {/* Topic Form Modal (reused for create and edit) */}
+                  {/* Keywords */}
+                  {topic.keywords.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      {topic.keywords.slice(0, 3).map(kw => (
+                        <span key={kw} className="px-2 py-0.5 bg-[#f5f5f7] rounded-full text-[10px] text-[#86868b]">{kw}</span>
+                      ))}
+                      {topic.keywords.length > 3 && (
+                        <span className="px-2 py-0.5 bg-[#f5f5f7] rounded-full text-[10px] text-[#aeaeb5]">+{topic.keywords.length - 3}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Organizations */}
+                  {topic.organizations.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      {topic.organizations.slice(0, 2).map(org => (
+                        <span key={org} className="px-2 py-0.5 bg-[#0071e3]/5 rounded-full text-[10px] text-[#0071e3]">{org}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between pt-3 border-t border-[#d2d2d7]">
+                    <div className="flex items-center gap-2">
+                      <SkillButton
+                        onClick={() => handleCollect(topic)}
+                        status={getSkillButtonStatus(topic.id)}
+                        variant="secondary"
+                      >
+                        {getSkillButtonLabel(topic.id)}
+                      </SkillButton>
+                      <button
+                        onClick={() => toggleExpand(topic.id)}
+                        className="flex items-center gap-1 px-3 py-2 text-xs text-[#86868b] hover:text-[#1d1d1f] transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        {docCount} 篇
+                        {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => openEditModal(topic)} className="p-2 text-[#aeaeb5] hover:text-[#0071e3] rounded-full hover:bg-[#0071e3]/5 transition-all" title="编辑">
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => handleDelete(topic.id)} className="p-2 text-[#aeaeb5] hover:text-[#ff3b30] rounded-full hover:bg-[#ff3b30]/5 transition-all" title="删除">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expanded: Document list + Upload */}
+                {isExpanded && (
+                  <div className="border-t border-[#d2d2d7] px-5 pb-5 pt-4 animate-fade-in">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                      {/* Document list */}
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-xs font-medium text-[#86868b]">已采集文档</h4>
+                          <span className="text-xs text-[#aeaeb5]">{topicDocs.length} 篇</span>
+                        </div>
+                        {topicDocs.length === 0 ? (
+                          <p className="text-xs text-[#aeaeb5] py-4 text-center">暂无文档，点击「采集」或上传文件</p>
+                        ) : (
+                          <div className="space-y-1 max-h-64 overflow-y-auto">
+                            {topicDocs.map((doc: any) => (
+                              <div key={doc.id} className="flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-[#f5f5f7] transition-colors">
+                                <FileText className="w-3.5 h-3.5 text-[#86868b] shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs text-[#1d1d1f] truncate">{doc.title}</p>
+                                  <span className="text-[10px] text-[#aeaeb5]">{doc.published_date || doc.source || ''}</span>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {doc.source_url && (
+                                    <a href={doc.source_url} target="_blank" rel="noopener noreferrer" className="p-1 text-[#aeaeb5] hover:text-[#0071e3] transition-colors">
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                  )}
+                                  <button onClick={() => handleDeleteDocument(doc.id)} className="p-1 text-[#aeaeb5] hover:text-[#ff3b30] transition-colors">
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Upload area */}
+                      <div>
+                        <h4 className="text-xs font-medium text-[#86868b] mb-3">上传文档</h4>
+                        <div
+                          className="border-2 border-dashed border-[#d2d2d7] rounded-xl p-5 text-center hover:border-[#0071e3]/30 transition-colors cursor-pointer"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt,.md" onChange={handleFileSelect} className="hidden" />
+                          <Upload className="w-6 h-6 text-[#aeaeb5] mx-auto mb-2" />
+                          <p className="text-xs text-[#86868b]">PDF、Word、TXT、Markdown</p>
+                        </div>
+
+                        {uploadedFile && (
+                          <div className="mt-3 bg-[#f5f5f7] rounded-xl p-3">
+                            <div className="flex items-center justify-between">
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium text-[#1d1d1f] truncate">{uploadedFile.name}</p>
+                                <p className="text-[10px] text-[#86868b]">{formatSize(uploadedFile.size)}</p>
+                              </div>
+                              <button onClick={() => { setUploadedFile(null); setUploadError(''); }} className="text-[#aeaeb5] hover:text-[#86868b]">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <div className="mt-2 flex gap-2">
+                              <button onClick={() => handleFileUpload(false)} disabled={uploadingFile !== null} className="flex-1 py-1.5 text-xs font-medium bg-white rounded-lg hover:bg-[#e8e8ed] transition-all disabled:opacity-40">
+                                上传
+                              </button>
+                              <button onClick={() => handleFileUpload(true)} disabled={uploadingFile !== null} className="flex-1 py-1.5 text-xs font-medium bg-[#0071e3] text-white rounded-lg hover:bg-[#0062cc] transition-all disabled:opacity-40">
+                                上传并分析
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {uploadError && <p className="mt-2 text-[10px] text-[#ff3b30]">{uploadError}</p>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Topic Form Modal */}
       <TopicForm
         isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          resetForm();
-        }}
+        onClose={() => { setIsModalOpen(false); resetForm(); }}
         onSubmit={handleSubmit}
         formData={formData}
         onFormDataChange={setFormData}
         isSubmitting={isSubmitting}
         mode={modalMode}
       />
-
-      {/* Research Results Modal */}
-      {researchResults && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
-            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 shrink-0">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">检索完成：{researchResults.topicName}</h3>
-                <p className="text-sm text-gray-500 mt-1">共发现 {researchResults.docs.length} 条最新高价值情报，已自动沉淀至知识图谱。</p>
-              </div>
-              <button
-                onClick={() => setResearchResults(null)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto flex-1 bg-gray-50/50">
-              {researchResults.docs.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  未检索到相关最新情报，请稍后再试或调整主题关键词。
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {researchResults.docs.map((doc, idx) => (
-                    <div key={idx} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-                      <div className="flex justify-between items-start gap-4">
-                        <h4 className="font-medium text-gray-900 leading-snug">{doc.title}</h4>
-                        <span className="shrink-0 px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded font-medium">
-                          {doc.type}
-                        </span>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-3 text-gray-500">
-                          <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-gray-300"></span>
-                            {doc.source}
-                          </span>
-                          <span>{doc.date}</span>
-                        </div>
-                        <a
-                          href={doc.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium"
-                        >
-                          查看原文 <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 border-t border-gray-200 bg-white flex justify-end gap-3 shrink-0">
-              <button
-                onClick={() => setResearchResults(null)}
-                className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-              >
-                关闭
-              </button>
-              <a
-                href="/data-sources"
-                className="px-4 py-2 text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors font-medium"
-              >
-                前往数据源管理
-              </a>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

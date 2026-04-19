@@ -1,55 +1,28 @@
 import { useState, useEffect } from 'react';
-import { Play, RefreshCw, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, Target, Users, Zap, Clock } from 'lucide-react';
+import { Target, CheckCircle2, TrendingUp, TrendingDown, AlertTriangle, Users, Zap, Clock, Network } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import PageHeader from '../components/PageHeader';
+import SkillButton from '../components/SkillButton';
+import EmptyState from '../components/EmptyState';
 
 interface Topic {
   id: string;
   name: string;
   description: string;
   priority: string;
+  organizations?: string[];
 }
 
 interface ScoringCard {
   topicId: string;
   topicName: string;
   direction: string;
-  scores: {
-    maturity: number;
-    academicInterest: number;
-    industryAdoption: number;
-    competition: number;
-    ecosystemDependency: number;
-    capabilityMatch: number;
-    standardizationWindow: number;
-    policyRisk: number;
-    roiPotential: number;
-    timing: number;
-  };
+  scores: Record<string, number>;
   overallScore: number;
   recommendation: string;
   rationale: string;
   evidence: string[];
   confidence: number;
-}
-
-interface AnalysisResult {
-  id: string;
-  topicId: string;
-  type: string;
-  status: string;
-  summary: string;
-  findings: Array<{
-    title: string;
-    description: string;
-    confidence: number;
-    evidence: string[];
-  }>;
-  recommendations: Array<{
-    id: string;
-    direction: string;
-    actionType: string;
-    rationale: string;
-    confidence: number;
-  }>;
 }
 
 const scoreDimensions = [
@@ -61,35 +34,42 @@ const scoreDimensions = [
   { key: 'capabilityMatch', label: '能力匹配度', icon: CheckCircle2 },
   { key: 'standardizationWindow', label: '标准化窗口', icon: Clock },
   { key: 'policyRisk', label: '政策风险', icon: AlertTriangle },
-  { key: 'roiPotential', label: '投入产出潜力', icon: TrendingUp },
+  { key: 'roiPotential', label: '投入产出', icon: TrendingUp },
   { key: 'timing', label: '进入时机', icon: Clock },
 ];
 
 const recommendationLabels: Record<string, { label: string; color: string }> = {
-  'continuous_tracking': { label: '持续跟踪', color: 'bg-blue-100 text-blue-700' },
-  'small_pilot': { label: '小规模试点', color: 'bg-yellow-100 text-yellow-700' },
-  'heavy_investment': { label: '重点投入', color: 'bg-green-100 text-green-700' },
-  'joint_development': { label: '联合布局', color: 'bg-purple-100 text-purple-700' },
-  'risk_avoidance': { label: '规避风险', color: 'bg-red-100 text-red-700' },
+  'continuous_tracking': { label: '持续跟踪', color: 'bg-blue-50 text-blue-600' },
+  'small_pilot': { label: '小规模试点', color: 'bg-amber-50 text-amber-600' },
+  'heavy_investment': { label: '重点投入', color: 'bg-emerald-50 text-emerald-600' },
+  'joint_development': { label: '联合布局', color: 'bg-purple-50 text-purple-600' },
+  'risk_avoidance': { label: '规避风险', color: 'bg-[#ff3b30]/10 text-[#ff3b30]' },
 };
+
+function getScoreColor(score: number): string {
+  if (score >= 70) return 'text-[#34c759]';
+  if (score >= 50) return 'text-[#ff9f0a]';
+  return 'text-[#ff3b30]';
+}
+
+function getScoreBg(score: number): string {
+  if (score >= 70) return 'bg-[#34c759]';
+  if (score >= 50) return 'bg-[#ff9f0a]';
+  return 'bg-[#ff3b30]';
+}
 
 export default function DecisionSupport() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [scoringCard, setScoringCard] = useState<ScoringCard | null>(null);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
 
-  useEffect(() => {
-    fetchTopics();
-  }, []);
+  // Competitor tracking state
+  const [competitorOrg, setCompetitorOrg] = useState('');
+  const [competitorStatus, setCompetitorStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
 
-  useEffect(() => {
-    if (selectedTopic) {
-      fetchScoringCard(selectedTopic);
-    }
-  }, [selectedTopic]);
+  useEffect(() => { fetchTopics(); }, []);
+  useEffect(() => { if (selectedTopic) fetchScoringCard(selectedTopic); }, [selectedTopic]);
 
   async function fetchTopics() {
     setLoading(true);
@@ -98,9 +78,7 @@ export default function DecisionSupport() {
       if (res.ok) {
         const data = await res.json();
         setTopics(data);
-        if (data.length > 0 && !selectedTopic) {
-          setSelectedTopic(data[0].id);
-        }
+        if (data.length > 0 && !selectedTopic) setSelectedTopic(data[0].id);
       }
     } catch (error) {
       console.error('Failed to fetch topics:', error);
@@ -112,172 +90,128 @@ export default function DecisionSupport() {
   async function fetchScoringCard(topicId: string) {
     try {
       const res = await fetch(`/api/topics/${topicId}/scoring`);
-      if (res.ok) {
-        setScoringCard(await res.json());
-      }
+      if (res.ok) setScoringCard(await res.json());
     } catch (error) {
       console.error('Failed to fetch scoring card:', error);
     }
   }
 
-  async function runAnalysis() {
-    if (!selectedTopic) return;
-
-    setAnalyzing(true);
+  async function handleCompetitorTrack() {
+    if (!competitorOrg.trim()) return;
+    setCompetitorStatus('running');
     try {
-      // Trigger analysis via skill executor
-      const res = await fetch('/api/skill/report', {
+      const topic = topics.find(t => t.id === selectedTopic);
+      const res = await fetch('/api/skill/track-competitor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          topicId: selectedTopic,
-          topicName: topics.find((t: any) => t.id === selectedTopic)?.name || '',
-          reportType: 'special',
+          organization: competitorOrg,
+          topicContext: topic?.name || '',
+          focusAreas: 'roadmaps,repos,press_releases,technology,partnerships',
         }),
       });
 
-      if (res.ok) {
-        const { executionId } = await res.json();
-        // Poll for result
-        let attempts = 0;
-        while (attempts < 60) {
-          await new Promise(r => setTimeout(r, 2000));
-          const statusRes = await fetch(`/api/skill/${executionId}/status`);
-          if (statusRes.ok) {
-            const status = await statusRes.json();
-            if (status.status === 'completed') {
-              const result = status.result ? JSON.parse(status.result) : {};
-              setAnalysisResult(result);
-              break;
-            } else if (status.status === 'failed') {
-              throw new Error(status.error || 'Analysis failed');
+      if (!res.ok) throw new Error('启动追踪失败');
+      const { executionId } = await res.json();
+
+      await new Promise<void>((resolve, reject) => {
+        const poll = async () => {
+          try {
+            const statusRes = await fetch(`/api/skill/${executionId}/status`);
+            if (statusRes.ok) {
+              const status = await statusRes.json();
+              if (status.status === 'completed') { resolve(); return; }
+              if (status.status === 'failed') { reject(new Error('追踪失败')); return; }
             }
-          }
-          attempts++;
-        }
-        await fetchScoringCard(selectedTopic);
+          } catch { /* ignore */ }
+          setTimeout(poll, 3000);
+        };
+        setTimeout(poll, 2000);
+      });
+
+      // Auto-trigger sync-graph after competitor tracking
+      if (selectedTopic) {
+        try {
+          await fetch('/api/skill/sync-graph', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topicId: selectedTopic }),
+          });
+        } catch { /* ignore sync failure */ }
       }
-    } catch (error) {
-      console.error('Failed to run analysis:', error);
-    } finally {
-      setAnalyzing(false);
+
+      setCompetitorStatus('completed');
+      setTimeout(() => setCompetitorStatus('idle'), 3000);
+    } catch {
+      setCompetitorStatus('failed');
+      setTimeout(() => setCompetitorStatus('idle'), 3000);
     }
-  }
-
-  function getScoreColor(score: number): string {
-    if (score >= 70) return 'text-green-600';
-    if (score >= 50) return 'text-yellow-600';
-    return 'text-red-600';
-  }
-
-  function getScoreBg(score: number): string {
-    if (score >= 70) return 'bg-green-500';
-    if (score >= 50) return 'bg-yellow-500';
-    return 'bg-red-500';
   }
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">加载中...</div>
+        <div className="w-6 h-6 border-2 border-[#d2d2d7] border-t-[#0071e3] rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">决策支持</h2>
-          <p className="mt-1 text-sm text-gray-500">技术规划决策支持与多维度评估分析。</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <select
-            value={selectedTopic || ''}
-            onChange={(e) => setSelectedTopic(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
-          >
-            {topics.map((topic) => (
-              <option key={topic.id} value={topic.id}>
-                {topic.name}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={runAnalysis}
-            disabled={analyzing || !selectedTopic}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {analyzing ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                分析中...
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" />
-                执行分析
-              </>
-            )}
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader title="决策分析" description="多维度技术评估、友商追踪与决策建议">
+        <select
+          value={selectedTopic || ''}
+          onChange={e => setSelectedTopic(e.target.value)}
+          className="px-3.5 py-2 bg-[#f5f5f7] rounded-xl text-sm focus:bg-white transition-all"
+        >
+          {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </PageHeader>
 
       {scoringCard && (
         <>
-          {/* Overall Score Card */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
+          {/* Overall score */}
+          <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
+            <div className="flex items-center justify-between mb-5">
               <div>
-                <h3 className="text-lg font-medium text-gray-900">综合评分</h3>
-                <p className="text-sm text-gray-500">{scoringCard.direction}</p>
+                <h3 className="text-base font-medium text-[#1d1d1f]">综合评分</h3>
+                <p className="text-sm text-[#86868b] mt-0.5">{scoringCard.direction}</p>
               </div>
               <div className="text-right">
-                <div className={`text-4xl font-bold ${getScoreColor(scoringCard.overallScore)}`}>
+                <div className={`text-5xl font-bold tracking-tight ${getScoreColor(scoringCard.overallScore)}`}>
                   {scoringCard.overallScore}
                 </div>
-                <div className="text-sm text-gray-500">/ 100</div>
+                <div className="text-xs text-[#86868b]">/ 100</div>
               </div>
             </div>
 
-            <div className="flex items-center gap-4 mb-6">
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                recommendationLabels[scoringCard.recommendation]?.color || 'bg-gray-100 text-gray-700'
-              }`}>
+            <div className="flex items-center gap-3 mb-4">
+              <span className={`px-3 py-1 rounded-full text-xs font-medium ${recommendationLabels[scoringCard.recommendation]?.color || 'bg-[#f5f5f7] text-[#86868b]'}`}>
                 {recommendationLabels[scoringCard.recommendation]?.label || scoringCard.recommendation}
               </span>
-              <span className="text-sm text-gray-500">
-                置信度: <span className="font-medium">{(scoringCard.confidence * 100).toFixed(0)}%</span>
+              <span className="text-xs text-[#86868b]">
+                置信度 {(scoringCard.confidence * 100).toFixed(0)}%
               </span>
             </div>
 
-            <p className="text-sm text-gray-600 bg-gray-50 p-4 rounded-lg">
-              {scoringCard.rationale}
-            </p>
+            <p className="text-sm text-[#86868b] leading-relaxed">{scoringCard.rationale}</p>
           </div>
 
-          {/* Dimension Scores */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <h3 className="text-lg font-medium text-gray-900 mb-6">维度评分</h3>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {/* Dimension scores */}
+          <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
+            <h3 className="text-base font-medium text-[#1d1d1f] mb-5">维度评分</h3>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {scoreDimensions.map(({ key, label, icon: Icon }) => {
-                const score = scoringCard.scores[key as keyof typeof scoringCard.scores];
+                const score = scoringCard.scores[key] ?? 0;
                 return (
-                  <div key={key} className="p-4 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Icon className="w-4 h-4 text-gray-400" />
-                      <span className="text-xs text-gray-500">{label}</span>
+                  <div key={key} className="bg-[#f5f5f7] rounded-xl p-3.5">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <Icon className="w-3.5 h-3.5 text-[#86868b]" />
+                      <span className="text-[10px] text-[#86868b]">{label}</span>
                     </div>
-                    <div className="flex items-end gap-2">
-                      <span className={`text-2xl font-bold ${getScoreColor(score)}`}>
-                        {score}
-                      </span>
-                    </div>
-                    <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${getScoreBg(score)} transition-all`}
-                        style={{ width: `${score}%` }}
-                      />
+                    <span className={`text-2xl font-bold ${getScoreColor(score)}`}>{score}</span>
+                    <div className="mt-2 h-1.5 bg-[#d2d2d7] rounded-full overflow-hidden">
+                      <div className={`h-full ${getScoreBg(score)} rounded-full transition-all`} style={{ width: `${score}%` }} />
                     </div>
                   </div>
                 );
@@ -285,76 +219,57 @@ export default function DecisionSupport() {
             </div>
           </div>
 
-          {/* Evidence */}
+          {/* Evidence with graph links */}
           {scoringCard.evidence.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">支持证据</h3>
-              <ul className="space-y-2">
-                {scoringCard.evidence.map((evidence, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-gray-600">
-                    <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    {evidence}
-                  </li>
+            <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
+              <h3 className="text-base font-medium text-[#1d1d1f] mb-4">支持证据</h3>
+              <div className="space-y-2">
+                {scoringCard.evidence.map((ev, i) => (
+                  <div key={i} className="flex items-start gap-2 text-sm text-[#1d1d1f]">
+                    <CheckCircle2 className="w-4 h-4 text-[#34c759] mt-0.5 shrink-0" />
+                    <span className="flex-1">{ev}</span>
+                    {selectedTopic && (
+                      <Link
+                        to={`/graph?topicId=${selectedTopic}`}
+                        className="shrink-0 p-1 text-[#aeaeb5] hover:text-[#0071e3] transition-colors"
+                        title="在图谱中查看"
+                      >
+                        <Network className="w-3.5 h-3.5" />
+                      </Link>
+                    )}
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
         </>
       )}
 
-      {/* Analysis Result */}
-      {analysisResult && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">分析结果</h3>
-          <p className="text-sm text-gray-600 mb-6">{analysisResult.summary}</p>
-
-          {analysisResult.findings.length > 0 && (
-            <div className="mb-6">
-              <h4 className="text-sm font-medium text-gray-700 mb-3">关键发现</h4>
-              <div className="space-y-3">
-                {analysisResult.findings.map((finding, i) => (
-                  <div key={i} className="p-4 bg-gray-50 rounded-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-gray-900">{finding.title}</span>
-                      <span className="text-xs text-gray-500">
-                        置信度: {(finding.confidence * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-600">{finding.description}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {analysisResult.recommendations.length > 0 && (
-            <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-3">决策建议</h4>
-              <div className="space-y-3">
-                {analysisResult.recommendations.map((rec) => (
-                  <div key={rec.id} className="p-4 border border-gray-200 rounded-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-gray-900">{rec.direction}</span>
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        recommendationLabels[rec.actionType]?.color || 'bg-gray-100 text-gray-700'
-                      }`}>
-                        {recommendationLabels[rec.actionType]?.label || rec.actionType}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-600">{rec.rationale}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+      {/* Competitor Tracking */}
+      <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
+        <h3 className="text-base font-medium text-[#1d1d1f] mb-1">友商追踪</h3>
+        <p className="text-sm text-[#86868b] mb-4">追踪竞品组织的技术路线图、开源仓库和新闻动态，追踪完成后图谱自动同步</p>
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            value={competitorOrg}
+            onChange={e => setCompetitorOrg(e.target.value)}
+            placeholder="输入组织名称，如 OpenAI, Google DeepMind..."
+            className="flex-1 px-3.5 py-2.5 bg-[#f5f5f7] rounded-xl text-sm focus:bg-white transition-all"
+            onKeyDown={e => e.key === 'Enter' && handleCompetitorTrack()}
+          />
+          <SkillButton onClick={handleCompetitorTrack} status={competitorStatus} disabled={!competitorOrg.trim()}>
+            开始追踪
+          </SkillButton>
         </div>
-      )}
+      </div>
 
-      {!scoringCard && !analysisResult && (
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-          <Target className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-          <p className="text-gray-500">选择主题并执行分析以获取决策支持</p>
-        </div>
+      {!scoringCard && (
+        <EmptyState
+          icon={<Target className="w-12 h-12" />}
+          title="选择主题开始分析"
+          description="选择一个技术主题，查看多维度评分和决策建议"
+        />
       )}
     </div>
   );

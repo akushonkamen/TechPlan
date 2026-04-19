@@ -24,6 +24,7 @@ export interface GraphNodeData {
   description?: string;
   url?: string;
   metadata?: Record<string, any>;
+  topicId?: string;
 }
 
 export interface GraphEdgeData {
@@ -46,7 +47,7 @@ const CustomNode: FC<{ data: GraphNodeData }> = ({ data }) => {
   const getNodeStyle = () => {
     switch (data.type) {
       case 'topic':
-        return 'bg-indigo-600 border-indigo-200';
+        return 'bg-[#0071e3] border-[#0071e3]/30';
       case 'entity':
         return 'bg-blue-500 border-blue-200';
       case 'event':
@@ -56,7 +57,7 @@ const CustomNode: FC<{ data: GraphNodeData }> = ({ data }) => {
       case 'document':
         return 'bg-emerald-500 border-emerald-200';
       default:
-        return 'bg-gray-500 border-gray-200';
+        return 'bg-[#86868b] border-[#d2d2d7]';
     }
   };
 
@@ -99,7 +100,6 @@ const applyLayout = (
 
   switch (layoutType) {
     case 'hierarchical':
-      // Simple hierarchical layout
       const levels: Record<string, number> = {};
       const visited = new Set<string>();
 
@@ -162,7 +162,6 @@ const applyLayout = (
 
     case 'force':
     default:
-      // Simple force-directed-like initial positioning
       layoutedNodes.forEach((node, i) => {
         const angle = Math.random() * 2 * Math.PI;
         const distance = 100 + Math.random() * 200;
@@ -207,8 +206,8 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
       type: 'smoothstep',
       animated: edge.data?.type === 'contradicts',
       style: {
-        stroke: edge.data?.type === 'contradicts' ? '#ef4444' :
-               edge.data?.type === 'supports' ? '#22c55e' : '#9ca3af',
+        stroke: edge.data?.type === 'contradicts' ? '#ff3b30' :
+               edge.data?.type === 'supports' ? '#34c759' : '#86868b',
         strokeWidth: 2,
       },
       label: edge.data?.label,
@@ -227,12 +226,10 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
 
-  // Update nodes when layout changes
   useEffect(() => {
     setNodes(layoutedNodes);
   }, [layoutedNodes, setNodes]);
 
-  // Update edges when data changes
   useEffect(() => {
     setEdges(layoutedEdges);
   }, [layoutedEdges, setEdges]);
@@ -274,26 +271,26 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
         fitView
         attributionPosition="bottom-left"
       >
-        <Background color="#e5e7eb" gap={20} />
+        <Background color="#d2d2d7" gap={20} />
         <Controls />
         <MiniMap
           nodeColor={(node) => {
             switch (node.data.type) {
-              case 'topic': return '#4f46e5';
+              case 'topic': return '#0071e3';
               case 'entity': return '#3b82f6';
               case 'event': return '#a855f7';
               case 'claim': return '#f59e0b';
               case 'document': return '#10b981';
-              default: return '#6b7280';
+              default: return '#86868b';
             }
           }}
-          className="!bg-white !border border-gray-200"
+          className="!bg-white !border !border-[#d2d2d7]"
         />
       </ReactFlow>
 
       {/* Layout Controls */}
-      <div className="absolute top-4 right-4 bg-white rounded-lg shadow-md border border-gray-200 p-2 z-10">
-        <div className="text-xs font-medium text-gray-700 mb-2 px-1">布局</div>
+      <div className="absolute top-4 right-4 bg-white rounded-xl shadow-md border border-[#d2d2d7] p-2 z-10">
+        <div className="text-xs font-medium text-[#86868b] mb-2 px-1">布局</div>
         <div className="flex flex-col gap-1">
           {[
             { value: 'force', label: '力导向' },
@@ -304,10 +301,10 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
             <button
               key={value}
               onClick={() => setLayout(value as any)}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
                 layout === value
-                  ? 'bg-indigo-100 text-indigo-700 font-medium'
-                  : 'text-gray-600 hover:bg-gray-100'
+                  ? 'bg-[#0071e3]/10 text-[#0071e3] font-medium'
+                  : 'text-[#86868b] hover:bg-[#f5f5f7]'
               }`}
             >
               {label}
@@ -318,35 +315,35 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
 
       {/* Node Details Panel */}
       {selectedNode && (
-        <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-md border border-gray-200 p-4 z-10 max-w-xs">
+        <div className="absolute bottom-4 right-4 bg-white rounded-xl shadow-md border border-[#d2d2d7] p-4 z-10 max-w-xs">
           <div className="flex justify-between items-start mb-2">
-            <h3 className="font-semibold text-gray-900">{selectedNode.data.label}</h3>
+            <h3 className="font-semibold text-[#1d1d1f]">{selectedNode.data.label}</h3>
             <button
               onClick={() => setSelectedNode(null)}
-              className="text-gray-400 hover:text-gray-600"
+              className="text-[#aeaeb5] hover:text-[#86868b]"
             >
               ✕
             </button>
           </div>
           <div className="space-y-1 text-sm">
             <div className="flex items-center gap-2">
-              <span className="text-gray-500">类型:</span>
-              <span className="capitalize text-gray-700">{selectedNode.data.type}</span>
+              <span className="text-[#86868b]">类型:</span>
+              <span className="capitalize text-[#1d1d1f]">{selectedNode.data.type}</span>
             </div>
             {selectedNode.data.description && (
               <div className="flex items-start gap-2">
-                <span className="text-gray-500">描述:</span>
-                <span className="text-gray-700">{selectedNode.data.description}</span>
+                <span className="text-[#86868b]">描述:</span>
+                <span className="text-[#1d1d1f]">{selectedNode.data.description}</span>
               </div>
             )}
             {selectedNode.data.url && (
               <div className="flex items-center gap-2">
-                <span className="text-gray-500">链接:</span>
+                <span className="text-[#86868b]">链接:</span>
                 <a
                   href={selectedNode.data.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-indigo-600 hover:underline"
+                  className="text-[#0071e3] hover:underline"
                 >
                   打开
                 </a>
@@ -357,27 +354,27 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
       )}
 
       {/* Legend */}
-      <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm p-3 rounded-lg shadow-sm border border-gray-200 text-xs space-y-2 z-10">
-        <div className="font-medium text-gray-700 mb-1">图例</div>
+      <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm p-3 rounded-xl shadow-sm border border-[#d2d2d7] text-xs space-y-2 z-10">
+        <div className="font-medium text-[#86868b] mb-1">图例</div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-indigo-600"></div>
-          <span>主题 (Topic)</span>
+          <div className="w-3 h-3 rounded-full bg-[#0071e3]"></div>
+          <span className="text-[#1d1d1f]">主题 (Topic)</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-          <span>实体 (Entity)</span>
+          <span className="text-[#1d1d1f]">实体 (Entity)</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-purple-500"></div>
-          <span>事件 (Event)</span>
+          <span className="text-[#1d1d1f]">事件 (Event)</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-          <span>主张 (Claim)</span>
+          <span className="text-[#1d1d1f]">主张 (Claim)</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-          <span>文献 (Document)</span>
+          <span className="text-[#1d1d1f]">文献 (Document)</span>
         </div>
       </div>
     </div>

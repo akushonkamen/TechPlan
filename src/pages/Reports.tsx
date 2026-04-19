@@ -1,266 +1,200 @@
 import { useState, useEffect } from 'react';
-import { FileText, Download, Calendar, ArrowRight, Play, Loader2, Trash2 } from 'lucide-react';
+import { FileText, Calendar, Trash2, ChevronDown, ChevronUp, Network } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import PageHeader from '../components/PageHeader';
+import SkillButton from '../components/SkillButton';
+import EmptyState from '../components/EmptyState';
 import { fetchTopics } from '../services/topicService';
-import { useReportGeneration } from '../hooks/useSkills';
 
 export default function Reports() {
-  const reportSkill = useReportGeneration();
   const [reports, setReports] = useState<any[]>([]);
   const [topics, setTopics] = useState<any[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [skillStatus, setSkillStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
   const [isLoading, setIsLoading] = useState(true);
-  const [viewingReport, setViewingReport] = useState<any | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [reportsRes, topicsData] = await Promise.all([
-        fetch('/api/reports'),
-        fetchTopics()
-      ]);
-      const reportsData = reportsRes.ok ? await reportsRes.json() : [];
-      setReports(reportsData);
+      const [reportsRes, topicsData] = await Promise.all([fetch('/api/reports'), fetchTopics()]);
+      setReports(reportsRes.ok ? await reportsRes.json() : []);
       setTopics(topicsData);
-      if (topicsData.length > 0 && !selectedTopicId) {
-        setSelectedTopicId(topicsData[0].id);
-      }
+      if (topicsData.length > 0 && !selectedTopicId) setSelectedTopicId(topicsData[0].id);
     } catch (error) {
-      console.error("Failed to load data:", error);
+      console.error('Failed to load data:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleGenerateReport = async () => {
-    if (!selectedTopicId || isGenerating) return;
+    if (!selectedTopicId || skillStatus === 'running') return;
+    const topic = topics.find(t => t.id === selectedTopicId);
+    if (!topic) return;
 
-    setIsGenerating(true);
+    setSkillStatus('running');
     try {
-      // 检查该主题是否有文档
-      const docsResponse = await fetch(`/api/documents?topic_id=${selectedTopicId}`);
-      const documents = await docsResponse.json();
-
-      if (!documents || documents.length === 0) {
-        alert('该主题暂无采集文档，请先采集数据');
-        return;
-      }
-
-      // 调用 skill 生成报告
-      const topic = topics.find((t: any) => t.id === selectedTopicId);
-      await reportSkill.generateReport({
-        topicId: selectedTopicId,
-        topicName: topic?.name || '',
-        reportType: 'weekly',
+      const res = await fetch('/api/skill/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicId: selectedTopicId,
+          topicName: topic.name,
+          reportType: 'weekly',
+        }),
       });
 
-      if (reportSkill.status === 'completed') {
-        alert('周报生成成功！');
-      } else if (reportSkill.error) {
-        throw new Error(reportSkill.error);
-      }
-      await loadData();
+      if (!res.ok) throw new Error((await res.json()).error || '启动失败');
+
+      const { executionId } = await res.json();
+
+      const poll = async () => {
+        try {
+          const statusRes = await fetch(`/api/skill/${executionId}/status`);
+          if (statusRes.ok) {
+            const status = await statusRes.json();
+            if (status.status === 'completed') {
+              setSkillStatus('completed');
+              await loadData();
+              setTimeout(() => setSkillStatus('idle'), 3000);
+              return;
+            } else if (status.status === 'failed') {
+              setSkillStatus('failed');
+              return;
+            }
+          }
+        } catch { /* ignore */ }
+        setTimeout(poll, 3000);
+      };
+      setTimeout(poll, 2000);
     } catch (error: any) {
-      console.error("Failed to generate report:", error);
-      alert(`生成报告失败: ${error.message}`);
-    } finally {
-      setIsGenerating(false);
+      setSkillStatus('failed');
     }
   };
 
-  const handleDeleteReport = async (id: string) => {
-    if (!confirm('确定要删除此报告吗？')) return;
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定删除此报告？')) return;
     try {
       await fetch(`/api/reports/${id}`, { method: 'DELETE' });
       await loadData();
-    } catch (error) {
-      console.error("Failed to delete report:", error);
-    }
+    } catch { /* ignore */ }
   };
 
-  const handleViewReport = (report: any) => {
-    setViewingReport(report);
-  };
-
-  const getReportTypeLabel = (type: string) => {
-    const labels: Record<string, string> = {
-      'weekly': '周报',
-      'special': '专题研判',
-      'alert': '预警报告',
-      'executive_summary': '管理摘要'
-    };
-    return labels[type] || type;
+  const getTypeLabel = (type: string) => {
+    const map: Record<string, string> = { weekly: '周报', special: '专题', alert: '预警', executive_summary: '摘要' };
+    return map[type] || type;
   };
 
   return (
-    <div className="space-y-6">
-      {/* Report Detail Modal */}
-      {viewingReport && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
-            <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-gray-900">{viewingReport.title}</h3>
-              <button
-                onClick={() => setViewingReport(null)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="p-6 overflow-y-auto max-h-[60vh]">
-              <div className="space-y-4">
-                <div>
-                  <h4 className="font-medium text-gray-900 mb-2">概要</h4>
-                  <p className="text-gray-700">{viewingReport.summary || '暂无概要'}</p>
-                </div>
-                {viewingReport.content && (
-                  <div>
-                    <h4 className="font-medium text-gray-900 mb-2">关键发现</h4>
-                    <ul className="list-disc list-inside space-y-1 text-gray-700">
-                      {(viewingReport.content.keyFindings || []).map((finding: string, i: number) => (
-                        <li key={i}>{finding}</li>
-                      ))}
-                    </ul>
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader title="分析报告" description="基于采集文档自动生成技术情报分析报告">
+        <select
+          value={selectedTopicId}
+          onChange={e => setSelectedTopicId(e.target.value)}
+          className="px-3.5 py-2 bg-[#f5f5f7] rounded-xl text-sm focus:bg-white transition-all"
+        >
+          <option value="">选择主题...</option>
+          {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <SkillButton onClick={handleGenerateReport} status={skillStatus} disabled={!selectedTopicId}>
+          生成周报
+        </SkillButton>
+      </PageHeader>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="w-6 h-6 border-2 border-[#d2d2d7] border-t-[#0071e3] rounded-full animate-spin" />
+        </div>
+      ) : reports.length === 0 ? (
+        <EmptyState
+          icon={<FileText className="w-12 h-12" />}
+          title="暂无报告"
+          description="选择主题后点击生成周报按钮，系统将基于采集文档自动生成分析报告"
+        />
+      ) : (
+        <div className="space-y-3">
+          {reports.map(report => {
+            const isExpanded = expandedId === report.id;
+            return (
+              <div key={report.id} className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden transition-all duration-200">
+                <div
+                  className="px-6 py-5 flex items-center justify-between cursor-pointer hover:bg-[#f5f5f7]/50 transition-colors"
+                  onClick={() => setExpandedId(isExpanded ? null : report.id)}
+                >
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="w-10 h-10 bg-[#0071e3]/10 rounded-xl flex items-center justify-center shrink-0">
+                      <FileText className="w-5 h-5 text-[#0071e3]" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-medium text-[#1d1d1f] truncate">{report.title}</h4>
+                      <div className="mt-1 flex items-center gap-3 text-xs text-[#86868b]">
+                        <span className="px-2 py-0.5 bg-[#f5f5f7] rounded-full">{getTypeLabel(report.type)}</span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {report.generated_at ? new Date(report.generated_at).toLocaleDateString('zh-CN') : '-'}
+                        </span>
+                        {report.topic_name && <span>{report.topic_name}</span>}
+                      </div>
+                    </div>
                   </div>
-                )}
-                {viewingReport.metadata?.documentSummary && (
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <h4 className="font-medium text-gray-900 mb-2">数据统计</h4>
-                    <div className="text-sm text-gray-600">
-                      <p>文档总数: {viewingReport.metadata.documentSummary.total}</p>
-                      <p>时间范围: {viewingReport.metadata.documentSummary.dateRange}</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDelete(report.id); }}
+                      className="p-2 text-[#aeaeb5] hover:text-[#ff3b30] rounded-full hover:bg-[#ff3b30]/5 transition-all"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                    {isExpanded ? <ChevronUp className="w-4 h-4 text-[#aeaeb5]" /> : <ChevronDown className="w-4 h-4 text-[#aeaeb5]" />}
+                  </div>
+                </div>
+
+                {isExpanded && (
+                  <div className="px-6 pb-6 pt-2 border-t border-[#f5f5f7] animate-fade-in">
+                    {report.summary && (
+                      <div className="mb-4">
+                        <h5 className="text-xs font-medium text-[#86868b] mb-1.5">概要</h5>
+                        <p className="text-sm text-[#1d1d1f] leading-relaxed">{report.summary}</p>
+                      </div>
+                    )}
+                    {report.content?.keyFindings?.length > 0 && (
+                      <div className="mb-4">
+                        <h5 className="text-xs font-medium text-[#86868b] mb-1.5">关键发现</h5>
+                        <ul className="space-y-1.5">
+                          {report.content.keyFindings.map((f: string, i: number) => (
+                            <li key={i} className="text-sm text-[#1d1d1f] flex items-start gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#0071e3] mt-1.5 shrink-0" />
+                              {f}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-4">
+                      {report.metadata?.documentSummary && (
+                        <div className="bg-[#f5f5f7] rounded-xl px-4 py-3 text-sm text-[#86868b]">
+                          文档总数: {report.metadata.documentSummary.total} · 时间范围: {report.metadata.documentSummary.dateRange}
+                        </div>
+                      )}
+                      {report.topic_id && (
+                        <Link
+                          to={`/graph?topicId=${report.topic_id}`}
+                          className="flex items-center gap-1.5 text-sm text-[#0071e3] hover:text-[#0062cc] transition-colors"
+                        >
+                          <Network className="w-4 h-4" />
+                          查看图谱
+                        </Link>
+                      )}
                     </div>
                   </div>
                 )}
               </div>
-            </div>
-            <div className="p-4 border-t border-gray-200 flex justify-end">
-              <button
-                onClick={() => setViewingReport(null)}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-              >
-                关闭
-              </button>
-            </div>
-          </div>
+            );
+          })}
         </div>
       )}
-
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">分析与报告</h2>
-          <p className="mt-1 text-sm text-gray-500">基于已采集文档生成技术情报周报</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <select
-            value={selectedTopicId}
-            onChange={(e) => setSelectedTopicId(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="">选择主题...</option>
-            {topics.map(t => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-          <button
-            onClick={handleGenerateReport}
-            disabled={!selectedTopicId || isGenerating}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                生成中...
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" />
-                生成周报
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Reports List */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
-          <h3 className="font-medium text-gray-900">
-            已生成报告
-            {!isLoading && <span className="ml-2 text-sm text-gray-500">({reports.length})</span>}
-          </h3>
-        </div>
-
-        {isLoading ? (
-          <div className="p-12 text-center text-gray-500">
-            <Loader2 className="w-8 h-8 mx-auto animate-spin mb-3" />
-            加载中...
-          </div>
-        ) : reports.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">
-            <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p>暂无报告</p>
-            <p className="text-sm mt-1">选择主题后点击"生成周报"按钮</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-200">
-            {reports.map((report) => (
-              <div key={report.id} className="p-4 hover:bg-gray-50 transition-colors flex items-center justify-between group">
-                <div className="flex items-start gap-4">
-                  <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600 mt-1">
-                    <FileText className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-900">{report.title}</h4>
-                    <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
-                      <span className="px-2 py-0.5 bg-gray-100 rounded text-gray-600">
-                        {getReportTypeLabel(report.type)}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        {report.generated_at ? new Date(report.generated_at).toLocaleDateString('zh-CN') : '-'}
-                      </span>
-                      <span>{report.topic_name}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleViewReport(report)}
-                    className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                    title="查看详情"
-                  >
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteReport(report.id)}
-                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    title="删除"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Quick Actions */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-        <h3 className="font-medium text-gray-900 mb-4">使用说明</h3>
-        <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600">
-          <li>在 <span className="font-medium text-gray-900">数据采集</span> 页面选择主题并检索文档</li>
-          <li>在此页面选择对应主题</li>
-          <li>点击 <span className="font-medium text-indigo-600">生成周报</span> 按钮</li>
-          <li>系统将基于采集的文档使用 AI 生成分析报告</li>
-        </ol>
-      </div>
     </div>
   );
 }
