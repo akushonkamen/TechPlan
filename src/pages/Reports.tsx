@@ -226,6 +226,11 @@ const Timeline: FC<{ entries: TimelineEntry[] }> = ({ entries }) => {
 
 // ── Section Block ──
 
+/** Fix double-escaped newlines from storage (\\n → real newline) */
+function fixEscapedNewlines(text: string): string {
+  return text.replace(/\\n/g, '\n');
+}
+
 /** Convert nested JSON objects to readable Markdown */
 function jsonToMarkdown(obj: any, depth = 0): string {
   if (typeof obj === 'string') return obj;
@@ -293,15 +298,15 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
           .replace(/^\s*"title"\s*:\s*"/gm, '# ')
           .replace(/^\s*"(summary|content|overview|keyPoints|sections|timeline|metrics|confidence|period|highlights|signals|entityRefs|thesis|id)"\s*:\s*"?/gm, '');
         if (text.trim().length < 50) text = rawContent;
-        displayContent = text;
+        displayContent = fixEscapedNewlines(text);
       }
     }
     // If no JSON found, render as markdown
     if (!nestedSections && !displayContent) {
-      displayContent = rawContent;
+      displayContent = fixEscapedNewlines(rawContent);
     }
   } else if (rawContent) {
-    displayContent = typeof rawContent === 'string' ? rawContent : jsonToMarkdown(rawContent);
+    displayContent = typeof rawContent === 'string' ? fixEscapedNewlines(rawContent) : jsonToMarkdown(rawContent);
   }
 
   return (
@@ -534,7 +539,7 @@ export default function Reports() {
       }
 
       setToast({
-        message: `${getTypeLabel(reportType)}生成已提交，请到任务中心查看进度`,
+        message: `${getTypeLabel(reportType)}正在生成中（如需采集数据可能需要几分钟），请到任务中心查看进度`,
         type: 'success',
         link: '/tasks',
       });
@@ -770,7 +775,7 @@ export default function Reports() {
                         <div className="bg-[#2A5A6B]/5 rounded-2xl p-5 space-y-3">
                           <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f] leading-relaxed">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {content.executiveSummary.overview}
+                              {fixEscapedNewlines(content.executiveSummary.overview)}
                             </ReactMarkdown>
                           </div>
                           {content.executiveSummary.keyPoints?.length > 0 && (
@@ -810,7 +815,7 @@ export default function Reports() {
                           <h5 className="text-xs font-medium text-[#888] mb-1.5">概要</h5>
                           <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f] leading-relaxed">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {report.summary}
+                              {fixEscapedNewlines(report.summary)}
                             </ReactMarkdown>
                           </div>
                           {/* For old markdown reports, attempt to render raw content */}
@@ -823,7 +828,7 @@ export default function Reports() {
                               ) : (
                                 <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f]">
                                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {report.content}
+                                    {fixEscapedNewlines(report.content)}
                                   </ReactMarkdown>
                                 </div>
                               )}

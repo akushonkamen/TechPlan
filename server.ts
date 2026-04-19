@@ -161,6 +161,7 @@ async function startServer() {
       organizations TEXT,
       schedule TEXT,
       daily_report_enabled INTEGER DEFAULT 0,
+      weekly_report_enabled INTEGER DEFAULT 0,
       monthly_report_enabled INTEGER DEFAULT 0,
       quarterly_report_enabled INTEGER DEFAULT 0
     );
@@ -523,6 +524,34 @@ async function startServer() {
     }
   }
 
+  // Migrate: add weekly_report_enabled column to topics if missing
+  try {
+    await db.exec(`ALTER TABLE topics ADD COLUMN weekly_report_enabled INTEGER DEFAULT 0`);
+  } catch (e: any) {
+    if (!e.message?.includes('duplicate column')) {
+      console.warn('[Migration] Warning adding topics.weekly_report_enabled:', e.message);
+    }
+  }
+
+  // Migrate: convert old schedule values to new report_enabled flags
+  try {
+    const oldTopics = await db.all(`SELECT id, schedule, daily_report_enabled, weekly_report_enabled, monthly_report_enabled, quarterly_report_enabled FROM topics`);
+    for (const t of oldTopics) {
+      const s = t.schedule;
+      if (s === 'daily' && !t.daily_report_enabled && !t.weekly_report_enabled && !t.monthly_report_enabled && !t.quarterly_report_enabled) {
+        await db.run(`UPDATE topics SET schedule = 'daily', daily_report_enabled = 1 WHERE id = ?`, [t.id]);
+      } else if (s === 'weekly' && !t.weekly_report_enabled) {
+        await db.run(`UPDATE topics SET schedule = 'weekly', weekly_report_enabled = 1 WHERE id = ?`, [t.id]);
+      } else if (s === 'monthly' && !t.monthly_report_enabled) {
+        await db.run(`UPDATE topics SET schedule = 'weekly', monthly_report_enabled = 1 WHERE id = ?`, [t.id]);
+      } else if (s === 'collect-daily') {
+        await db.run(`UPDATE topics SET schedule = 'daily' WHERE id = ?`, [t.id]);
+      }
+    }
+  } catch (e: any) {
+    console.warn('[Migration] Warning migrating topic schedules:', e.message);
+  }
+
   // Create index for deduplication lookups
   try {
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_documents_dedup_hash ON documents(dedup_hash)`);
@@ -658,7 +687,11 @@ async function startServer() {
         ...row,
         aliases: safeJsonParse(row.aliases, []),
         keywords: safeJsonParse(row.keywords, []),
-        organizations: safeJsonParse(row.organizations, [])
+        organizations: safeJsonParse(row.organizations, []),
+        dailyReportEnabled: !!row.daily_report_enabled,
+        weeklyReportEnabled: !!row.weekly_report_enabled,
+        monthlyReportEnabled: !!row.monthly_report_enabled,
+        quarterlyReportEnabled: !!row.quarterly_report_enabled,
       }));
       res.json(topics);
     } catch (error) {
@@ -678,8 +711,8 @@ async function startServer() {
         createdAt: topic.createdAt || now,
       };
       await db.run(
-        `INSERT INTO topics (id, name, description, aliases, owner, priority, scope, createdAt, keywords, organizations, schedule)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO topics (id, name, description, aliases, owner, priority, scope, createdAt, keywords, organizations, schedule, daily_report_enabled, weekly_report_enabled, monthly_report_enabled, quarterly_report_enabled)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           topicData.id,
           topicData.name,
@@ -691,7 +724,11 @@ async function startServer() {
           topicData.createdAt,
           JSON.stringify(topicData.keywords || []),
           JSON.stringify(topicData.organizations || []),
-          topicData.schedule || 'weekly'
+          topicData.schedule || 'daily',
+          topicData.dailyReportEnabled ? 1 : 0,
+          topicData.weeklyReportEnabled ? 1 : 0,
+          topicData.monthlyReportEnabled ? 1 : 0,
+          topicData.quarterlyReportEnabled ? 1 : 0,
         ]
       );
       res.status(201).json(topicData);
@@ -721,7 +758,9 @@ async function startServer() {
         `UPDATE topics SET
           name = ?, description = ?, aliases = ?, owner = ?,
           priority = ?, scope = ?, createdAt = ?, keywords = ?,
-          organizations = ?, schedule = ?
+          organizations = ?, schedule = ?,
+          daily_report_enabled = ?, weekly_report_enabled = ?,
+          monthly_report_enabled = ?, quarterly_report_enabled = ?
         WHERE id = ?`,
         [
           topic.name,
@@ -734,6 +773,10 @@ async function startServer() {
           JSON.stringify(topic.keywords || []),
           JSON.stringify(topic.organizations || []),
           topic.schedule,
+          topic.dailyReportEnabled ? 1 : 0,
+          topic.weeklyReportEnabled ? 1 : 0,
+          topic.monthlyReportEnabled ? 1 : 0,
+          topic.quarterlyReportEnabled ? 1 : 0,
           id
         ]
       );
@@ -2631,6 +2674,16 @@ async function startServer() {
         let parsedMetadata = row.metadata;
         try { if (parsedContent) parsedContent = JSON.parse(parsedContent); } catch { /* keep raw string */ }
         try { if (parsedMetadata) parsedMetadata = JSON.parse(parsedMetadata); } catch { /* keep raw string */ }
+        // Fix double-escaped newlines (\\n → real newline) in report content
+        if (parsedContent && typeof parsedContent === 'object') {
+          const fix = (s: string) => s.replace(/\\n/g, '\n');
+          if (parsedContent.executiveSummary?.overview) parsedContent.executiveSummary.overview = fix(parsedContent.executiveSummary.overview);
+          if (parsedContent.executiveSummary?.keyPoints) parsedContent.executiveSummary.keyPoints = parsedContent.executiveSummary.keyPoints.map((p: any) => typeof p === 'string' ? fix(p) : p);
+          if (Array.isArray(parsedContent.sections)) parsedContent.sections = parsedContent.sections.map((s: any) => ({ ...s, content: typeof s.content === 'string' ? fix(s.content) : s.content }));
+        } else if (typeof parsedContent === 'string') {
+          parsedContent = parsedContent.replace(/\\n/g, '\n');
+        }
+        if (typeof row.summary === 'string') row.summary = row.summary.replace(/\\n/g, '\n');
         return { ...row, content: parsedContent, metadata: parsedMetadata };
       });
 
@@ -2657,6 +2710,15 @@ async function startServer() {
       let parsedMetadata = row.metadata;
       try { if (parsedContent) parsedContent = JSON.parse(parsedContent); } catch { /* keep raw string */ }
       try { if (parsedMetadata) parsedMetadata = JSON.parse(parsedMetadata); } catch { /* keep raw string */ }
+      // Fix double-escaped newlines
+      if (parsedContent && typeof parsedContent === 'object') {
+        const fix = (s: string) => s.replace(/\\n/g, '\n');
+        if (parsedContent.executiveSummary?.overview) parsedContent.executiveSummary.overview = fix(parsedContent.executiveSummary.overview);
+        if (Array.isArray(parsedContent.sections)) parsedContent.sections = parsedContent.sections.map((s: any) => ({ ...s, content: typeof s.content === 'string' ? fix(s.content) : s.content }));
+      } else if (typeof parsedContent === 'string') {
+        parsedContent = parsedContent.replace(/\\n/g, '\n');
+      }
+      if (typeof row.summary === 'string') row.summary = row.summary.replace(/\\n/g, '\n');
       const report = { ...row, content: parsedContent, metadata: parsedMetadata };
 
       res.json(report);
@@ -3189,7 +3251,7 @@ async function startServer() {
         params.alertType = 'risk';
       }
 
-      // Step 1: Collect data — non-blocking to avoid client timeout (ERR_ABORTED)
+      // Step 1: Collect data — await collection to ensure data is ready before report generation
       const autoCollect = options?.autoCollect !== false;
       let collectionResult = { executionId: '', collected: 0, duplicatesSkipped: 0 };
 
@@ -3206,20 +3268,20 @@ async function startServer() {
           console.log(`[ReportGenerate] Skipping collection for topic ${topicId}: ${existingCount} docs already exist`);
           collectionResult = { executionId: 'skip', collected: 0, duplicatesSkipped: 0 };
         } else {
-          console.log(`[ReportGenerate] Queuing background collection for topic ${topicId}`);
-          triggerCollectionForPeriod(
-            topicId,
-            topic.name,
-            computedPeriod.start,
-            computedPeriod.end,
-            options?.keywords || [],
-            options?.organizations || []
-          ).then((result) => {
-            console.log(`[ReportGenerate] Background collection done:`, result);
-          }).catch((collectErr: any) => {
-            console.error(`[ReportGenerate] Background collection failed:`, collectErr?.message || collectErr);
-          });
-          collectionResult = { executionId: 'pending', collected: 0, duplicatesSkipped: 0 };
+          console.log(`[ReportGenerate] Starting collection for topic ${topicId}, please wait...`);
+          try {
+            collectionResult = await triggerCollectionForPeriod(
+              topicId,
+              topic.name,
+              computedPeriod.start,
+              computedPeriod.end,
+              options?.keywords || [],
+              options?.organizations || []
+            );
+            console.log(`[ReportGenerate] Collection done:`, collectionResult);
+          } catch (collectErr: any) {
+            console.error(`[ReportGenerate] Collection failed:`, collectErr?.message || collectErr);
+          }
         }
       }
 

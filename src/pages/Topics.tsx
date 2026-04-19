@@ -47,7 +47,11 @@ export default function Topics() {
     priority: 'medium' as 'high' | 'medium' | 'low',
     keywords: '',
     organizations: '',
-    schedule: 'weekly' as 'daily' | 'weekly' | 'monthly' | 'disabled',
+    schedule: 'daily' as 'daily' | 'weekly' | 'disabled',
+    dailyReportEnabled: false,
+    weeklyReportEnabled: true,
+    monthlyReportEnabled: false,
+    quarterlyReportEnabled: false,
   });
 
   useEffect(() => { fetchTopics(); }, []);
@@ -88,7 +92,7 @@ export default function Topics() {
   };
 
   const resetForm = () => {
-    setFormData({ name: '', description: '', priority: 'medium', keywords: '', organizations: '', schedule: 'weekly' });
+    setFormData({ name: '', description: '', priority: 'medium', keywords: '', organizations: '', schedule: 'daily', dailyReportEnabled: false, weeklyReportEnabled: true, monthlyReportEnabled: false, quarterlyReportEnabled: false });
     setEditingTopicId(null);
   };
 
@@ -101,7 +105,11 @@ export default function Topics() {
       priority: topic.priority,
       keywords: topic.keywords.join(', '),
       organizations: topic.organizations.join(', '),
-      schedule: topic.schedule,
+      schedule: topic.schedule === 'daily' || topic.schedule === 'weekly' ? topic.schedule : 'daily',
+      dailyReportEnabled: topic.dailyReportEnabled,
+      weeklyReportEnabled: topic.weeklyReportEnabled,
+      monthlyReportEnabled: topic.monthlyReportEnabled,
+      quarterlyReportEnabled: topic.quarterlyReportEnabled,
     });
     setEditingTopicId(topic.id);
     setModalMode('edit');
@@ -123,6 +131,10 @@ export default function Topics() {
         keywords: formData.keywords.split(/[,，]/).map(k => k.trim()).filter(Boolean),
         organizations: formData.organizations.split(/[,，]/).map(o => o.trim()).filter(Boolean),
         schedule: formData.schedule,
+        dailyReportEnabled: formData.dailyReportEnabled,
+        weeklyReportEnabled: formData.weeklyReportEnabled,
+        monthlyReportEnabled: formData.monthlyReportEnabled,
+        quarterlyReportEnabled: formData.quarterlyReportEnabled,
       };
 
       if (modalMode === 'create') {
@@ -326,6 +338,17 @@ export default function Topics() {
                       ))}
                     </div>
                   )}
+
+                  {/* Schedule + Report types */}
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${topic.schedule === 'disabled' ? 'bg-[#888]/10 text-[#888]' : 'bg-[#2A5A6B]/10 text-[#2A5A6B]'}`}>
+                      {topic.schedule === 'daily' ? '日采集' : topic.schedule === 'weekly' ? '周采集' : '已停用'}
+                    </span>
+                    {topic.dailyReportEnabled && <span className="px-2 py-0.5 bg-[#9C7B3C]/10 text-[#9C7B3C] rounded-full text-[10px] font-medium">日报</span>}
+                    {topic.weeklyReportEnabled && <span className="px-2 py-0.5 bg-[#5B7553]/10 text-[#5B7553] rounded-full text-[10px] font-medium">周报</span>}
+                    {topic.monthlyReportEnabled && <span className="px-2 py-0.5 bg-[#2A5A6B]/10 text-[#2A5A6B] rounded-full text-[10px] font-medium">月报</span>}
+                    {topic.quarterlyReportEnabled && <span className="px-2 py-0.5 bg-[#7B5EA7]/10 text-[#7B5EA7] rounded-full text-[10px] font-medium">季报</span>}
+                  </div>
 
                   {/* Actions */}
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[#1d1d1f]/20">

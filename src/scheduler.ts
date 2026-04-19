@@ -19,7 +19,7 @@ interface SchedulerStatus {
 interface PendingTopic {
   topicId: string;
   topicName: string;
-  schedule: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'collect-daily';
+  schedule: 'daily' | 'weekly' | 'monthly' | 'quarterly';
   lastReportAt: string | null;
   dueInMinutes: number;
 }
@@ -34,7 +34,6 @@ interface RecentTrigger {
 
 const SCHEDULE_DAYS: Record<string, number> = {
   daily: 1,
-  'collect-daily': 1,
   weekly: 7,
   monthly: 30,
   quarterly: 90,
@@ -145,70 +144,28 @@ export class SchedulerService {
     if (!this.db || !this.startExecution || !this.reportHandler) return;
 
     try {
+      // ── Phase 1: Collect data for topics with collection enabled ──
+      await this.collectForAllTopics();
+
+      // ── Phase 2: Generate due reports ──
       const pending = await this.computePendingTopics();
       const toTrigger = pending.slice(0, this.maxTriggers);
 
       for (const topic of toTrigger) {
-        const isCollectOnly = topic.schedule === 'collect-daily';
-        const skillName = isCollectOnly ? null : (SCHEDULE_TO_SKILL[topic.schedule] ?? 'report');
-        console.log(`[Scheduler] ${isCollectOnly ? 'Collecting data' : `Triggering ${topic.schedule} report`} for topic "${topic.topicName}"`);
+        const skillName = SCHEDULE_TO_SKILL[topic.schedule] ?? 'report';
+        console.log(`[Scheduler] Triggering ${topic.schedule} report for topic "${topic.topicName}"`);
 
-        const now = new Date();
-        const pad = (n: number) => String(n).padStart(2, '0');
-        const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-        let timeRangeStart: string, timeRangeEnd: string;
-        switch (topic.schedule) {
-          case 'daily':
-          case 'collect-daily':
-            timeRangeStart = fmt(now);
-            timeRangeEnd = fmt(now);
-            timeRangeStart = fmt(now);
-            timeRangeEnd = fmt(now);
-            break;
-          case 'monthly': {
-            timeRangeStart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
-            timeRangeEnd = fmt(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-            break;
-          }
-          case 'quarterly': {
-            const q = Math.floor(now.getMonth() / 3);
-            timeRangeStart = fmt(new Date(now.getFullYear(), q * 3, 1));
-            timeRangeEnd = fmt(new Date(now.getFullYear(), q * 3 + 3, 0));
-            break;
-          }
-          default: { // weekly
-            const weekAgo = new Date(now.getTime() - 7 * 86400000);
-            timeRangeStart = fmt(weekAgo);
-            timeRangeEnd = fmt(now);
-          }
-        }
+        const { start: timeRangeStart, end: timeRangeEnd } = this.getReportRange(topic.schedule);
 
         const params: Record<string, any> = {
           topicId: topic.topicId,
           topicName: topic.topicName,
-          reportType: topic.schedule === 'weekly' ? 'weekly' : topic.schedule,
+          reportType: topic.schedule,
           timeRangeStart,
           timeRangeEnd,
         };
 
         try {
-          // Collect fresh data
-          if (this.collectFn) {
-            try {
-              console.log(`[Scheduler] Collecting data for "${topic.topicName}" (${timeRangeStart} - ${timeRangeEnd})`);
-              await this.collectFn(topic.topicId, topic.topicName, timeRangeStart, timeRangeEnd);
-            } catch (collectErr) {
-              console.warn(`[Scheduler] Collection failed for "${topic.topicName}":`, collectErr);
-            }
-          }
-
-          // collect-daily mode: only collect, skip report generation
-          if (isCollectOnly) {
-            console.log(`[Scheduler] Collection-only mode for "${topic.topicName}", skipping report`);
-            this.addTrigger(topic, `collect-${Date.now()}`, 'completed');
-            continue;
-          }
-
           // Check if we have enough data to generate a meaningful report
           if (this.getDocumentsCountInPeriod) {
             const docCount = await this.getDocumentsCountInPeriod(topic.topicId, timeRangeStart, timeRangeEnd);
@@ -237,61 +194,104 @@ export class SchedulerService {
     }
   }
 
-  private async computePendingTopics(): Promise<PendingTopic[]> {
-    // Support both old schedule column and new *_report_enabled columns
+  /** Collect data for all topics that have collection enabled. */
+  private async collectForAllTopics() {
+    if (!this.collectFn) return;
     const topics = await this.db.all(
-      `SELECT id, name, schedule,
-        COALESCE(daily_report_enabled, CASE WHEN schedule = 'daily' THEN 1 ELSE 0 END) as daily_enabled,
-        COALESCE(monthly_report_enabled, CASE WHEN schedule = 'monthly' THEN 1 ELSE 0 END) as monthly_enabled,
-        COALESCE(quarterly_report_enabled, CASE WHEN schedule = 'quarterly' THEN 1 ELSE 0 END) as quarterly_enabled
-       FROM topics WHERE (schedule IS NOT NULL AND schedule != 'disabled')
-       OR daily_report_enabled = 1 OR monthly_report_enabled = 1 OR quarterly_report_enabled = 1`
+      `SELECT id, name, schedule FROM topics WHERE schedule IS NOT NULL AND schedule != 'disabled'`
+    );
+    for (const topic of topics) {
+      const { start, end } = this.getCollectionRange(topic.schedule);
+      try {
+        console.log(`[Scheduler] Collecting data for "${topic.name}" (${start} - ${end})`);
+        await this.collectFn(topic.id, topic.name, start, end);
+      } catch (err) {
+        console.warn(`[Scheduler] Collection failed for "${topic.name}":`, err);
+      }
+    }
+  }
+
+  private getCollectionRange(schedule: string): { start: string; end: string } {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (schedule === 'weekly') {
+      const weekAgo = new Date(now.getTime() - 7 * 86400000);
+      return { start: fmt(weekAgo), end: fmt(now) };
+    }
+    return { start: fmt(now), end: fmt(now) };
+  }
+
+  private getReportRange(schedule: string): { start: string; end: string } {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    switch (schedule) {
+      case 'daily':
+        return { start: fmt(now), end: fmt(now) };
+      case 'monthly': {
+        const start = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+        const end = fmt(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+        return { start, end };
+      }
+      case 'quarterly': {
+        const q = Math.floor(now.getMonth() / 3);
+        const start = fmt(new Date(now.getFullYear(), q * 3, 1));
+        const end = fmt(new Date(now.getFullYear(), q * 3 + 3, 0));
+        return { start, end };
+      }
+      default: { // weekly
+        const weekAgo = new Date(now.getTime() - 7 * 86400000);
+        return { start: fmt(weekAgo), end: fmt(now) };
+      }
+    }
+  }
+
+  private async computePendingTopics(): Promise<PendingTopic[]> {
+    const topics = await this.db.all(
+      `SELECT id, name,
+        COALESCE(daily_report_enabled, 0) as daily_enabled,
+        COALESCE(weekly_report_enabled, 0) as weekly_enabled,
+        COALESCE(monthly_report_enabled, 0) as monthly_enabled,
+        COALESCE(quarterly_report_enabled, 0) as quarterly_enabled
+       FROM topics WHERE daily_report_enabled = 1 OR weekly_report_enabled = 1
+       OR monthly_report_enabled = 1 OR quarterly_report_enabled = 1`
     );
     if (!topics || topics.length === 0) return [];
 
-    // Batch query: Get all last report timestamps for all topic-schedule combinations
-    const topicSchedulePairs: Array<{ topicId: string; schedule: string }> = [];
+    // Build report schedule pairs from *_report_enabled flags only
+    const reportPairs: Array<{ topicId: string; schedule: string }> = [];
     for (const topic of topics) {
-      const schedules: string[] = [];
-      if (topic.schedule && topic.schedule !== 'disabled') schedules.push(topic.schedule);
-      if (topic.daily_enabled && !schedules.includes('daily')) schedules.push('daily');
-      if (topic.monthly_enabled && !schedules.includes('monthly')) schedules.push('monthly');
-      if (topic.quarterly_enabled && !schedules.includes('quarterly')) schedules.push('quarterly');
-
-      for (const schedule of schedules) {
-        topicSchedulePairs.push({ topicId: topic.id, schedule });
-      }
+      if (topic.daily_enabled) reportPairs.push({ topicId: topic.id, schedule: 'daily' });
+      if (topic.weekly_enabled) reportPairs.push({ topicId: topic.id, schedule: 'weekly' });
+      if (topic.monthly_enabled) reportPairs.push({ topicId: topic.id, schedule: 'monthly' });
+      if (topic.quarterly_enabled) reportPairs.push({ topicId: topic.id, schedule: 'quarterly' });
     }
 
-    // Build batch query with UNION ALL
-    if (topicSchedulePairs.length === 0) return [];
+    if (reportPairs.length === 0) return [];
 
-    const unionQueries = topicSchedulePairs.map(
+    // Batch query last report timestamps
+    const unionQueries = reportPairs.map(
       () => `SELECT ? as topic_id, ? as schedule_type, MAX(generated_at) as lastAt FROM reports WHERE topic_id = ? AND type = ?`
     ).join(' UNION ALL ');
 
-    const batchParams = topicSchedulePairs.flatMap(pair => [pair.topicId, pair.schedule, pair.topicId, pair.schedule]);
+    const batchParams = reportPairs.flatMap(pair => [pair.topicId, pair.schedule, pair.topicId, pair.schedule]);
     const lastReports = await this.db.all(unionQueries, batchParams);
 
-    // Create lookup map: "topicId:schedule" -> lastAt timestamp
     const lastReportMap = new Map<string, string | null>();
     for (const row of lastReports) {
-      const key = `${row.topic_id}:${row.schedule_type}`;
-      lastReportMap.set(key, row.lastAt);
+      lastReportMap.set(`${row.topic_id}:${row.schedule_type}`, row.lastAt);
     }
 
     const now = Date.now();
     const results: PendingTopic[] = [];
 
     for (const topic of topics) {
-      // Determine which schedules to check for this topic
-      const schedules: Array<'daily' | 'weekly' | 'monthly' | 'quarterly' | 'collect-daily'> = [];
-      if (topic.schedule && topic.schedule !== 'disabled') {
-        schedules.push(topic.schedule as 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'collect-daily');
-      }
-      if (topic.daily_enabled && !schedules.includes('daily')) schedules.push('daily');
-      if (topic.monthly_enabled && !schedules.includes('monthly')) schedules.push('monthly');
-      if (topic.quarterly_enabled && !schedules.includes('quarterly')) schedules.push('quarterly');
+      const schedules: Array<'daily' | 'weekly' | 'monthly' | 'quarterly'> = [];
+      if (topic.daily_enabled) schedules.push('daily');
+      if (topic.weekly_enabled) schedules.push('weekly');
+      if (topic.monthly_enabled) schedules.push('monthly');
+      if (topic.quarterly_enabled) schedules.push('quarterly');
 
       for (const schedule of schedules) {
         const key = `${topic.id}:${schedule}`;

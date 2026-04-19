@@ -9,5 +9,9 @@ export interface Topic {
   createdAt: string;
   keywords: string[];
   organizations: string[];
-  schedule: 'daily' | 'weekly' | 'monthly' | 'collect-daily' | 'disabled';
+  schedule: 'daily' | 'weekly' | 'disabled';
+  dailyReportEnabled: boolean;
+  weeklyReportEnabled: boolean;
+  monthlyReportEnabled: boolean;
+  quarterlyReportEnabled: boolean;
 }
