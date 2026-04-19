@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import type { Topic } from '../types';
+import { INPUT, LABEL, MODAL_BACKDROP, MODAL_CONTAINER } from '../lib/design';
 
 interface TopicFormProps {
   isOpen: boolean;
@@ -12,7 +13,7 @@ interface TopicFormProps {
     priority: 'high' | 'medium' | 'low';
     keywords: string;
     organizations: string;
-    schedule: 'daily' | 'weekly' | 'monthly';
+    schedule: 'daily' | 'weekly' | 'monthly' | 'disabled';
   };
   onFormDataChange: (data: TopicFormProps['formData']) => void;
   isSubmitting?: boolean;
@@ -30,19 +31,16 @@ export default function TopicForm({
 }: TopicFormProps) {
   if (!isOpen) return null;
 
-  const inputClass = 'w-full px-4 py-2.5 bg-[#f5f5f7] rounded-xl text-sm text-[#1d1d1f] placeholder:text-[#aeaeb5] focus:bg-white focus:shadow-[0_0_0_4px_rgba(0,113,227,0.15)] transition-all outline-none';
-  const labelClass = 'block text-sm font-medium text-[#1d1d1f] mb-1.5';
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-fade-in">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center ${MODAL_BACKDROP}`}>
+      <div className={`${MODAL_CONTAINER} w-full max-w-2xl overflow-hidden animate-scale-in`}>
         <div className="px-8 py-5 flex justify-between items-center">
           <h3 className="text-lg font-semibold text-[#1d1d1f]">
             {mode === 'create' ? '新建技术主题' : '编辑技术主题'}
           </h3>
           <button
             onClick={onClose}
-            className="text-[#aeaeb5] hover:text-[#86868b] transition-colors"
+            className="p-1.5 text-[#aeaeb5] hover:text-[#86868b] hover:bg-[#f5f5f7] rounded-full transition-colors"
             disabled={isSubmitting}
           >
             <X className="w-5 h-5" />
@@ -51,13 +49,13 @@ export default function TopicForm({
 
         <form onSubmit={onSubmit} className="px-8 pb-8 space-y-5">
           <div>
-            <label className={labelClass}>
+            <label className={LABEL}>
               主题名称 <span className="text-[#ff3b30]">*</span>
             </label>
             <input
               required
               type="text"
-              className={inputClass}
+              className={INPUT}
               placeholder="例如：端侧大模型"
               value={formData.name}
               onChange={(e) => onFormDataChange({ ...formData, name: e.target.value })}
@@ -66,9 +64,9 @@ export default function TopicForm({
           </div>
 
           <div>
-            <label className={labelClass}>主题描述</label>
+            <label className={LABEL}>主题描述</label>
             <textarea
-              className={`${inputClass} resize-none h-20`}
+              className={`${INPUT} resize-none h-20`}
               placeholder="描述该主题需要追踪的核心技术方向..."
               value={formData.description}
               onChange={(e) => onFormDataChange({ ...formData, description: e.target.value })}
@@ -78,11 +76,11 @@ export default function TopicForm({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>优先级</label>
+              <label className={LABEL}>优先级</label>
               <select
-                className={inputClass}
+                className={INPUT}
                 value={formData.priority}
-                onChange={(e) => onFormDataChange({ ...formData, priority: e.target.value as any })}
+                onChange={(e) => onFormDataChange({ ...formData, priority: e.target.value as 'high' | 'medium' | 'low' })}
                 disabled={isSubmitting}
               >
                 <option value="high">高优先级</option>
@@ -91,28 +89,29 @@ export default function TopicForm({
               </select>
             </div>
             <div>
-              <label className={labelClass}>采集频率</label>
+              <label className={LABEL}>采集频率</label>
               <select
-                className={inputClass}
+                className={INPUT}
                 value={formData.schedule}
-                onChange={(e) => onFormDataChange({ ...formData, schedule: e.target.value as any })}
+                onChange={(e) => onFormDataChange({ ...formData, schedule: e.target.value as 'daily' | 'weekly' | 'monthly' | 'disabled' })}
                 disabled={isSubmitting}
               >
                 <option value="daily">每日</option>
                 <option value="weekly">每周</option>
                 <option value="monthly">每月</option>
+                <option value="disabled">禁用</option>
               </select>
             </div>
           </div>
 
           <div>
-            <label className={labelClass}>
+            <label className={LABEL}>
               核心关键词 (逗号分隔) <span className="text-[#ff3b30]">*</span>
             </label>
             <input
               required
               type="text"
-              className={inputClass}
+              className={INPUT}
               placeholder="例如：模型压缩, 量化, NPU"
               value={formData.keywords}
               onChange={(e) => onFormDataChange({ ...formData, keywords: e.target.value })}
@@ -121,10 +120,10 @@ export default function TopicForm({
           </div>
 
           <div>
-            <label className={labelClass}>关注机构 (逗号分隔)</label>
+            <label className={LABEL}>关注机构 (逗号分隔)</label>
             <input
               type="text"
-              className={inputClass}
+              className={INPUT}
               placeholder="例如：Apple, Qualcomm, 华为"
               value={formData.organizations}
               onChange={(e) => onFormDataChange({ ...formData, organizations: e.target.value })}
@@ -132,18 +131,18 @@ export default function TopicForm({
             />
           </div>
 
-          <div className="pt-5 flex justify-end gap-3 border-t border-[#d2d2d7]">
+          <div className="pt-5 flex justify-end gap-3 border-t border-[#f5f5f7]">
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2 text-[#1d1d1f] bg-[#f5f5f7] rounded-full text-sm font-medium hover:bg-[#e8e8ed] transition-all disabled:opacity-50"
+              className="px-5 py-2 text-[#1d1d1f] bg-[#f5f5f7] rounded-[980px] text-sm font-medium hover:bg-[#e8e8ed] transition-all disabled:opacity-50 active:scale-[0.97]"
               disabled={isSubmitting}
             >
               取消
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-white bg-[#0071e3] rounded-full text-sm font-medium hover:bg-[#0062cc] transition-all disabled:opacity-50 active:scale-[0.97] flex items-center gap-2"
+              className="px-5 py-2 text-white bg-[#0071e3] rounded-[980px] text-sm font-semibold hover:bg-[#0062cc] transition-all disabled:opacity-50 active:scale-[0.97] flex items-center gap-2"
               disabled={isSubmitting}
             >
               {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}

@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import type { OptimizationConfig } from '../hooks/useSkillApi';
+import { CARD, INPUT, LABEL, BTN_PRIMARY } from '../lib/design';
 
 interface OptimizationConfigFormProps {
   config: OptimizationConfig | null;
@@ -40,34 +41,34 @@ export default function OptimizationConfigForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-6 space-y-4">
+    <form onSubmit={handleSubmit} className={`${CARD} p-6 space-y-4`}>
       <div>
-        <label className="block text-sm font-medium text-[#1d1d1f] mb-1.5">评估标准</label>
+        <label className={LABEL}>评估标准</label>
         <input
           type="text"
           name="evaluation_criteria"
           defaultValue={config.evaluation_criteria}
           placeholder="relevance,depth,accuracy"
-          className="w-full px-3.5 py-2.5 bg-[#f5f5f7] border-0 rounded-xl text-sm focus:bg-white transition-all"
+          className={INPUT}
         />
         <p className="text-xs text-[#86868b] mt-1">用逗号分隔多个评估维度</p>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-[#1d1d1f] mb-1.5">最大迭代次数</label>
+          <label className={LABEL}>最大迭代次数</label>
           <input
             type="number"
             name="max_iterations"
             defaultValue={config.max_iterations}
             min={1}
             max={50}
-            className="w-full px-3.5 py-2.5 bg-[#f5f5f7] border-0 rounded-xl text-sm focus:bg-white transition-all"
+            className={INPUT}
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-[#1d1d1f] mb-1.5">收敛阈值</label>
+          <label className={LABEL}>收敛阈值</label>
           <input
             type="number"
             name="convergence_threshold"
@@ -75,17 +76,17 @@ export default function OptimizationConfigForm({
             min={0}
             max={10}
             step={0.1}
-            className="w-full px-3.5 py-2.5 bg-[#f5f5f7] border-0 rounded-xl text-sm focus:bg-white transition-all"
+            className={INPUT}
           />
         </div>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-[#1d1d1f] mb-1.5">关注领域</label>
+        <label className={LABEL}>关注领域</label>
         <select
           name="focus_area"
           defaultValue={config.focus_area}
-          className="w-full px-3.5 py-2.5 bg-[#f5f5f7] border-0 rounded-xl text-sm focus:bg-white transition-all"
+          className={INPUT}
         >
           {FOCUS_AREA_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -98,7 +99,7 @@ export default function OptimizationConfigForm({
       <button
         type="submit"
         disabled={saving}
-        className="w-full px-4 py-2.5 bg-[#0071e3] text-white rounded-full text-sm font-medium hover:bg-[#0062cc] transition-all disabled:opacity-50 active:scale-[0.97]"
+        className={`w-full ${BTN_PRIMARY} disabled:opacity-50`}
       >
         {saving ? '保存中...' : '保存配置'}
       </button>

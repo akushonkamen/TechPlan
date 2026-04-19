@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
 import EmptyState from '../components/EmptyState';
+import { CARD, SPINNER } from '../lib/design';
 
 interface Topic {
   id: string;
@@ -137,7 +138,9 @@ export default function DecisionSupport() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ topicId: selectedTopic }),
           });
-        } catch { /* ignore sync failure */ }
+        } catch (error) {
+          console.error('Auto sync-graph failed after competitor tracking:', error);
+        }
       }
 
       setCompetitorStatus('completed');
@@ -151,7 +154,7 @@ export default function DecisionSupport() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-[#d2d2d7] border-t-[#0071e3] rounded-full animate-spin" />
+        <div className={SPINNER} />
       </div>
     );
   }
@@ -171,7 +174,7 @@ export default function DecisionSupport() {
       {scoringCard && (
         <>
           {/* Overall score */}
-          <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
+          <div className={`${CARD} p-8`}>
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="text-base font-medium text-[#1d1d1f]">综合评分</h3>
@@ -198,7 +201,7 @@ export default function DecisionSupport() {
           </div>
 
           {/* Dimension scores */}
-          <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
+          <div className={`${CARD} p-8`}>
             <h3 className="text-base font-medium text-[#1d1d1f] mb-5">维度评分</h3>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {scoreDimensions.map(({ key, label, icon: Icon }) => {
@@ -221,7 +224,7 @@ export default function DecisionSupport() {
 
           {/* Evidence with graph links */}
           {scoringCard.evidence.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
+            <div className={`${CARD} p-8`}>
               <h3 className="text-base font-medium text-[#1d1d1f] mb-4">支持证据</h3>
               <div className="space-y-2">
                 {scoringCard.evidence.map((ev, i) => (
@@ -246,7 +249,7 @@ export default function DecisionSupport() {
       )}
 
       {/* Competitor Tracking */}
-      <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8">
+      <div className={`${CARD} p-8`}>
         <h3 className="text-base font-medium text-[#1d1d1f] mb-1">友商追踪</h3>
         <p className="text-sm text-[#86868b] mb-4">追踪竞品组织的技术路线图、开源仓库和新闻动态，追踪完成后图谱自动同步</p>
         <div className="flex items-center gap-3">

@@ -6,6 +6,7 @@ import TopicForm from '../components/TopicForm';
 import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
 import EmptyState from '../components/EmptyState';
+import { CARD, BTN_PRIMARY, SPINNER } from '../lib/design';
 
 export default function Topics() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,7 +25,7 @@ export default function Topics() {
   // Per-topic document counts + expanded state
   const [topicDocCounts, setTopicDocCounts] = useState<Record<string, number>>({});
   const [expandedTopicId, setExpandedTopicId] = useState<string | null>(null);
-  const [topicDocs, setTopicDocs] = useState<any[]>([]);
+  const [topicDocs, setTopicDocs] = useState<{ id: string; title: string; published_date?: string; source?: string; source_url?: string }[]>([]);
 
   // File upload state
   const [uploadingFile, setUploadingFile] = useState<string | null>(null);
@@ -75,7 +76,9 @@ export default function Topics() {
     try {
       const res = await fetch(`/api/documents?topic_id=${topicId}`);
       if (res.ok) setTopicDocs(await res.json());
-    } catch { /* ignore */ }
+    } catch (error) {
+      console.error('Failed to fetch topic documents:', error);
+    }
   };
 
   const resetForm = () => {
@@ -148,7 +151,9 @@ export default function Topics() {
       await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
       if (expandedTopicId) fetchTopicDocs(expandedTopicId);
       fetchTopics();
-    } catch { /* ignore */ }
+    } catch {
+      alert('删除文档失败');
+    }
   };
 
   // Chain: research → extract → sync-graph (three-step pipeline)
@@ -389,7 +394,7 @@ export default function Topics() {
         </div>
         <button
           onClick={openCreateModal}
-          className="flex items-center gap-2 px-5 py-2 bg-[#0071e3] text-white rounded-full text-sm font-medium hover:bg-[#0062cc] transition-all active:scale-[0.97]"
+          className={`flex items-center gap-2 ${BTN_PRIMARY}`}
         >
           <Plus className="w-4 h-4" />
           新建主题
@@ -398,7 +403,7 @@ export default function Topics() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <div className="w-6 h-6 border-2 border-[#d2d2d7] border-t-[#0071e3] rounded-full animate-spin" />
+          <div className={SPINNER} />
         </div>
       ) : filteredTopics.length === 0 ? (
         <EmptyState
@@ -417,7 +422,7 @@ export default function Topics() {
             const isExpanded = expandedTopicId === topic.id;
             const docCount = topicDocCounts[topic.id] ?? 0;
             return (
-              <div key={topic.id} className={`bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden hover:shadow-md transition-all group ${isExpanded ? 'md:col-span-2 lg:col-span-3' : ''}`}>
+              <div key={topic.id} className={`${CARD} overflow-hidden hover:shadow-md transition-all group ${isExpanded ? 'md:col-span-2 lg:col-span-3' : ''}`}>
                 <div className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div className="min-w-0 flex-1">

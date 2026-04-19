@@ -9,7 +9,7 @@ export interface Topic {
   createdAt: string;
   keywords: string[];
   organizations: string[];
-  schedule: 'daily' | 'weekly' | 'monthly';
+  schedule: 'daily' | 'weekly' | 'monthly' | 'disabled';
 }
 
 export interface Document {
