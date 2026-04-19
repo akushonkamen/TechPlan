@@ -32,10 +32,10 @@ export default function OptimizationConfigForm({
     const formData = new FormData(e.currentTarget);
 
     onSave({
-      evaluation_criteria: formData.get('evaluation_criteria') as string,
-      max_iterations: Number(formData.get('max_iterations')),
-      convergence_threshold: Number(formData.get('convergence_threshold')),
-      focus_area: formData.get('focus_area') as string,
+      evaluation_criteria: formData.get('evaluation_criteria') as string || '',
+      max_iterations: Number(formData.get('max_iterations')) || 10,
+      convergence_threshold: Number(formData.get('convergence_threshold')) || 8,
+      focus_area: formData.get('focus_area') as string || 'general',
     });
   };
 

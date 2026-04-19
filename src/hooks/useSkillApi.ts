@@ -33,14 +33,14 @@ export interface SkillVersion {
 }
 
 export interface OptimizationConfig {
-  id: string;
+  id?: string;
   skill_name: string;
   evaluation_criteria: string;
   max_iterations: number;
   convergence_threshold: number;
   focus_area: string;
   custom_params: string | null;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export interface OptimizationHistoryEntry {
@@ -61,23 +61,26 @@ export function useSkillsList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchSkills = async () => {
-      try {
-        const res = await fetch('/api/skills');
-        if (!res.ok) throw new Error('Failed to fetch skills');
-        const data = await res.json();
-        setSkills(data);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchSkills();
+  const fetchSkills = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/skills');
+      if (!res.ok) throw new Error('Failed to fetch skills');
+      const data = await res.json();
+      setSkills(data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  return { skills, loading, error };
+  useEffect(() => {
+    fetchSkills();
+  }, [fetchSkills]);
+
+  return { skills, loading, error, refetch: fetchSkills };
 }
 
 // Fetch single skill detail
@@ -178,14 +181,18 @@ export function useOptimizationConfig(name: string) {
       });
       if (!res.ok) throw new Error('Failed to save optimization config');
       const data = await res.json();
-      setConfig(data);
+      if (data && data.skill_name) {
+        setConfig(data);
+      } else {
+        await fetchConfig();
+      }
     } catch (err: any) {
       setError(err.message);
       throw err;
     } finally {
       setSaving(false);
     }
-  }, [name]);
+  }, [name, fetchConfig]);
 
   return { config, loading, error, save, saving, refetch: fetchConfig };
 }
