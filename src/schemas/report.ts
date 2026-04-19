@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // Signal within a report section
-export const SignalSchema = z.object({
+const SignalSchema = z.object({
   type: z.string(),
   title: z.string(),
   description: z.string().optional().default(''),
@@ -9,7 +9,7 @@ export const SignalSchema = z.object({
 }).passthrough();
 
 // Report section
-export const ReportSectionSchema = z.object({
+const ReportSectionSchema = z.object({
   id: z.string(),
   title: z.string(),
   thesis: z.string().optional().default(''),
@@ -20,7 +20,7 @@ export const ReportSectionSchema = z.object({
 }).passthrough();
 
 // Timeline entry
-export const TimelineEntrySchema = z.object({
+const TimelineEntrySchema = z.object({
   date: z.string(),
   event: z.string(),
   significance: z.string().optional().default(''),
@@ -28,7 +28,7 @@ export const TimelineEntrySchema = z.object({
 }).passthrough();
 
 // Executive summary
-export const ExecutiveSummarySchema = z.object({
+const ExecutiveSummarySchema = z.object({
   overview: z.string().optional().default(''),
   keyPoints: z.array(z.any()).optional().default([]),
   confidence: z.enum(['high', 'medium', 'low']).optional(),
@@ -37,7 +37,7 @@ export const ExecutiveSummarySchema = z.object({
 }).passthrough();
 
 // Normalized report content (post-normalization shape persisted to DB)
-export const NormalizedReportContentSchema = z.object({
+const NormalizedReportContentSchema = z.object({
   version: z.string().optional(),
   meta: z.any().optional(),
   executiveSummary: ExecutiveSummarySchema.optional(),
@@ -47,7 +47,7 @@ export const NormalizedReportContentSchema = z.object({
 }).passthrough();
 
 // Full report output (top-level shape from Claude)
-export const ReportOutputSchema = z.object({
+const ReportOutputSchema = z.object({
   title: z.string().optional().default('Untitled Report'),
   summary: z.string().optional().default(''),
   type: z.string().optional(),
@@ -55,13 +55,7 @@ export const ReportOutputSchema = z.object({
   metadata: z.record(z.string(), z.any()).optional().default({}),
 }).passthrough();
 
-// Type exports
-export type Signal = z.infer<typeof SignalSchema>;
-export type ReportSection = z.infer<typeof ReportSectionSchema>;
-export type TimelineEntry = z.infer<typeof TimelineEntrySchema>;
-export type ExecutiveSummary = z.infer<typeof ExecutiveSummarySchema>;
-export type NormalizedReportContent = z.infer<typeof NormalizedReportContentSchema>;
-export type ReportOutput = z.infer<typeof ReportOutputSchema>;
+type ReportOutput = z.infer<typeof ReportOutputSchema>;
 
 /**
  * Validate a parsed report object. Returns the validated data or null.

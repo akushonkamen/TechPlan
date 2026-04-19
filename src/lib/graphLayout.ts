@@ -1,6 +1,6 @@
 import type { GraphEdge, GraphNode, GraphSensemakingCluster } from '../types/graph';
 
-export type GraphLayoutMode = 'terrain' | 'focus' | 'timeline' | 'grid' | 'radar';
+export type GraphLayoutMode = 'terrain' | 'focus' | 'timeline' | 'grid' | 'radar' | 'matrix' | 'bundle';
 
 interface LayoutOptions {
   centerNodeId?: string;
@@ -26,7 +26,7 @@ const TYPE_ORDER: Record<string, number> = {
   document: 7,
 };
 
-export function calculateNodeImportance(node: GraphNode, edges: GraphEdge[]): number {
+function calculateNodeImportance(node: GraphNode, edges: GraphEdge[]): number {
   if (typeof node.data.importance === 'number') return node.data.importance;
 
   const degree = edges.reduce((count, edge) => (
@@ -35,9 +35,18 @@ export function calculateNodeImportance(node: GraphNode, edges: GraphEdge[]): nu
   const metadata = node.data.metadata ?? {};
   const docCount = Number(metadata.docCount ?? metadata.doc_count ?? 0);
   const confidence = Number(metadata.confidence ?? 0.5);
-  const recentBoost = node.data.recent ? 0.15 : 0;
+  const recentBoost = node.data.recent ? 0.12 : 0;
 
-  return Number((degree * 0.45 + Math.log1p(docCount) * 0.25 + confidence * 0.3 + recentBoost).toFixed(4));
+  const normalizedDegree = Math.log1p(degree) / Math.log1p(50);
+  const normalizedDocs = Math.log1p(docCount) / Math.log1p(20);
+  const spreadConfidence = Math.sqrt(confidence);
+
+  return Number((
+    normalizedDegree * 0.40 +
+    normalizedDocs * 0.20 +
+    spreadConfidence * 0.30 +
+    recentBoost
+  ).toFixed(4));
 }
 
 export function rankNodesByImportance(nodes: GraphNode[], edges: GraphEdge[]): RankedNode[] {
@@ -69,6 +78,8 @@ export function applyGraphLayout(
   if (mode === 'focus') return applyFocusLayout(layoutedNodes, layoutedEdges, options);
   if (mode === 'timeline') return applyTimelineLayout(layoutedNodes, layoutedEdges, options);
   if (mode === 'terrain') return applyTerrainLayout(layoutedNodes, layoutedEdges, options);
+  if (mode === 'matrix') return applyMatrixMode(layoutedNodes, layoutedEdges);
+  if (mode === 'bundle') return applyBundleLayout(layoutedNodes, layoutedEdges, options);
   return applyRadarLayout(layoutedNodes, layoutedEdges, options);
 }
 
@@ -202,6 +213,64 @@ function applyTimelineLayout(
     node.position = {
       x: Math.round((index - (nonEvents.length - 1) / 2) * 150),
       y: index % 2 === 0 ? -60 : 240,
+    };
+  });
+
+  return { nodes, edges };
+}
+
+function applyMatrixMode(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  // Matrix layout: nodes listed vertically on the left, with row/col positions for cells
+  const ranked = rankNodesByImportance(nodes, edges).map(item => item.node);
+  const cellSize = 28;
+  const labelOffset = 120;
+  ranked.forEach((node, index) => {
+    node.position = {
+      x: -labelOffset,
+      y: index * cellSize,
+    };
+  });
+  return { nodes, edges };
+}
+
+function applyBundleLayout(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  options: LayoutOptions,
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  // Circular bundle: nodes on a circle, sorted by cluster
+  const topic = findCenterNode(nodes, options.centerNodeId);
+  if (topic) topic.position = CENTER;
+
+  const nonTopic = nodes.filter(n => n.id !== topic?.id);
+  const byCluster = new Map<string, GraphNode[]>();
+  nonTopic.forEach(node => {
+    const cid = node.data.clusterId || '_uncategorized';
+    if (!byCluster.has(cid)) byCluster.set(cid, []);
+    byCluster.get(cid)!.push(node);
+  });
+
+  // Sort clusters: put uncategorized last
+  const clusterOrder = [...byCluster.entries()]
+    .sort(([a], [b]) => {
+      if (a === '_uncategorized') return 1;
+      if (b === '_uncategorized') return -1;
+      return 0;
+    });
+
+  const allNodes = clusterOrder.flatMap(([, group]) =>
+    rankNodesByImportance(group, edges).map(item => item.node)
+  );
+
+  const radius = Math.max(200, allNodes.length * 12);
+  allNodes.forEach((node, index) => {
+    const angle = (index / allNodes.length) * Math.PI * 2 - Math.PI / 2;
+    node.position = {
+      x: Math.round(Math.cos(angle) * radius),
+      y: Math.round(Math.sin(angle) * radius),
     };
   });
 

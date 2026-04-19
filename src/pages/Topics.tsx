@@ -1,6 +1,6 @@
 import type { FormEvent, ChangeEvent } from 'react';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Edit2, Trash2, Loader2, Tags, Upload, FileText, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Tags, Upload, FileText, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import type { Topic } from '../types';
 import TopicForm from '../components/TopicForm';
 import PageHeader from '../components/PageHeader';
@@ -38,11 +38,6 @@ export default function Topics() {
       timeoutsRef.current.forEach(clearTimeout);
     };
   }, []);
-
-  const safeTimeout = (fn: () => void, ms: number) => {
-    const id = setTimeout(() => { if (mountedRef.current) fn(); }, ms);
-    timeoutsRef.current.push(id);
-  };
 
   // Form state
   const [formData, setFormData] = useState({
@@ -225,21 +220,21 @@ export default function Topics() {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="主题追踪" description="管理技术追踪主题，查看文档，设置优先级和关键词">
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#888]" />
           <input
             type="text"
             placeholder="搜索主题..."
-            className="pl-9 pr-4 py-2 bg-[#F7F7F7] rounded-full text-sm w-56 focus:bg-white transition-all"
+            className="pl-9 pr-4 py-2 bg-[#F7F7F7] rounded-full text-sm w-full sm:w-56 focus:bg-white transition-all"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
         </div>
         <button
           onClick={openCreateModal}
-          className={`flex items-center gap-2 ${BTN_PRIMARY}`}
+          className={`flex items-center justify-center gap-2 ${BTN_PRIMARY}`}
         >
           <Plus className="w-4 h-4" />
           新建主题
@@ -301,7 +296,7 @@ export default function Topics() {
                   )}
 
                   {/* Actions */}
-                  <div className="flex items-center justify-between pt-3 border-t border-[#1d1d1f]/20">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[#1d1d1f]/20">
                     <button
                       onClick={() => toggleExpand(topic.id)}
                       className="flex items-center gap-1 px-3 py-2 text-xs text-[#888] hover:text-[#1d1d1f] transition-colors"

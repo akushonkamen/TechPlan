@@ -21,8 +21,8 @@ export default function PageHeader({ title, description, children, stats, badge 
       )}
 
       {/* Title section */}
-      <div className="flex items-start justify-between gap-6">
-        <div className="flex-1">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+        <div className="min-w-0 flex-1">
           <h1 className="text-3xl font-extrabold tracking-tight text-[#1d1d1f] leading-[1.1] uppercase">
             {title}
           </h1>
@@ -33,7 +33,7 @@ export default function PageHeader({ title, description, children, stats, badge 
           )}
         </div>
         {children && (
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-3 lg:shrink-0">
             {children}
           </div>
         )}
@@ -41,11 +41,11 @@ export default function PageHeader({ title, description, children, stats, badge 
 
       {/* Stats bar */}
       {stats && stats.length > 0 && (
-        <div className="mt-8 flex items-center gap-8 px-6 py-4 bg-[#F7F7F7] rounded-2xl border border-[#1d1d1f]/60">
+        <div className="mt-8 flex flex-wrap items-center gap-4 sm:gap-8 px-4 sm:px-6 py-4 bg-[#F7F7F7] rounded-2xl border border-[#1d1d1f]/60">
           {stats.map((stat, index) => (
             <div
               key={stat.label}
-              className={index !== stats.length - 1 ? 'pr-8 border-r border-[#1d1d1f]/20' : ''}
+              className={index !== stats.length - 1 ? 'pr-4 sm:pr-8 sm:border-r border-[#1d1d1f]/20' : ''}
             >
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-extrabold text-[#1d1d1f] leading-none tracking-tight">

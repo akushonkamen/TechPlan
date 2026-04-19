@@ -41,7 +41,7 @@ export default function OptimizationConfigForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className={`${CARD} p-6 space-y-4`}>
+    <form onSubmit={handleSubmit} className={`${CARD} p-5 sm:p-6 space-y-4`}>
       <div>
         <label className={LABEL}>评估标准</label>
         <input
@@ -54,7 +54,7 @@ export default function OptimizationConfigForm({
         <p className="text-xs text-[#888] mt-1">用逗号分隔多个评估维度</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className={LABEL}>最大迭代次数</label>
           <input

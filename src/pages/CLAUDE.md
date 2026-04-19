@@ -49,7 +49,7 @@ handleCollect(topic):
 **Purpose**: Visualize entity relationships
 
 **Features**:
-- ReactFlow graph visualization
+- Custom SVG graph visualization
 - Node/edge filtering with highlight-first search
 - Deterministic terrain layout with focus, timeline, and grid modes
 - LLM-backed graph sensemaking clusters with fallback
@@ -98,7 +98,7 @@ handleCollect(topic):
 **Purpose**: System configuration
 
 **Features**:
-- Neo4j connection settings
+- Local graph database status
 - Skill configuration
 - Scheduler settings
 - User preferences
@@ -159,7 +159,7 @@ const fetchPage = async (p: number) => {
 ## Data Flow
 
 ```
-User Action → fetch() → Backend API → SQLite/Neo4j → Response → setState() → Re-render
+User Action → fetch() → Backend API → SQLite/Kuzu → Response → setState() → Re-render
 ```
 
 ## WebSocket Integration

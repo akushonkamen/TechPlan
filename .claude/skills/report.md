@@ -404,6 +404,11 @@ db.serialize(() => {
 - [ ] 实体名称统一规范
 - [ ] 无歧义表述
 
+### 5e. 置信度校验
+- [ ] 信号级 `signals[].confidence` 与证据数量一致：2+ sources → >= 0.8, 1 source → 0.5-0.7
+- [ ] 无 signal confidence > 0.9（保留不确定性空间）
+- [ ] `meta.confidence` 与数据覆盖一致：documents >= 10 → "high", 5-9 → "medium", <5 → "low"
+
 ---
 
 ## 第六阶段：图谱关联准备

@@ -18,6 +18,7 @@ import { validateReportOutput } from "./src/schemas/report.js";
 import { validateExtractionOutput } from "./src/schemas/extraction.js";
 import { SchedulerService } from "./src/scheduler.js";
 import { getKuzuConnection, kuzuQuery, closeKuzu } from "./src/db/kuzu.js";
+import { computeStatistics, findShortestPath, computePageRank, detectCommunities, predictLinks, detectAnomalies, extractSubgraph, findCrossTopicEntities } from "./src/lib/graphAnalysis.js";
 import { GRAPH_RELATION_TYPES, normalizeGraphRelationType } from "./src/types/graph.js";
 import { GraphSensemakingService } from "./src/services/graphSensemaking.js";
 
@@ -142,7 +143,7 @@ async function startServer() {
   });
 
   // Initialize Kuzu graph database
-  const kuzuConn = await getKuzuConnection();
+  await getKuzuConnection();
   console.log('[Kuzu] Graph database initialized');
 
   // Create tables if they don't exist
@@ -534,41 +535,7 @@ async function startServer() {
   }
 
   /**
-   * Generate content fingerprint using crypto.createHash
-   * Creates a SHA-256 hash of normalized content for deduplication
-   * @param content - The content to fingerprint (title, url, or full content)
-   * @returns Hex string hash
-   */
-  function generateFingerprint(content: string): string {
-    const normalized = content
-      .toLowerCase()
-      .trim()
-      // Normalize whitespace
-      .replace(/\s+/g, ' ')
-      // Remove common tracking parameters
-      .replace(/[?&](utm_[^&]*|ref=[^&]*|source=[^&]*|fbclid=[^&]*|gclid=[^&]*)/gi, '')
-      // Remove trailing slashes
-      .replace(/\/+$/, '');
-
-    return crypto.createHash('sha256').update(normalized, 'utf8').digest('hex');
-  }
-
-  /**
-   * Extract domain from URL for rate limiting and grouping
-   * @param url - The URL to extract domain from
-   * @returns Domain name or null
-   */
-  function extractDomain(url: string): string | null {
-    try {
-      const urlObj = new URL(url);
-      return urlObj.hostname.replace(/^www\./, '');
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Compute deduplication hash for a document (legacy, uses generateFingerprint now)
+   * Compute deduplication hash for a document.
    * Hash is based on normalized URL + title to identify duplicates
    */
   function computeDedupHash(sourceUrl: string | null, title: string): string {
@@ -680,7 +647,7 @@ async function startServer() {
 
   // ===== Topics CRUD =====
 
-  app.get("/api/topics", async (req, res) => {
+  app.get("/api/topics", async (_req, res) => {
     try {
       const rows = await db.all("SELECT * FROM topics ORDER BY createdAt DESC");
       // Parse JSON arrays back to arrays
@@ -793,7 +760,7 @@ async function startServer() {
    * GET /api/dashboard/stats
    * 获取仪表盘统计数据
    */
-  app.get("/api/dashboard/stats", async (req, res) => {
+  app.get("/api/dashboard/stats", async (_req, res) => {
     try {
       const activeTopicsCount = await db.get("SELECT COUNT(*) as count FROM topics");
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -834,7 +801,7 @@ async function startServer() {
    * GET /api/dashboard/trend
    * 获取采集趋势数据（最近7天）
    */
-  app.get("/api/dashboard/trend", async (req, res) => {
+  app.get("/api/dashboard/trend", async (_req, res) => {
     try {
       const trendData = [];
       const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -872,7 +839,7 @@ async function startServer() {
    * GET /api/dashboard/topic-distribution
    * 获取主题证据分布
    */
-  app.get("/api/dashboard/topic-distribution", async (req, res) => {
+  app.get("/api/dashboard/topic-distribution", async (_req, res) => {
     try {
       const distribution = await db.all(`
         SELECT t.name, COUNT(d.id) as value
@@ -895,7 +862,7 @@ async function startServer() {
    * 获取最新预警列表 - 按发布时间排序，显示"发布于X小时前"
    * 优先级: breaking news → developing stories → trending topics
    */
-  app.get("/api/dashboard/alerts", async (req, res) => {
+  app.get("/api/dashboard/alerts", async (_req, res) => {
     try {
       // 获取所有高优先级主题的文档，按 published_date 排序
       const alerts = await db.all(`
@@ -970,21 +937,6 @@ async function startServer() {
     }
   });
 
-  function formatTimeAgo(dateStr: string): string {
-    if (!dateStr) return '未知时间';
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 60) return `${diffMins}分钟前`;
-    if (diffHours < 24) return `${diffHours}小时前`;
-    if (diffDays < 7) return `${diffDays}天前`;
-    return date.toLocaleDateString('zh-CN');
-  }
-
   /**
    * Format time ago as "发布于X小时前" (Published X hours ago)
    * Used for activity feed to show published date instead of collected date
@@ -1036,23 +988,6 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to fetch documents:", error);
       res.status(500).json({ error: "Failed to fetch documents" });
-    }
-  });
-
-  app.get("/api/documents/:id", async (req, res) => {
-    try {
-      const row = await db.get("SELECT * FROM documents WHERE id = ?", [req.params.id]);
-      if (!row) {
-        return res.status(404).json({ error: "Document not found" });
-      }
-      const document = {
-        ...row,
-        metadata: safeJsonParse(row.metadata)
-      };
-      res.json(document);
-    } catch (error) {
-      console.error("Failed to fetch document:", error);
-      res.status(500).json({ error: "Failed to fetch document" });
     }
   });
 
@@ -1111,12 +1046,13 @@ async function startServer() {
 
       const usePublished = use_published_date === 'true';
       const dateColumn = usePublished ? 'published_date' : 'collected_date';
+      const metadataSelect = include_metadata === 'true' ? ', metadata' : '';
 
       // Build query with strict time filtering
       const query = `
         SELECT id, title, source, source_url, ${dateColumn} as date,
                published_date, collected_date, substr(content, 1, 500) as excerpt,
-               urgency, relevance_score, freshness_hours
+               urgency, relevance_score, freshness_hours${metadataSelect}
         FROM documents
         WHERE topic_id = ?
           AND ${dateColumn} IS NOT NULL
@@ -1152,6 +1088,23 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to fetch documents by period:", error);
       res.status(500).json({ error: "Failed to fetch documents by period" });
+    }
+  });
+
+  app.get("/api/documents/:id", async (req, res) => {
+    try {
+      const row = await db.get("SELECT * FROM documents WHERE id = ?", [req.params.id]);
+      if (!row) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+      const document = {
+        ...row,
+        metadata: safeJsonParse(row.metadata)
+      };
+      res.json(document);
+    } catch (error) {
+      console.error("Failed to fetch document:", error);
+      res.status(500).json({ error: "Failed to fetch document" });
     }
   });
 
@@ -1390,7 +1343,7 @@ async function startServer() {
     }
   });
 
-  // ===== Graph Data (ReactFlow) =====
+  // ===== Graph Data =====
 
   /**
    * GET /api/topics/:id/scoring
@@ -1399,6 +1352,8 @@ async function startServer() {
   app.get("/api/topics/:id/scoring", requireAdmin, async (req, res) => {
     try {
       const topicId = req.params.id;
+
+      // 1. Basic counts
       const docCount = await db.get("SELECT COUNT(*) as count FROM documents WHERE topic_id = ?", [topicId]);
       const entityCount = await db.get("SELECT COUNT(*) as count FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ?", [topicId]);
       const claimCount = await db.get("SELECT COUNT(*) as count FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ?", [topicId]);
@@ -1408,13 +1363,86 @@ async function startServer() {
       const entities = entityCount?.count || 0;
       const claims = claimCount?.count || 0;
       const events = eventCount?.count || 0;
-      const score = Math.min(100, docs * 5 + entities * 2 + claims * 3 + events * 4);
 
-      let recommendation = '建议增加数据采集量';
-      if (score >= 70) recommendation = '数据充分，可以生成深度分析报告';
-      else if (score >= 40) recommendation = '数据基本充足，建议补充采集后生成报告';
+      // 2. Volume — logarithmic with diminishing returns
+      const totalItems = docs + entities + claims + events;
+      const volume = Math.min(100, Math.round(20 * Math.log2(1 + totalItems)));
 
-      res.json({ score, breakdown: { documents: docs, entities, claims, events }, recommendation });
+      // 3. Diversity — entity type + relation type coverage
+      const entityTypes = await db.get("SELECT COUNT(DISTINCT e.type) as count FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ?", [topicId]);
+      const relationTypes = await db.get("SELECT COUNT(DISTINCT r.relation) as count FROM relations r JOIN documents d ON r.document_id = d.id WHERE d.topic_id = ?", [topicId]);
+      const expectedEntityTypes = 7; // Technology, Organization, Person, Product, Location, TimePeriod, Other
+      const expectedRelationTypes = 10; // develops, competes_with, published_by, uses, invests_in, partners_with, acquires, supports, contradicts, related_to
+      const diversity = Math.min(100, Math.round(
+        ((entityTypes?.count || 0) + (relationTypes?.count || 0)) / (expectedEntityTypes + expectedRelationTypes) * 100
+      ));
+
+      // 4. Quality — confidence-weighted average
+      const confStats = await db.get(`
+        SELECT AVG(e.confidence) as avg_conf,
+               SUM(CASE WHEN e.confidence >= 0.7 THEN 1 ELSE 0 END) as high_conf,
+               COUNT(*) as total
+        FROM entities e JOIN documents d ON e.document_id = d.id WHERE d.topic_id = ?
+      `, [topicId]);
+      const avgConf = confStats?.avg_conf ?? 0.5;
+      const highConfCount = confStats?.high_conf || 0;
+      const totalConf = confStats?.total || 1;
+      const qualityWeighted = totalConf > 0
+        ? (avgConf * (totalConf + highConfCount)) / (totalConf * 2) // high-conf items count 2x
+        : 0.5;
+      const quality = Math.min(100, Math.round(qualityWeighted * 100));
+
+      // 5. Freshness — days since newest document
+      const newestDoc = await db.get("SELECT MAX(created_at) as newest FROM documents WHERE topic_id = ?", [topicId]);
+      let freshness = 0;
+      if (newestDoc?.newest) {
+        const daysSince = (Date.now() - new Date(newestDoc.newest).getTime()) / (1000 * 60 * 60 * 24);
+        freshness = Math.max(0, Math.round(100 - daysSince * 2));
+      }
+
+      // 6. Connectivity — entities with relations / total entities
+      const connectedEntities = await db.get(`
+        SELECT COUNT(DISTINCT e.text) as count FROM entities e
+        JOIN documents d ON e.document_id = d.id
+        WHERE d.topic_id = ? AND (
+          e.text IN (SELECT r.source_text FROM relations r JOIN documents d2 ON r.document_id = d2.id WHERE d2.topic_id = ?)
+          OR e.text IN (SELECT r.target_text FROM relations r JOIN documents d2 ON r.document_id = d2.id WHERE d2.topic_id = ?)
+        )
+      `, [topicId, topicId, topicId]);
+      const connectivity = Math.min(100, Math.round(
+        ((connectedEntities?.count || 0) / Math.max(1, entities)) * 100
+      ));
+
+      // 7. Overall score — weighted average of dimensions
+      const score = Math.round(
+        volume * 0.20 +
+        diversity * 0.25 +
+        quality * 0.25 +
+        freshness * 0.15 +
+        connectivity * 0.15
+      );
+
+      // 8. Grade
+      const grade = score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : score >= 20 ? 'D' : 'F';
+
+      // 9. Recommendation
+      const weaknesses: string[] = [];
+      if (volume < 40) weaknesses.push('增加数据采集量');
+      if (diversity < 40) weaknesses.push('扩展实体和关系类型覆盖');
+      if (quality < 50) weaknesses.push('提高提取置信度');
+      if (freshness < 30) weaknesses.push('补充近期文档');
+      if (connectivity < 30) weaknesses.push('加强实体关联');
+      const recommendation = weaknesses.length === 0
+        ? '数据充分，可以生成深度分析报告'
+        : `数据${grade >= 'C' ? '基本' : ''}可用，建议：${weaknesses.join('、')}`;
+
+      res.json({
+        score,
+        grade,
+        dimensions: { volume, diversity, quality, freshness, connectivity },
+        breakdown: { documents: docs, entities, claims, events },
+        recommendation,
+      });
     } catch (error) {
       res.status(500).json({ error: "Failed to compute scoring" });
     }
@@ -1426,7 +1454,7 @@ async function startServer() {
    * GET /api/graph/status
    * 获取图数据库状态
    */
-  app.get("/api/graph/status", async (req, res) => {
+  app.get("/api/graph/status", async (_req, res) => {
     try {
       const entityCount = await db.get("SELECT COUNT(*) as count FROM entities");
       const relCount = await db.get("SELECT COUNT(*) as count FROM relations");
@@ -1511,7 +1539,8 @@ async function startServer() {
 
         const entities = await db.all(`
           SELECT e.text, e.type, COUNT(DISTINCT e.document_id) as doc_count,
-                 MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen
+                 MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen,
+                 0.6 * MAX(e.confidence) + 0.4 * MIN(MAX(e.confidence), MIN(1.0, COUNT(DISTINCT e.document_id) * 0.25)) as agg_confidence
           FROM entities e JOIN documents d ON e.document_id = d.id
           WHERE d.topic_id = ?
           GROUP BY e.text ORDER BY doc_count DESC LIMIT 80
@@ -1520,18 +1549,20 @@ async function startServer() {
         const entityTexts = new Set(entities.map(e => e.text));
         for (const ent of entities) {
           const nid = entityNodeId(ent.text);
-          nodes.push({ id: nid, label: ent.text, type: (ent.type || 'entity').toLowerCase(), properties: { docCount: ent.doc_count, confidence: ent.confidence, firstSeen: ent.first_seen } });
+          nodes.push({ id: nid, label: ent.text, type: (ent.type || 'entity').toLowerCase(), properties: { docCount: ent.doc_count, confidence: ent.agg_confidence ?? ent.confidence, firstSeen: ent.first_seen } });
           links.push({ id: `t-${nid}`, source: topicId, target: nid, label: 'HAS_ENTITY', properties: {} });
         }
 
         // Only include inter-entity relations when hop >= 1 (include neighbors)
         if (hop >= 1) {
           const rawRels = await db.all(`
-            SELECT r.source_text, r.target_text, r.relation, MAX(r.confidence) as confidence
+            SELECT r.source_text, r.target_text, r.relation, MAX(r.confidence) as confidence,
+                   COUNT(DISTINCT r.document_id) as doc_count,
+                   0.6 * MAX(r.confidence) + 0.4 * MIN(MAX(r.confidence), MIN(1.0, COUNT(DISTINCT r.document_id) * 0.25)) as agg_confidence
             FROM relations r JOIN documents d ON r.document_id = d.id
             WHERE d.topic_id = ? AND r.source_text != r.target_text
             GROUP BY r.source_text, r.target_text, r.relation
-            ORDER BY confidence DESC LIMIT 60
+            ORDER BY agg_confidence DESC LIMIT 60
           `, [topicId]);
 
           let relIdx = 0;
@@ -1542,7 +1573,7 @@ async function startServer() {
               source: entityNodeId(rel.source_text),
               target: entityNodeId(rel.target_text),
               label: normalizeGraphRelationType(rel.relation),
-              properties: { confidence: rel.confidence },
+              properties: { confidence: rel.agg_confidence ?? rel.confidence },
             });
           }
         }
@@ -1855,17 +1886,19 @@ async function startServer() {
       const related = await db.all(`
         SELECT DISTINCT
           CASE WHEN r.source_text = ? THEN r.target_text ELSE r.source_text END as name,
-          r.relation, MAX(r.confidence) as confidence
+          r.relation, MAX(r.confidence) as confidence,
+          COUNT(DISTINCT r.document_id) as doc_count,
+          0.6 * MAX(r.confidence) + 0.4 * MIN(MAX(r.confidence), MIN(1.0, COUNT(DISTINCT r.document_id) * 0.25)) as agg_confidence
         FROM relations r JOIN documents d ON r.document_id = d.id
         WHERE r.source_text = ? OR r.target_text = ?
         GROUP BY name, r.relation
-        ORDER BY confidence DESC LIMIT 20
+        ORDER BY agg_confidence DESC LIMIT 20
       `, [entityText, entityText, entityText]);
 
       const entities = [];
       for (const r of related) {
         const ent = await db.get("SELECT type, confidence FROM entities WHERE text = ? LIMIT 1", [r.name]);
-        entities.push({ id: entityNodeId(r.name), name: r.name, type: ent?.type || 'entity', relation: r.relation, confidence: r.confidence });
+        entities.push({ id: entityNodeId(r.name), name: r.name, type: ent?.type || 'entity', relation: r.relation, confidence: r.agg_confidence ?? r.confidence });
       }
 
       res.json({ entities, count: entities.length });
@@ -1934,7 +1967,7 @@ async function startServer() {
         JOIN documents d ON r.document_id = d.id
         WHERE d.topic_id = ?
           AND r.created_at > ?
-          AND r.confidence > 0.5
+          AND (r.confidence > 0.5 OR COUNT(DISTINCT r.document_id) >= 2)
           AND r.source_text != r.target_text
         GROUP BY r.source_text, r.target_text, r.relation
         ORDER BY first_seen_date DESC, r.confidence DESC
@@ -2141,12 +2174,14 @@ async function startServer() {
         for (const sourceEntity of currentLevel) {
           // Get relations where this entity is source or target
           const relations = await db.all(`
-            SELECT r.source_text, r.target_text, r.relation, MAX(r.confidence) as confidence
+            SELECT r.source_text, r.target_text, r.relation, MAX(r.confidence) as confidence,
+                   COUNT(DISTINCT r.document_id) as doc_count,
+                   0.6 * MAX(r.confidence) + 0.4 * MIN(MAX(r.confidence), MIN(1.0, COUNT(DISTINCT r.document_id) * 0.25)) as agg_confidence
             FROM relations r
             WHERE (r.source_text = ? OR r.target_text = ?)
             AND r.source_text != r.target_text
             GROUP BY r.source_text, r.target_text, r.relation
-            ORDER BY confidence DESC
+            ORDER BY agg_confidence DESC
             LIMIT 20
           `, [sourceEntity, sourceEntity]);
 
@@ -2183,7 +2218,7 @@ async function startServer() {
                 source: sourceId,
                 target: targetId,
                 label: normalizeGraphRelationType(rel.relation),
-                properties: { confidence: rel.confidence },
+                properties: { confidence: rel.agg_confidence ?? rel.confidence },
               });
               visitedLinks.add(linkId);
             }
@@ -2248,7 +2283,8 @@ async function startServer() {
       // 2. Get deduplicated entities (normalized by LOWER(TRIM))
       const entities = await db.all(`
         SELECT LOWER(TRIM(e.text)) as text, e.type, COUNT(DISTINCT e.document_id) as doc_count,
-               MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen
+               MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen,
+               0.6 * MAX(e.confidence) + 0.4 * MIN(MAX(e.confidence), MIN(1.0, COUNT(DISTINCT e.document_id) * 0.25)) as agg_confidence
         FROM entities e JOIN documents d ON e.document_id = d.id
         WHERE d.topic_id = ?
         GROUP BY LOWER(TRIM(e.text)), e.type ORDER BY doc_count DESC LIMIT 200
@@ -2262,7 +2298,7 @@ async function startServer() {
             {
               name: ent.text,
               type: (ent.type || 'entity').toLowerCase(),
-              conf: ent.confidence || 0.5,
+              conf: ent.agg_confidence ?? (ent.confidence || 0.5),
               docs: ent.doc_count || 0,
               first: ent.first_seen || '',
             }
@@ -2288,11 +2324,12 @@ async function startServer() {
       // 5. Create inter-entity relationships (normalized names)
       const rawRels = await db.all(`
         SELECT LOWER(TRIM(r.source_text)) as source_text, LOWER(TRIM(r.target_text)) as target_text,
-               r.relation, MAX(r.confidence) as confidence
+               r.relation, MAX(r.confidence) as confidence,
+               0.6 * MAX(r.confidence) + 0.4 * MIN(MAX(r.confidence), MIN(1.0, COUNT(DISTINCT r.document_id) * 0.25)) as agg_confidence
         FROM relations r JOIN documents d ON r.document_id = d.id
         WHERE d.topic_id = ? AND LOWER(TRIM(r.source_text)) != LOWER(TRIM(r.target_text))
         GROUP BY LOWER(TRIM(r.source_text)), LOWER(TRIM(r.target_text)), r.relation
-        ORDER BY confidence DESC LIMIT 200
+        ORDER BY agg_confidence DESC LIMIT 200
       `, [topicId]);
 
       const entityTextSet = new Set(entityNames);
@@ -2303,7 +2340,7 @@ async function startServer() {
           await kuzuQuery(
             `MATCH (a:Entity {name: $src}), (b:Entity {name: $tgt})
              MERGE (a)-[:${relType} {confidence: $conf}]->(b)`,
-            { src: rel.source_text, tgt: rel.target_text, conf: rel.confidence || 0.5 }
+            { src: rel.source_text, tgt: rel.target_text, conf: rel.agg_confidence ?? (rel.confidence || 0.5) }
           );
           relationshipsCreated++;
         } catch {}
@@ -2362,6 +2399,165 @@ async function startServer() {
     } catch (error: any) {
       console.error("Failed to sync graph:", error);
       res.status(500).json({ error: "Failed to sync graph", details: error?.message });
+    }
+  });
+
+  // ===== Graph Analysis API =====
+
+  /**
+   * GET /api/graph/stats/:topicId
+   * Graph statistics: density, degree, components, diameter, clustering coefficient
+   */
+  app.get("/api/graph/stats/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const graph = await getTopicGraphPayload(topicId);
+      const nodes = graph.nodes.map((n: any) => ({ id: n.id, type: n.type, label: n.label || n.id, properties: n.properties }));
+      const edges = graph.links.map((e: any) => ({ id: e.id, source: e.source, target: e.target, confidence: e.properties?.confidence, type: e.label }));
+      res.json(computeStatistics(nodes, edges));
+    } catch (error: any) {
+      console.error("Failed to compute graph stats:", error);
+      res.status(500).json({ error: "Failed to compute graph stats", details: error?.message });
+    }
+  });
+
+  /**
+   * GET /api/graph/path/:topicId/:sourceId/:targetId
+   * Shortest path between two entities (Dijkstra with confidence weight)
+   */
+  app.get("/api/graph/path/:topicId/:sourceId/:targetId", async (req, res) => {
+    try {
+      const { topicId, sourceId, targetId } = req.params;
+      const graph = await getTopicGraphPayload(topicId);
+      const nodes = graph.nodes.map((n: any) => ({ id: n.id, type: n.type, label: n.label || n.id }));
+      const edges = graph.links.map((e: any) => ({ id: e.id, source: e.source, target: e.target, confidence: e.properties?.confidence }));
+      const result = findShortestPath(nodes, edges, decodeURIComponent(sourceId), decodeURIComponent(targetId));
+      // Enrich path with node labels
+      const nodeMap = new Map(nodes.map((n: any) => [n.id, n]));
+      res.json({ ...result, pathLabels: result.path.map(id => nodeMap.get(id)?.label || id) });
+    } catch (error: any) {
+      console.error("Failed to find path:", error);
+      res.status(500).json({ error: "Failed to find path", details: error?.message });
+    }
+  });
+
+  /**
+   * GET /api/graph/centrality/:topicId
+   * PageRank centrality scores
+   */
+  app.get("/api/graph/centrality/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const graph = await getTopicGraphPayload(topicId);
+      const nodes = graph.nodes.map((n: any) => ({ id: n.id, type: n.type, label: n.label || n.id }));
+      const edges = graph.links.map((e: any) => ({ id: e.id, source: e.source, target: e.target, confidence: e.properties?.confidence }));
+      const topK = Math.min(30, parseInt(req.query.top as string) || 20);
+      res.json(computePageRank(nodes, edges).slice(0, topK));
+    } catch (error: any) {
+      console.error("Failed to compute centrality:", error);
+      res.status(500).json({ error: "Failed to compute centrality", details: error?.message });
+    }
+  });
+
+  /**
+   * GET /api/graph/communities/:topicId
+   * Community detection via label propagation
+   */
+  app.get("/api/graph/communities/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const graph = await getTopicGraphPayload(topicId);
+      const nodes = graph.nodes.map((n: any) => ({ id: n.id, type: n.type, label: n.label || n.id }));
+      const edges = graph.links.map((e: any) => ({ id: e.id, source: e.source, target: e.target, confidence: e.properties?.confidence, type: e.label }));
+      res.json(detectCommunities(nodes, edges));
+    } catch (error: any) {
+      console.error("Failed to detect communities:", error);
+      res.status(500).json({ error: "Failed to detect communities", details: error?.message });
+    }
+  });
+
+  /**
+   * GET /api/graph/predictions/:topicId
+   * Link predictions (Jaccard + Adamic-Adar)
+   */
+  app.get("/api/graph/predictions/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const graph = await getTopicGraphPayload(topicId);
+      const nodes = graph.nodes.map((n: any) => ({ id: n.id, type: n.type, label: n.label || n.id }));
+      const edges = graph.links.map((e: any) => ({ id: e.id, source: e.source, target: e.target, confidence: e.properties?.confidence }));
+      const topK = Math.min(30, parseInt(req.query.top as string) || 15);
+      res.json(predictLinks(nodes, edges, topK));
+    } catch (error: any) {
+      console.error("Failed to predict links:", error);
+      res.status(500).json({ error: "Failed to predict links", details: error?.message });
+    }
+  });
+
+  /**
+   * GET /api/graph/anomalies/:topicId
+   * Anomaly detection: degree outliers, isolated high-confidence, bridge nodes
+   */
+  app.get("/api/graph/anomalies/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const graph = await getTopicGraphPayload(topicId);
+      const nodes = graph.nodes.map((n: any) => ({ id: n.id, type: n.type, label: n.label || n.id }));
+      const edges = graph.links.map((e: any) => ({ id: e.id, source: e.source, target: e.target, confidence: e.properties?.confidence }));
+      res.json(detectAnomalies(nodes, edges));
+    } catch (error: any) {
+      console.error("Failed to detect anomalies:", error);
+      res.status(500).json({ error: "Failed to detect anomalies", details: error?.message });
+    }
+  });
+
+  /**
+   * GET /api/graph/subgraph/:topicId
+   * Extract filtered subgraph by nodeTypes, edgeTypes, minConfidence
+   */
+  app.get("/api/graph/subgraph/:topicId", async (req, res) => {
+    try {
+      const { topicId } = req.params;
+      const graph = await getTopicGraphPayload(topicId);
+      const nodes = graph.nodes.map((n: any) => ({ id: n.id, type: n.type, label: n.label || n.id, properties: n.properties }));
+      const edges = graph.links.map((e: any) => ({ id: e.id, source: e.source, target: e.target, confidence: e.properties?.confidence, type: e.label }));
+      const filter = {
+        nodeTypes: req.query.nodeTypes ? (req.query.nodeTypes as string).split(',') : undefined,
+        edgeTypes: req.query.edgeTypes ? (req.query.edgeTypes as string).split(',') : undefined,
+        minConfidence: req.query.minConfidence ? parseFloat(req.query.minConfidence as string) : undefined,
+        maxConfidence: req.query.maxConfidence ? parseFloat(req.query.maxConfidence as string) : undefined,
+        maxNodes: req.query.maxNodes ? parseInt(req.query.maxNodes as string) : undefined,
+      };
+      res.json(extractSubgraph(nodes, edges, filter));
+    } catch (error: any) {
+      console.error("Failed to extract subgraph:", error);
+      res.status(500).json({ error: "Failed to extract subgraph", details: error?.message });
+    }
+  });
+
+  /**
+   * GET /api/graph/global
+   * Cross-topic entity resolution — find entities appearing across multiple topics
+   */
+  app.get("/api/graph/global", async (_req, res) => {
+    try {
+      const topics = await db.all("SELECT id, name FROM topics") as Array<{ id: string; name: string }>;
+      const topicsData = [];
+      for (const topic of topics) {
+        try {
+          const graph = await getTopicGraphPayload(topic.id);
+          topicsData.push({
+            topicId: topic.id,
+            topicName: topic.name,
+            nodes: graph.nodes.map((n: any) => ({ id: n.id, type: n.type, label: n.label || n.id })),
+            edges: graph.links.map((e: any) => ({ id: e.id, source: e.source, target: e.target })),
+          });
+        } catch { /* skip failed topics */ }
+      }
+      res.json(findCrossTopicEntities(topicsData));
+    } catch (error: any) {
+      console.error("Failed to resolve cross-topic entities:", error);
+      res.status(500).json({ error: "Failed to resolve cross-topic entities", details: error?.message });
     }
   });
 
@@ -2485,11 +2681,11 @@ async function startServer() {
 
         // 添加topic信息
         const reviews = await Promise.all(claims.map(async (claim: any) => {
-          const doc = await db.get("SELECT topic_id, url FROM documents WHERE id = (SELECT document_id FROM claims WHERE id = ?)", [claim.id]);
+          const doc = await db.get("SELECT topic_id, source_url FROM documents WHERE id = (SELECT document_id FROM claims WHERE id = ?)", [claim.id]);
           return {
             ...claim,
             topic_id: doc?.topic_id || '',
-            source_url: doc?.url || '',
+            source_url: doc?.source_url || '',
             topic_name: doc?.topic_id || '未分类',
             reason: ''
           };
@@ -2515,11 +2711,11 @@ async function startServer() {
 
         // 添加topic信息
         const reviews = await Promise.all(entities.map(async (entity: any) => {
-          const doc = await db.get("SELECT topic_id, url FROM documents WHERE id = (SELECT document_id FROM entities WHERE id = ?)", [entity.id]);
+          const doc = await db.get("SELECT topic_id, source_url FROM documents WHERE id = (SELECT document_id FROM entities WHERE id = ?)", [entity.id]);
           return {
             ...entity,
             topic_id: doc?.topic_id || '',
-            source_url: doc?.url || '',
+            source_url: doc?.source_url || '',
             topic_name: doc?.topic_id || '未分类',
             reason: ''
           };
@@ -2562,11 +2758,11 @@ async function startServer() {
         const allItems = [...claims, ...entities];
         const reviews = await Promise.all(allItems.map(async (item: any) => {
           const tableName = item.type === 'claim_review' ? 'claims' : 'entities';
-          const doc = await db.get(`SELECT topic_id, url FROM documents WHERE id = (SELECT document_id FROM ${tableName} WHERE id = ?)`, [item.id]);
+          const doc = await db.get(`SELECT topic_id, source_url FROM documents WHERE id = (SELECT document_id FROM ${tableName} WHERE id = ?)`, [item.id]);
           return {
             ...item,
             topic_id: doc?.topic_id || '',
-            source_url: doc?.url || '',
+            source_url: doc?.source_url || '',
             topic_name: doc?.topic_id || '未分类',
             reason: ''
           };
@@ -2587,9 +2783,16 @@ async function startServer() {
    * GET /api/reviews/stats
    * 获取审核统计信息
    */
-  app.get("/api/reviews/stats", async (req, res) => {
+  app.get("/api/reviews/stats", async (_req, res) => {
     try {
-      const [pendingResult, approvedResult, rejectedResult] = await Promise.all([
+      const [
+        pendingClaimsResult,
+        pendingEntitiesResult,
+        approvedClaimsResult,
+        approvedEntitiesResult,
+        rejectedClaimsResult,
+        rejectedEntitiesResult,
+      ] = await Promise.all([
         db.get("SELECT COUNT(*) as count FROM claims WHERE review_status = 'pending' AND confidence < 0.7"),
         db.get("SELECT COUNT(*) as count FROM entities WHERE review_status = 'pending' AND confidence < 0.7"),
         db.get("SELECT COUNT(*) as count FROM claims WHERE review_status = 'approved'"),
@@ -2598,18 +2801,20 @@ async function startServer() {
         db.get("SELECT COUNT(*) as count FROM entities WHERE review_status = 'rejected'"),
       ]);
 
-      const pendingClaims = (pendingResult as any)?.count || 0;
-      const pendingEntities = (approvedResult as any)?.count || 0;
-      const approvedClaims = (approvedResult as any)?.count || 0;
-      const approvedEntities = (rejectedResult as any)?.count || 0;
-      const rejectedClaims = (rejectedResult as any)?.count || 0;
-      const rejectedEntities = (rejectedResult as any)?.count || 0;
+      const pendingClaims = (pendingClaimsResult as any)?.count || 0;
+      const pendingEntities = (pendingEntitiesResult as any)?.count || 0;
+      const approvedClaims = (approvedClaimsResult as any)?.count || 0;
+      const approvedEntities = (approvedEntitiesResult as any)?.count || 0;
+      const rejectedClaims = (rejectedClaimsResult as any)?.count || 0;
+      const rejectedEntities = (rejectedEntitiesResult as any)?.count || 0;
 
       res.json({
         total: pendingClaims + pendingEntities,
         entityDisambig: pendingEntities,
         claimReview: pendingClaims,
-        conflictResolve: 0
+        conflictResolve: 0,
+        approved: approvedClaims + approvedEntities,
+        rejected: rejectedClaims + rejectedEntities,
       });
     } catch (error) {
       console.error("Failed to fetch review stats:", error);
@@ -3026,7 +3231,7 @@ async function startServer() {
    * GET /api/config
    * 获取当前配置
    */
-  app.get("/api/config", requireAdmin, async (req, res) => {
+  app.get("/api/config", requireAdmin, async (_req, res) => {
     try {
       let config = {
         aiProvider: "openai",
@@ -3039,9 +3244,6 @@ async function startServer() {
         customApiKey: "",
         customBaseUrl: "",
         customModel: "",
-        neo4jUri: "",
-        neo4jUser: "",
-        neo4jPassword: "",
       };
 
       // 从文件读取配置
@@ -3055,9 +3257,6 @@ async function startServer() {
       if (process.env.OPENAI_BASE_URL) config.openaiBaseUrl = process.env.OPENAI_BASE_URL;
       if (process.env.GEMINI_API_KEY) config.geminiApiKey = process.env.GEMINI_API_KEY;
       if (process.env.GEMINI_BASE_URL) config.geminiBaseUrl = process.env.GEMINI_BASE_URL;
-      if (process.env.NEO4J_URI) config.neo4jUri = process.env.NEO4J_URI;
-      if (process.env.NEO4J_USER) config.neo4jUser = process.env.NEO4J_USER;
-      if (process.env.NEO4J_PASSWORD) config.neo4jPassword = process.env.NEO4J_PASSWORD;
 
       // Mask sensitive fields before sending to client
       const mask = (val: string | undefined) => {
@@ -3075,9 +3274,6 @@ async function startServer() {
         customBaseUrl: config.customBaseUrl,
         customModel: config.customModel,
         customApiKey: mask(config.customApiKey),
-        neo4jUri: config.neo4jUri,
-        neo4jUser: config.neo4jUser,
-        neo4jPassword: mask(config.neo4jPassword),
       });
     } catch (error) {
       console.error("Failed to load config:", error);
@@ -3109,9 +3305,6 @@ async function startServer() {
         "customApiKey",
         "customBaseUrl",
         "customModel",
-        "neo4jUri",
-        "neo4jUser",
-        "neo4jPassword",
       ];
 
       for (const key of allowList) {
@@ -3128,9 +3321,6 @@ async function startServer() {
       if (Object.prototype.hasOwnProperty.call(payload, "openaiBaseUrl")) process.env.OPENAI_BASE_URL = String(payload.openaiBaseUrl ?? "");
       if (Object.prototype.hasOwnProperty.call(payload, "geminiApiKey")) process.env.GEMINI_API_KEY = String(payload.geminiApiKey ?? "");
       if (Object.prototype.hasOwnProperty.call(payload, "geminiBaseUrl")) process.env.GEMINI_BASE_URL = String(payload.geminiBaseUrl ?? "");
-      if (Object.prototype.hasOwnProperty.call(payload, "neo4jUri")) process.env.NEO4J_URI = String(payload.neo4jUri ?? "");
-      if (Object.prototype.hasOwnProperty.call(payload, "neo4jUser")) process.env.NEO4J_USER = String(payload.neo4jUser ?? "");
-      if (Object.prototype.hasOwnProperty.call(payload, "neo4jPassword")) process.env.NEO4J_PASSWORD = String(payload.neo4jPassword ?? "");
 
       res.json({ success: true, message: "配置已保存" });
     } catch (error) {
@@ -3717,7 +3907,7 @@ async function startServer() {
   }
 
   // ── Parse markdown summary into basic report structure ──
-  function parseMarkdownReport(markdown: string, params: Record<string, any>): { overview: string; keyPoints: string[]; sections: any[] } | null {
+  function parseMarkdownReport(markdown: string): { overview: string; keyPoints: string[]; sections: any[] } | null {
     if (!markdown || markdown.length < 100) return null;
 
     const lines = markdown.split('\n').map(l => l.trim()).filter(Boolean);
@@ -3918,7 +4108,7 @@ async function startServer() {
           normalizedContent.metrics = nestedContent.metrics ?? {};
         } else {
           // Smart fallback: try to parse markdown summary into report structure
-          const mdReport = parseMarkdownReport(rawStr, params);
+          const mdReport = parseMarkdownReport(rawStr);
           if (mdReport && mdReport.sections.length > 0) {
             normalizedContent.executiveSummary.overview = mdReport.overview || '';
             normalizedContent.executiveSummary.keyPoints = mdReport.keyPoints;
@@ -4317,7 +4507,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

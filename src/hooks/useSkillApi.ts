@@ -43,7 +43,7 @@ export interface OptimizationConfig {
   updated_at?: string;
 }
 
-export interface OptimizationHistoryEntry {
+interface OptimizationHistoryEntry {
   id: string;
   skill_name: string;
   iterations_completed: number;

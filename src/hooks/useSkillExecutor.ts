@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-export interface SkillResult {
+interface SkillResult {
   totalCollected?: number;
   extractionStats?: { entities?: number; relations?: number };
   title?: string;
@@ -10,7 +10,7 @@ export interface SkillResult {
   [key: string]: unknown;
 }
 
-export interface SkillExecutionState {
+interface SkillExecutionState {
   executionId: string | null;
   status: 'idle' | 'running' | 'completed' | 'failed' | 'timeout';
   progress: string[];
@@ -33,7 +33,6 @@ export function useSkillExecutor() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const progressRef = useRef<string[]>([]);
-  const startTimeRef = useRef<number>(0);
 
   const connectWebSocket = useCallback((executionId: string) => {
     return new Promise<void>((resolve) => {

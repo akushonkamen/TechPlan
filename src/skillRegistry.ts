@@ -25,7 +25,7 @@ export interface SkillConfig {
 }
 
 // Backward compatible simple config for existing code
-export interface SimpleSkillConfig {
+interface SimpleSkillConfig {
   name: string;
   description: string;
 }
@@ -209,7 +209,10 @@ export class SkillRegistry {
       return;
     }
 
-    const files = fs.readdirSync(skillsDir).filter(f => f.endsWith('.md'));
+    const files = fs.readdirSync(skillsDir).filter(f => {
+      const lower = f.toLowerCase();
+      return lower.endsWith('.md') && lower !== 'claude.md' && lower !== 'readme.md';
+    });
     for (const file of files) {
       const name = path.basename(file, '.md');
       const filePath = path.join(skillsDir, file);

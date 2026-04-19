@@ -70,6 +70,23 @@ sqlite3 -json database.sqlite "SELECT id, title, content FROM documents WHERE to
 
 字段要求：
 - `confidence` 必须在 `0~1`。
+
+#### 置信度校准标准
+
+给 confidence 赋值时，严格遵循以下标准：
+
+| 分值范围 | 含义 | 使用条件 |
+|----------|------|----------|
+| 0.90-1.00 | 明确事实 | 实体名/关系在文本中直接且无歧义地出现；多个独立段落佐证 |
+| 0.75-0.89 | 高度确信 | 文本明确提及但需要一次推理（如"OpenAI 的 GPT-4" → develops 关系） |
+| 0.55-0.74 | 中等确信 | 需要两步以上推理，或文本表述含糊（如"某大型科技公司"推断为 Organization） |
+| 0.35-0.54 | 低确信 | 间接推断，信息来自上下文暗示而非直接陈述 |
+| 0.00-0.34 | 猜测 | 基于常识或模糊线索的推测，仅用于关系推断 |
+
+**关键原则**：
+- 不要默认给 0.85-0.95。大多数抽取应在 0.55-0.85 范围。
+- 实体名直接出现 → 0.85-0.95；需要消歧 → 0.65-0.80；推断的 → 0.40-0.65。
+- 关系强度：直接陈述"A开发了B" → 0.85+；间接暗示 → 0.55-0.75。
 - `entities[].type` 仅允许：`Technology|Organization|Person|Product|Location|TimePeriod|Other`。
 - `relations[].relation` 仅允许：`develops|competes_with|published_by|uses|invests_in|partners_with|acquires|supports|contradicts|related_to`。
 - `claims[].polarity` 仅允许：`positive|negative|neutral`。

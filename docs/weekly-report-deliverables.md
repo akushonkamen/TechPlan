@@ -2,6 +2,9 @@
 
 > 创建日期：2026-03-30
 > 版本：v1.0
+> 状态：历史交付记录，非当前实现清单
+
+> 注意：本文记录早期周报方案交付物，其中提到的部分服务和表已经没有对应运行时代码。当前实现以 `server.ts`、`.claude/skills/report.md`、`src/services/reportService.ts` 中仍存在的逻辑为准。
 
 ---
 
@@ -11,14 +14,14 @@
 
 | 文档名称 | 路径 | 说明 |
 |----------|------|------|
-| 周报生成链路设计方案 | [docs/weekly-report-pipeline-design.md](file:///home/yalun/Dev/TechPlan/docs/weekly-report-pipeline-design.md) | 完整的设计方案，包含需求分析、数据采集、图谱关联、内容生成、审核发布等所有环节 |
-| 周报生成流程图 | [docs/weekly-report-flowchart.md](file:///home/yalun/Dev/TechPlan/docs/weekly-report-flowchart.md) | 详细的流程图，包括整体流程、图谱关联流程、状态流转、数据流向、API 调用序列 |
+| 周报生成链路设计方案 | [docs/weekly-report-pipeline-design.md](weekly-report-pipeline-design.md) | 历史设计方案，包含需求分析、数据采集、图谱关联、内容生成、审核发布等规划环节 |
+| 周报生成流程图 | [docs/weekly-report-flowchart.md](weekly-report-flowchart.md) | 历史流程图，包括整体流程、图谱关联流程、状态流转、数据流向、API 调用序列 |
 
 ### 1.2 技能模板
 
 | 技能名称 | 路径 | 版本 | 说明 |
 |----------|------|------|------|
-| 咨询级报告生成 | [.claude/skills/report.md](file:///home/yalun/Dev/TechPlan/.claude/skills/report.md) | v3.0.0 | 六阶段生成流程，包含数据收集、信号识别、分析框架、内容生成、质量检查、图谱关联 |
+| 咨询级报告生成 | [.claude/skills/report.md](../.claude/skills/report.md) | v3.0.0 | 六阶段生成流程，包含数据收集、信号识别、分析框架、内容生成、质量检查、图谱关联 |
 
 ---
 
@@ -26,27 +29,18 @@
 
 ### 2.1 数据库迁移
 
-**文件**: [src/services/reportService.ts](file:///home/yalun/Dev/TechPlan/src/services/reportService.ts)
+**文件**: [src/services/reportService.ts](../src/services/reportService.ts)
 
-新增表结构：
-- `report_templates` - 报告模板表
-- `report_reviews` - 报告审核记录表
-- `report_feedback` - 报告反馈表
-- `report_graph_links` - 报告图谱关联表
-- `report_versions` - 报告版本历史表
+当前实现没有创建报告扩展表；早期规划中的 `report_templates`、`report_reviews`、`report_feedback`、`report_graph_links`、`report_versions` 已从运行时迁移中移除。
 
 更新 `reports` 表字段：
 - `status` - 报告状态（draft/published）
-- `version` - 版本号
-- `template_id` - 模板ID
 - `review_status` - 审核状态
-- `published_at` - 发布时间
-- `published_by` - 发布人
 - `period_start` / `period_end` - 报告周期
 
 ### 2.2 报告审核服务
 
-**文件**: [src/services/reportReviewService.ts](file:///home/yalun/Dev/TechPlan/src/services/reportReviewService.ts)
+状态：早期规划，当前仓库没有 `src/services/reportReviewService.ts`。
 
 功能：
 - 自动化审核（10项检查规则）
@@ -65,7 +59,7 @@
 
 ### 2.3 报告图谱关联服务
 
-**文件**: [src/services/reportGraphService.ts](file:///home/yalun/Dev/TechPlan/src/services/reportGraphService.ts)
+状态：早期规划，当前仓库没有 `src/services/reportGraphService.ts`。
 
 功能：
 - `buildGraphLinks()` - 构建报告与图谱的关联
@@ -303,11 +297,8 @@ interface ReportContentV2 {
 ### 7.1 单元测试
 
 ```bash
-# 测试审核服务
-npm test -- reportReviewService.test.ts
-
-# 测试图谱关联服务
-npm test -- reportGraphService.test.ts
+# 运行当前测试套件
+npm run test -- --run
 ```
 
 ### 7.2 集成测试

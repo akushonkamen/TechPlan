@@ -70,12 +70,12 @@ export default function SkillVersionHistory({
   if (!isOpen) return null;
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center ${MODAL_BACKDROP}`}>
+    <div className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center ${MODAL_BACKDROP}`}>
       {/* Modal */}
-      <div className={`${MODAL_CONTAINER} w-full max-w-lg mx-4 animate-scale-in`}>
+      <div className={`${MODAL_CONTAINER} w-full max-w-lg animate-scale-in`}>
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-[#1d1d1f]/20">
-          <h2 className="text-lg font-semibold text-[#1d1d1f]">版本历史 — {displayName}</h2>
+        <div className="flex items-start justify-between gap-3 p-5 sm:p-6 border-b border-[#1d1d1f]/20">
+          <h2 className="text-lg font-semibold text-[#1d1d1f] min-w-0">版本历史 — {displayName}</h2>
           <button
             onClick={onClose}
             className="p-1.5 text-[#888] hover:text-[#1d1d1f] hover:bg-[#1d1d1f]/5 rounded-full transition-all"
@@ -85,7 +85,7 @@ export default function SkillVersionHistory({
         </div>
 
         {/* Content */}
-        <div className="p-6 max-h-[60vh] overflow-y-auto">
+        <div className="p-5 sm:p-6 max-h-[60vh] overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-6 h-6 text-[#2A5A6B] animate-spin" />
@@ -97,7 +97,7 @@ export default function SkillVersionHistory({
               {versions.map((v) => (
                 <div
                   key={v.id}
-                  className="flex items-center justify-between p-4 bg-[#E8E8E8] rounded-xl"
+                  className="flex flex-col gap-3 p-4 bg-[#E8E8E8] rounded-xl sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">

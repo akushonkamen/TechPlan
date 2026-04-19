@@ -10,11 +10,11 @@ TechPlan is a full-stack technology intelligence platform that tracks technical 
 |-------|------------|
 | **Frontend** | React 19, TypeScript, Vite, Tailwind CSS v4 |
 | **Backend** | Express, Node.js |
-| **Database** | SQLite (primary), Neo4j (optional graph DB) |
+| **Database** | SQLite (primary), Kuzu (local graph cache) |
 | **AI** | Claude CLI with stream-json output |
 | **Real-time** | WebSocket (ws) |
 | **Charts** | Recharts |
-| **Graph** | ReactFlow |
+| **Graph** | Custom SVG canvas |
 
 ## Quick Start
 
@@ -47,7 +47,7 @@ TechPlan/
 │   ├── services/        # API client functions
 │   ├── hooks/           # Custom React hooks
 │   ├── schemas/         # Validation schemas
-│   ├── db/              # Database client (Neo4j)
+│   ├── db/              # Database client (Kuzu)
 │   ├── skillExecutor.ts  # Claude CLI execution engine
 │   ├── skillRegistry.ts  # Skill loader from markdown
 │   ├── scheduler.ts      # Report scheduling
@@ -167,9 +167,6 @@ No custom API needed - LLMs can query directly.
 | `PORT` | 3000 | Server port |
 | `ADMIN_TOKEN` | - | Admin authentication |
 | `MAX_UPLOAD_SIZE_MB` | 10 | File upload limit |
-| `NEO4J_URI` | - | Neo4j connection (optional) |
-| `NEO4J_USERNAME` | - | Neo4j auth |
-| `NEO4J_PASSWORD` | - | Neo4j auth |
 
 ## Database Schema
 
@@ -185,7 +182,7 @@ No custom API needed - LLMs can query directly.
 | `events` | Timeline events |
 | `reports` | Generated reports |
 
-### Neo4j Graph (Optional)
+### Kuzu Graph Cache
 
 - **Nodes**: Topic, Entity, Event, Claim, Document, Person, Organization
 - **Relationships**: DEVELOPS, COMPETES_WITH, PUBLISHED_BY, USES, INVESTS_IN

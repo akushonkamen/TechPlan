@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Target, CheckCircle2, TrendingUp, TrendingDown, AlertTriangle, Users, Zap, Clock, Network } from 'lucide-react';
+import { Target, CheckCircle2, TrendingUp, AlertTriangle, Users, Zap, Clock, Network } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
@@ -139,12 +139,12 @@ export default function DecisionSupport() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="决策分析" description="多维度技术评估、友商追踪与决策建议">
         <select
           value={selectedTopic || ''}
           onChange={e => setSelectedTopic(e.target.value)}
-          className="px-3.5 py-2 bg-[#F7F7F7] rounded-[980px] text-sm focus:bg-[#1d1d1f]/5 transition-all"
+          className="w-full px-3.5 py-2 bg-[#F7F7F7] rounded-[980px] text-sm focus:bg-[#1d1d1f]/5 transition-all sm:w-auto"
         >
           {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
@@ -153,13 +153,13 @@ export default function DecisionSupport() {
       {scoringCard && (
         <>
           {/* Overall score */}
-          <div className={`${CARD} p-8`}>
-            <div className="flex items-center justify-between mb-5">
-              <div>
+          <div className={`${CARD} p-5 sm:p-8`}>
+            <div className="flex flex-col gap-4 mb-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <h3 className="text-base font-medium text-[#1d1d1f]">综合评分</h3>
                 <p className="text-sm text-[#888] mt-0.5">{scoringCard.direction}</p>
               </div>
-              <div className="text-right">
+              <div className="text-left sm:text-right">
                 <div className={`text-5xl font-semibold tracking-tight ${getScoreColor(scoringCard.overallScore)}`}>
                   {scoringCard.overallScore}
                 </div>
@@ -167,7 +167,7 @@ export default function DecisionSupport() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex flex-wrap items-center gap-3 mb-4">
               <span className={`px-3 py-1 rounded-full text-xs font-medium ${recommendationLabels[scoringCard.recommendation]?.color || 'bg-[#F7F7F7] text-[#888]'}`}>
                 {recommendationLabels[scoringCard.recommendation]?.label || scoringCard.recommendation}
               </span>
@@ -180,7 +180,7 @@ export default function DecisionSupport() {
           </div>
 
           {/* Dimension scores */}
-          <div className={`${CARD} p-8`}>
+          <div className={`${CARD} p-5 sm:p-8`}>
             <h3 className="text-base font-medium text-[#1d1d1f] mb-5">维度评分</h3>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {scoreDimensions.map(({ key, label, icon: Icon }) => {
@@ -203,7 +203,7 @@ export default function DecisionSupport() {
 
           {/* Evidence with graph links */}
           {scoringCard.evidence.length > 0 && (
-            <div className={`${CARD} p-8`}>
+          <div className={`${CARD} p-5 sm:p-8`}>
               <h3 className="text-base font-medium text-[#1d1d1f] mb-4">支持证据</h3>
               <div className="space-y-2">
                 {scoringCard.evidence.map((ev, i) => (
@@ -231,13 +231,13 @@ export default function DecisionSupport() {
       <div className={`${CARD} p-8`}>
         <h3 className="text-base font-medium text-[#1d1d1f] mb-1">友商追踪</h3>
         <p className="text-sm text-[#888] mb-4">追踪竞品组织的技术路线图、开源仓库和新闻动态，追踪完成后图谱自动同步</p>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <input
             type="text"
             value={competitorOrg}
             onChange={e => setCompetitorOrg(e.target.value)}
             placeholder="输入组织名称，如 OpenAI, Google DeepMind..."
-            className={`flex-1 ${INPUT}`}
+            className={`min-w-0 flex-1 ${INPUT}`}
             onKeyDown={e => e.key === 'Enter' && handleCompetitorTrack()}
           />
           <SkillButton onClick={handleCompetitorTrack} status={trackStatus} disabled={!competitorOrg.trim()}>

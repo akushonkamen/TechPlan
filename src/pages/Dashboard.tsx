@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, Area, AreaChart, CartesianGrid } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart, CartesianGrid } from 'recharts';
 import { Activity, FileText, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import StatCard from '../components/StatCard';
 import { CARD, SPINNER, SECTION_TITLE } from '../lib/design';
-import { axisStyle, CHART_COLORS, ChartTooltip, CHART_TITLE, EmptyChart } from '../lib/charts.tsx';
+import { axisStyle, ChartTooltip, CHART_TITLE, EmptyChart } from '../lib/charts.tsx';
 
 interface DashboardStats {
   activeTopics: number;
@@ -75,7 +75,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div className="max-w-7xl mx-auto space-y-5 animate-fade-in">
       <PageHeader
         title="概览"
         description="技术情报追踪 - 突发优先，时效相关"

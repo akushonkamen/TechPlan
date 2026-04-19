@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, CheckCircle2, XCircle, Terminal, Clock, Activity, Filter, X } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Terminal, Clock, Activity } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import { CARD, SPINNER } from '../lib/design';
@@ -193,7 +193,7 @@ export default function Tasks() {
   }, [running.length]);
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="任务中心" description="查看和管理所有任务执行状态" />
 
       {/* Running tasks */}
@@ -209,15 +209,15 @@ export default function Tasks() {
               <div key={exec.id} className={`${CARD} overflow-hidden`}>
                 {/* Card header */}
                 <div
-                  className="px-5 py-4 flex items-center justify-between cursor-pointer hover:bg-[#F7F7F7]/50 transition-colors"
+                  className="px-4 py-4 flex flex-col gap-3 cursor-pointer hover:bg-[#F7F7F7]/50 transition-colors sm:px-5 sm:flex-row sm:items-center sm:justify-between"
                   onClick={() => setActiveId(isActive ? null : exec.id)}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${style.bg}`}>
                       <Icon className={`w-4.5 h-4.5 ${style.text} ${exec.status === 'running' ? 'animate-spin' : ''}`} />
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-[#1d1d1f]">{skillLabel(exec.skill_name)}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full ${style.bg} ${style.text}`}>
                           {STATUS_LABELS[exec.status] || exec.status}
@@ -231,7 +231,7 @@ export default function Tasks() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 sm:justify-end">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCancel(exec.id); }}
                       className="text-xs text-[#A0453A] hover:text-[#A0453A]/80 px-3 py-1.5 rounded-[980px] border border-[#A0453A]/30 transition-colors"
@@ -277,9 +277,9 @@ export default function Tasks() {
 
       {/* History section */}
       <div>
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
           <h3 className="text-sm font-semibold text-[#1d1d1f]">历史记录</h3>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {(['all', 'running', 'completed', 'failed'] as FilterTab[]).map(tab => (
               <button
                 key={tab}
@@ -316,19 +316,19 @@ export default function Tasks() {
               return (
                 <div key={exec.id} className={`${CARD} overflow-hidden`}>
                   <div
-                    className="px-5 py-3.5 flex items-center justify-between cursor-pointer hover:bg-[#F7F7F7]/50 transition-colors"
+                    className="px-4 py-3.5 flex flex-col gap-3 cursor-pointer hover:bg-[#F7F7F7]/50 transition-colors sm:px-5 lg:flex-row lg:items-center lg:justify-between"
                     onClick={() => setExpandedId(isExpanded ? null : exec.id)}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <Icon className={`w-4 h-4 ${style.text} ${exec.status === 'running' ? 'animate-spin' : ''}`} />
-                      <div>
-                        <div className="flex items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-medium text-[#1d1d1f]">{skillLabel(exec.skill_name)}</span>
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${style.bg} ${style.text}`}>
                             {STATUS_LABELS[exec.status] || exec.status}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5 text-xs text-[#888]">
+                        <div className="flex flex-wrap items-center gap-2 mt-0.5 text-xs text-[#888]">
                           <span>{new Date(exec.started_at).toLocaleString('zh-CN')}</span>
                           <span className="text-[#888]">·</span>
                           <span>{formatDuration(exec.started_at, exec.completed_at)}</span>
@@ -340,12 +340,12 @@ export default function Tasks() {
 
                     {/* Quick result summary for completed */}
                     {exec.status === 'completed' && exec.result && (
-                      <span className="text-xs text-[#5B7553] font-medium truncate max-w-xs">
+                      <span className="text-xs text-[#5B7553] font-medium truncate lg:max-w-xs">
                         执行成功
                       </span>
                     )}
                     {exec.status === 'failed' && exec.error && (
-                      <span className="text-xs text-[#A0453A] truncate max-w-xs">
+                      <span className="text-xs text-[#A0453A] truncate lg:max-w-xs">
                         {exec.error.slice(0, 60)}
                       </span>
                     )}
@@ -353,7 +353,7 @@ export default function Tasks() {
 
                   {/* Expanded detail */}
                   {isExpanded && (
-                    <div className="px-5 pb-4 border-t border-[#1d1d1f]/20 animate-fade-in space-y-3 pt-3">
+                    <div className="px-4 pb-4 border-t border-[#1d1d1f]/20 animate-fade-in space-y-3 pt-3 sm:px-5">
                       {/* Params */}
                       {exec.params && (
                         <div>

@@ -165,7 +165,7 @@ export default function ReviewConsole() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="审核台" description="人工复核低置信度抽取结果、实体消歧与矛盾证据">
         <div className="flex items-center gap-3">
           <span className="text-sm text-[#888]">待处理 <span className="bg-[#A0453A]/10 text-[#A0453A] font-semibold px-2 py-0.5 rounded-full">{stats?.total || 0}</span></span>
@@ -181,8 +181,8 @@ export default function ReviewConsole() {
       </PageHeader>
 
       <div className={`${CARD} overflow-hidden`}>
-        <div className="p-4 border-b border-[#1d1d1f]/20">
-          <div className={`inline-flex items-center gap-1 ${SEGMENT_TRACK}`}>
+        <div className="p-4 border-b border-[#1d1d1f]/20 overflow-x-auto">
+          <div className={`inline-flex min-w-max items-center gap-1 ${SEGMENT_TRACK}`}>
             {[
               { key: null as string | null, label: '全部待办' },
               { key: 'entity_disambig', label: `实体消歧 (${stats?.entityDisambig || 0})` },
@@ -212,18 +212,18 @@ export default function ReviewConsole() {
         ) : (
           <div className="divide-y divide-[#1d1d1f]/20">
             {reviews.map((review) => (
-              <div key={review.id} className="p-6 hover:bg-[#1d1d1f]/5 transition-colors">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center gap-3">
+              <div key={review.id} className="p-4 hover:bg-[#1d1d1f]/5 transition-colors sm:p-6">
+                <div className="flex flex-col gap-3 mb-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${getTypeStyle(review.type)}`}>
                       {typeLabels[review.type] || review.type}
                     </span>
                     <span className="text-sm font-medium text-[#1d1d1f]">{review.topic_name || '未分类'}</span>
                     <span className="text-xs text-[#888]">{review.time}</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                     {rejectingId === review.id ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs text-[#A0453A]">确认拒绝？</span>
                         <button
                           onClick={() => { handleReject(review.id); setRejectingId(null); }}
@@ -260,15 +260,15 @@ export default function ReviewConsole() {
 
                 <div className="bg-[#F7F7F7] border border-[#1d1d1f]/30 rounded-xl p-4 mb-3">
                   <p className="text-sm text-[#1d1d1f] font-medium">{review.content}</p>
-                  <div className="mt-3 flex items-center gap-4 text-xs">
-                    <span className="text-[#888] flex items-center gap-1">
+                  <div className="mt-3 flex flex-wrap items-center gap-2 sm:gap-4 text-xs">
+                    <span className="text-[#888] flex min-w-0 items-center gap-1">
                       来源:
                       {review.source_url ? (
                         <a
                           href={review.source_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[#2A5A6B] hover:text-[#1E4A58] hover:underline flex items-center gap-0.5"
+                          className="text-[#2A5A6B] hover:text-[#1E4A58] hover:underline flex min-w-0 items-center gap-0.5"
                         >
                           {review.source} <ExternalLink className="w-3 h-3" />
                         </a>
@@ -306,7 +306,7 @@ export default function ReviewConsole() {
           <h4 className="text-[13px] font-semibold text-[#888] mb-3">最近操作</h4>
           <div className="space-y-2">
             {archivedActions.map((a, i) => (
-              <div key={i} className="flex items-center gap-2 text-sm">
+              <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
                 {a.action === 'approve' ? <Check className="w-3.5 h-3.5 text-[#5B7553]" /> : <X className="w-3.5 h-3.5 text-[#A0453A]" />}
                 <span className="text-[#888]">{a.time}</span>
                 <span className="text-[#1d1d1f]">{a.action === 'approve' ? '通过' : '拒绝'}了</span>

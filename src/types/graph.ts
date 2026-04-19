@@ -1,6 +1,4 @@
-import type { Edge, Node } from 'reactflow';
-
-export const GRAPH_NODE_TYPES = [
+const GRAPH_NODE_TYPES = [
   'topic',
   'technology',
   'product',
@@ -39,8 +37,6 @@ export const GRAPH_RELATION_TYPES = [
 
 export type GraphRelationType = typeof GRAPH_RELATION_TYPES[number];
 
-export type GraphExportFormat = 'json' | 'png';
-
 export type GraphClusterRole = 'anchor' | 'member' | 'bridge' | 'supporting';
 
 export interface GraphSensemakingCluster {
@@ -76,7 +72,7 @@ export interface GraphSensemakingResult {
   error?: string;
 }
 
-export type GraphEdgeVisualType =
+type GraphEdgeVisualType =
   | 'has_entity'
   | 'has_event'
   | 'has_claim'
@@ -85,7 +81,7 @@ export type GraphEdgeVisualType =
   | 'contradicts'
   | 'related_to';
 
-export interface GraphNodeData {
+interface GraphNodeData {
   label: string;
   fullLabel?: string;
   canonicalName?: string;
@@ -99,13 +95,12 @@ export interface GraphNodeData {
   dimmed?: boolean;
   importance?: number;
   recent?: boolean;
-  pulse?: boolean;
   clusterId?: string;
   clusterLabel?: string;
   clusterRole?: GraphClusterRole;
 }
 
-export interface GraphEdgeData {
+interface GraphEdgeData {
   label?: string;
   type: GraphEdgeVisualType;
   relationType?: GraphRelationType;
@@ -114,10 +109,21 @@ export interface GraphEdgeData {
   dimmed?: boolean;
 }
 
-export type GraphNode = Node<GraphNodeData>;
-export type GraphEdge = Edge<GraphEdgeData>;
+export interface GraphNode {
+  id: string;
+  type?: string;
+  position: { x: number; y: number };
+  data: GraphNodeData;
+}
 
-export const RELATION_LABELS: Record<GraphRelationType, string> = {
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  data?: GraphEdgeData;
+}
+
+const RELATION_LABELS: Record<GraphRelationType, string> = {
   HAS_ENTITY: '实体',
   ABOUT: '关于',
   HAS_EVENT: '事件',
@@ -180,10 +186,6 @@ const RELATION_ALIASES: Record<string, GraphRelationType> = {
   EVOLVES_FROM: 'EVOLVES_FROM',
   BENCHMARKS: 'BENCHMARKS',
 };
-
-export const ENTITY_RELATION_TYPES = GRAPH_RELATION_TYPES.filter(
-  rel => !['HAS_ENTITY', 'HAS_EVENT', 'HAS_CLAIM', 'ABOUT'].includes(rel)
-);
 
 export const DEFAULT_VISIBLE_RELATIONS: GraphRelationType[] = [
   'DEVELOPS',

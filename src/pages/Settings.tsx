@@ -3,7 +3,7 @@ import { Save, Eye, EyeOff, Key, AlertCircle, Check, Zap, Database, Cpu, Layers,
 import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
 import { useBilevelOptimization } from '../hooks/useSkills';
-import { useSkillsList, useOptimizationConfig, useOptHistory, type SkillConfig } from '../hooks/useSkillApi';
+import { useSkillsList, useOptimizationConfig, useOptHistory } from '../hooks/useSkillApi';
 import SkillCard from '../components/SkillCard';
 import SkillDetailPanel from '../components/SkillDetailPanel';
 import SkillVersionHistory from '../components/SkillVersionHistory';
@@ -24,9 +24,6 @@ interface Config {
   customApiKey: string;
   customBaseUrl: string;
   customModel: string;
-  neo4jUri?: string;
-  neo4jUser?: string;
-  neo4jPassword?: string;
 }
 
 const MODEL_PRESETS = {
@@ -58,13 +55,9 @@ export default function Settings() {
     customApiKey: '',
     customBaseUrl: '',
     customModel: '',
-    neo4jUri: '',
-    neo4jUser: '',
-    neo4jPassword: '',
   });
 
   const [showApiKey, setShowApiKey] = useState(false);
-  const [showNeo4jPassword, setShowNeo4jPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [testing, setTesting] = useState(false);
@@ -283,34 +276,36 @@ export default function Settings() {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
       <PageHeader title="设置" description="配置 AI 模型、数据库连接和技能优化" />
 
       {/* Tab bar */}
-      <div className={`flex items-center gap-1 ${SEGMENT_TRACK} w-fit`}>
-        {tabs.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-[980px] text-sm font-medium transition-all ${
-              activeTab === tab.key
-                ? SEGMENT_ACTIVE
-                : SEGMENT_INACTIVE
-            }`}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className={`inline-flex min-w-max items-center gap-1 ${SEGMENT_TRACK}`}>
+          {tabs.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-[980px] text-sm font-medium transition-all ${
+                activeTab === tab.key
+                  ? SEGMENT_ACTIVE
+                  : SEGMENT_INACTIVE
+              }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* AI Config Tab */}
       {activeTab === 'ai' && (
         <div className="space-y-5 animate-fade-in">
-          <div className={`${CARD} p-8 space-y-5`}>
+          <div className={`${CARD} p-5 sm:p-8 space-y-5`}>
             <div>
               <label className={LABEL}>模型提供商</label>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {[
                   { value: 'openai' as const, label: 'OpenAI' },
                   { value: 'gemini' as const, label: 'Google Gemini' },
@@ -407,7 +402,7 @@ export default function Settings() {
               </div>
             )}
 
-            <div className="flex items-center gap-3 pt-4 border-t border-[#1d1d1f]/20">
+            <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-[#1d1d1f]/20">
               <button
                 onClick={handleTest}
                 disabled={!getCurrentApiKey() || testing}
@@ -435,40 +430,39 @@ export default function Settings() {
 
       {/* Graph DB Tab */}
       {activeTab === 'graph' && (
-        <div className={`${CARD} p-8 space-y-4 animate-fade-in`}>
-          <p className="text-sm text-[#888]">配置 Neo4j 图数据库连接（可选）。不配置则使用本地存储。</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={LABEL}>连接 URI</label>
-              <input type="text" value={config.neo4jUri} onChange={e => setConfig({ ...config, neo4jUri: e.target.value })} placeholder="bolt://localhost:7687" className={`${INPUT} font-mono`} />
+        <div className={`${CARD} p-5 sm:p-8 space-y-5 animate-fade-in`}>
+          <div>
+            <h3 className="text-lg font-semibold text-[#1d1d1f]">本地图数据库</h3>
+            <p className="mt-2 text-sm text-[#888]">
+              知识图谱以 SQLite 为事实源，Kuzu 作为本地缓存；无需配置远程图数据库连接。
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-[#1d1d1f]/10 p-4">
+              <div className="text-xs uppercase text-[#888]">事实源</div>
+              <div className="mt-1 font-mono text-sm text-[#1d1d1f]">database.sqlite</div>
             </div>
-            <div>
-              <label className={LABEL}>用户名</label>
-              <input type="text" value={config.neo4jUser} onChange={e => setConfig({ ...config, neo4jUser: e.target.value })} placeholder="neo4j" className={INPUT} />
+            <div className="rounded-lg border border-[#1d1d1f]/10 p-4">
+              <div className="text-xs uppercase text-[#888]">图缓存</div>
+              <div className="mt-1 font-mono text-sm text-[#1d1d1f]">database.kuzu</div>
             </div>
           </div>
-          <div className="max-w-sm">
-            <label className={LABEL}>密码</label>
-            <div className="relative">
-              <input type={showNeo4jPassword ? 'text' : 'password'} value={config.neo4jPassword} onChange={e => setConfig({ ...config, neo4jPassword: e.target.value })} placeholder="密码" className={`${INPUT} pr-10 font-mono`} />
-              <button type="button" onClick={() => setShowNeo4jPassword(!showNeo4jPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#888] hover:text-[#1d1d1f]">
-                {showNeo4jPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
+          <p className="text-sm text-[#666]">
+            图谱接口会在 Kuzu 缺少主题数据时后台同步，并立即使用 SQLite fallback 返回结果。
+          </p>
         </div>
       )}
 
       {/* Skills Tab */}
       {activeTab === 'skills' && (
-        <div className="space-y-6 animate-fade-in">
+        <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
           {skillsLoading ? (
             <div className={`${CARD} p-12 text-center text-sm text-[#888]`}>
               加载中...
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {allSkills.map((skill) => (
                   <div key={skill.name}>
                     <SkillCard
@@ -515,7 +509,7 @@ export default function Settings() {
       {/* Optimize Tab */}
       {activeTab === 'optimize' && (
         <div className="space-y-5 animate-fade-in">
-          <div className={`${CARD} p-8 space-y-5`}>
+          <div className={`${CARD} p-5 sm:p-8 space-y-5`}>
             <div>
               <h3 className="text-base font-medium text-[#1d1d1f]">技能优化</h3>
               <p className="text-sm text-[#888] mt-1">通过双层优化循环自动提升技能质量</p>
@@ -570,12 +564,12 @@ export default function Settings() {
 
           {/* Optimization History */}
           {!optHistoryLoading && optHistory.length > 0 && (
-            <div className={`${CARD} p-6`}>
+            <div className={`${CARD} p-5 sm:p-6`}>
               <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">优化历史</h4>
               <div className="space-y-3">
                 {optHistory.map((entry) => (
-                  <div key={entry.id} className="flex items-center justify-between py-3 border-b border-[#1d1d1f]/20 last:border-0">
-                    <div className="flex items-center gap-4">
+                  <div key={entry.id} className="flex flex-col gap-2 py-3 border-b border-[#1d1d1f]/20 last:border-0 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-4 min-w-0">
                       <span className={entry.converged ? 'text-[#5B7553]' : 'text-[#A0453A]'}>
                         {entry.converged ? '✓' : '✗'}
                       </span>
@@ -599,14 +593,14 @@ export default function Settings() {
       {/* Scheduler Tab */}
       {activeTab === 'scheduler' && (
         <div className="space-y-5 animate-fade-in">
-          <div className={`${CARD} p-8 space-y-5`}>
+          <div className={`${CARD} p-5 sm:p-8 space-y-5`}>
             <div>
               <h3 className="text-base font-medium text-[#1d1d1f]">定时任务调度器</h3>
               <p className="text-sm text-[#888] mt-1">按主题的采集频率自动触发周报生成</p>
             </div>
 
             {/* Enable/Disable Toggle */}
-            <div className="flex items-center justify-between py-3 border-b border-[#1d1d1f]/20">
+            <div className="flex items-center justify-between gap-4 py-3 border-b border-[#1d1d1f]/20">
               <div>
                 <div className="text-sm font-medium text-[#1d1d1f]">启用调度器</div>
                 <div className="text-xs text-[#888] mt-0.5">
@@ -633,7 +627,7 @@ export default function Settings() {
             {/* Check Interval */}
             <div>
               <label className={LABEL}>检查间隔（分钟）</label>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <input
                   type="number"
                   min={5}
@@ -650,7 +644,7 @@ export default function Settings() {
 
             {/* Status Info */}
             {schedulerStatus && (
-              <div className="grid grid-cols-3 gap-4 py-3 border-t border-[#1d1d1f]/20">
+              <div className="grid grid-cols-1 gap-4 py-3 border-t border-[#1d1d1f]/20 sm:grid-cols-3">
                 <div>
                   <div className="text-xs text-[#888]">运行状态</div>
                   <div className={`text-sm font-medium mt-1 ${schedulerStatus.running ? 'text-[#5B7553]' : 'text-[#888]'}`}>
@@ -678,7 +672,7 @@ export default function Settings() {
           </div>
 
           {/* Pending Topics */}
-          <div className={`${CARD} p-6`}>
+          <div className={`${CARD} p-5 sm:p-6`}>
             <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">待触发主题</h4>
             {schedulerLoading ? (
               <div className="text-sm text-[#888]">加载中...</div>
@@ -687,8 +681,8 @@ export default function Settings() {
             ) : (
               <div className="space-y-3">
                 {schedulerStatus?.pendingTopics.map(topic => (
-                  <div key={topic.topicId} className="flex items-center justify-between py-3 border-b border-[#1d1d1f]/20 last:border-0">
-                    <div>
+                  <div key={topic.topicId} className="flex flex-col gap-2 py-3 border-b border-[#1d1d1f]/20 last:border-0 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
                       <div className="text-sm text-[#1d1d1f]">{topic.topicName}</div>
                       <div className="text-xs text-[#888] mt-0.5">
                         周期: {topic.schedule === 'daily' ? '每日' : topic.schedule === 'weekly' ? '每周' : '每月'}
@@ -704,12 +698,12 @@ export default function Settings() {
 
           {/* Recent Triggers */}
           {(schedulerStatus?.recentTriggers?.length ?? 0) > 0 && (
-            <div className={`${CARD} p-6`}>
+            <div className={`${CARD} p-5 sm:p-6`}>
               <h4 className="text-sm font-medium text-[#1d1d1f] mb-4">最近触发记录</h4>
               <div className="space-y-3">
                 {schedulerStatus?.recentTriggers.slice(0, 10).map((trigger, i) => (
-                  <div key={i} className="flex items-center justify-between py-3 border-b border-[#1d1d1f]/20 last:border-0">
-                    <div>
+                  <div key={i} className="flex flex-col gap-2 py-3 border-b border-[#1d1d1f]/20 last:border-0 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
                       <div className="text-sm text-[#1d1d1f]">{trigger.topicName}</div>
                       <div className="text-xs text-[#888] mt-0.5">
                         {new Date(trigger.triggeredAt).toLocaleString('zh-CN')}

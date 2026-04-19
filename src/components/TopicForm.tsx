@@ -1,6 +1,5 @@
 import type { FormEvent } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import type { Topic } from '../types';
 import { INPUT, LABEL, MODAL_BACKDROP, MODAL_CONTAINER } from '../lib/design';
 
 interface TopicFormProps {
@@ -32,9 +31,9 @@ export default function TopicForm({
   if (!isOpen) return null;
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center ${MODAL_BACKDROP}`}>
-      <div className={`${MODAL_CONTAINER} w-full max-w-2xl overflow-hidden animate-scale-in`}>
-        <div className="px-8 py-5 flex justify-between items-center">
+    <div className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center ${MODAL_BACKDROP}`}>
+      <div className={`${MODAL_CONTAINER} w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto animate-scale-in`}>
+        <div className="px-5 py-5 sm:px-8 flex justify-between items-center">
           <h3 className="text-lg font-semibold text-[#1d1d1f]">
             {mode === 'create' ? '新建技术主题' : '编辑技术主题'}
           </h3>
@@ -47,7 +46,7 @@ export default function TopicForm({
           </button>
         </div>
 
-        <form onSubmit={onSubmit} className="px-8 pb-8 space-y-5">
+        <form onSubmit={onSubmit} className="px-5 pb-6 sm:px-8 sm:pb-8 space-y-5">
           <div>
             <label className={LABEL}>
               主题名称 <span className="text-[#A0453A]">*</span>
@@ -74,7 +73,7 @@ export default function TopicForm({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={LABEL}>优先级</label>
               <select
@@ -131,7 +130,7 @@ export default function TopicForm({
             />
           </div>
 
-          <div className="pt-5 flex justify-end gap-3 border-t border-[#1d1d1f]/20">
+          <div className="pt-5 flex flex-col-reverse gap-3 border-t border-[#1d1d1f]/20 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={onClose}
@@ -142,7 +141,7 @@ export default function TopicForm({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-white bg-[#1d1d1f] rounded-[980px] text-sm font-semibold hover:bg-[#1a1a1a] transition-all disabled:opacity-50 active:scale-[0.97] flex items-center gap-2"
+              className="px-5 py-2 text-white bg-[#1d1d1f] rounded-[980px] text-sm font-semibold hover:bg-[#1a1a1a] transition-all disabled:opacity-50 active:scale-[0.97] flex items-center justify-center gap-2"
               disabled={isSubmitting}
             >
               {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}

@@ -77,7 +77,7 @@ export default function ExecutionHistory() {
   return (
     <div className="space-y-4">
       {/* Filter bar */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Filter className="w-4 h-4 text-[#888]" />
         {(['all', 'completed', 'failed'] as StatusFilter[]).map(f => (
           <button
@@ -101,7 +101,7 @@ export default function ExecutionHistory() {
           <div key={exec.id}>
             <button
               onClick={() => setExpanded(expanded === exec.id ? null : exec.id)}
-              className="w-full flex items-center gap-3 px-5 py-4 hover:bg-[#1d1d1f]/5 transition-colors text-left"
+              className="w-full flex flex-wrap items-center gap-3 px-4 py-4 hover:bg-[#1d1d1f]/5 transition-colors text-left sm:px-5"
             >
               {expanded === exec.id
                 ? <ChevronDown className="w-4 h-4 text-[#888] shrink-0" />
@@ -115,13 +115,13 @@ export default function ExecutionHistory() {
                 {SKILL_NAMES[exec.skill_name] ?? exec.skill_name}
               </span>
               <span className="text-xs text-[#aaa] font-mono">{exec.id.slice(0, 12)}</span>
-              <span className="ml-auto text-xs text-[#888]">
+              <span className="w-full text-xs text-[#888] sm:ml-auto sm:w-auto">
                 {exec.started_at ? new Date(exec.started_at).toLocaleString('zh-CN') : ''}
               </span>
             </button>
 
             {expanded === exec.id && (
-              <div className="px-5 pb-5 space-y-3 animate-fade-in">
+              <div className="px-4 pb-5 space-y-3 animate-fade-in sm:px-5">
                 {/* Params */}
                 {exec.params && Object.keys(exec.params).length > 0 && (
                   <div>
@@ -155,7 +155,7 @@ export default function ExecutionHistory() {
                 )}
 
                 {/* Meta */}
-                <div className="flex gap-6 text-xs text-[#aaa]">
+                <div className="flex flex-wrap gap-3 sm:gap-6 text-xs text-[#aaa]">
                   {exec.completed_at && (
                     <span>完成于 {new Date(exec.completed_at).toLocaleString('zh-CN')}</span>
                   )}

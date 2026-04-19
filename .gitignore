@@ -8,4 +8,7 @@ coverage/
 !.env.example
 config.json
 *.sqlite
+database.kuzu*
+state/
+uploads/
 .omc/

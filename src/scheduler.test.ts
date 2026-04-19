@@ -102,7 +102,6 @@ describe('SchedulerService', () => {
     });
 
     it('should not start when disabled', () => {
-      const statusBefore = scheduler.getStatus();
       scheduler.restart({ enabled: false });
       const statusAfter = scheduler.getStatus();
       expect(statusAfter.running).toBe(false);

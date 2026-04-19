@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const ConfidenceSchema = z.number().min(0).max(1);
 
-export const EntityTypeSchema = z.enum([
+const EntityTypeSchema = z.enum([
   'Technology',
   'Organization',
   'Person',
@@ -12,7 +12,7 @@ export const EntityTypeSchema = z.enum([
   'Other',
 ]);
 
-export const RelationTypeSchema = z.enum([
+const RelationTypeSchema = z.enum([
   'develops',
   'competes_with',
   'published_by',
@@ -25,9 +25,9 @@ export const RelationTypeSchema = z.enum([
   'related_to',
 ]);
 
-export const ClaimPolaritySchema = z.enum(['positive', 'negative', 'neutral']);
+const ClaimPolaritySchema = z.enum(['positive', 'negative', 'neutral']);
 
-export const EventTypeSchema = z.enum([
+const EventTypeSchema = z.enum([
   'breakthrough',
   'partnership',
   'product_launch',
@@ -38,14 +38,14 @@ export const EventTypeSchema = z.enum([
   'other',
 ]);
 
-export const EntityExtractionSchema = z.object({
+const EntityExtractionSchema = z.object({
   text: z.string().trim().min(1),
   type: EntityTypeSchema,
   confidence: ConfidenceSchema,
   aliases: z.array(z.string().trim().min(1)).optional().default([]),
 }).passthrough();
 
-export const RelationExtractionSchema = z.object({
+const RelationExtractionSchema = z.object({
   source_text: z.string().trim().min(1),
   target_text: z.string().trim().min(1),
   relation: RelationTypeSchema,
@@ -53,7 +53,7 @@ export const RelationExtractionSchema = z.object({
   evidence: z.string().optional().default(''),
 }).passthrough();
 
-export const ClaimExtractionSchema = z.object({
+const ClaimExtractionSchema = z.object({
   text: z.string().trim().min(1),
   type: z.string().optional().default('claim'),
   polarity: ClaimPolaritySchema,
@@ -61,7 +61,7 @@ export const ClaimExtractionSchema = z.object({
   source_context: z.string().optional().default(''),
 }).passthrough();
 
-export const EventExtractionSchema = z.object({
+const EventExtractionSchema = z.object({
   type: EventTypeSchema,
   title: z.string().trim().min(1),
   description: z.string().optional().default(''),
@@ -70,7 +70,7 @@ export const EventExtractionSchema = z.object({
   confidence: ConfidenceSchema,
 }).passthrough();
 
-export const ExtractionResultSchema = z.object({
+const ExtractionResultSchema = z.object({
   topicId: z.string().trim().min(1),
   documentsProcessed: z.number().int().min(0),
   extractionStats: z.object({
@@ -78,7 +78,7 @@ export const ExtractionResultSchema = z.object({
     relations: z.number().int().min(0).optional().default(0),
     claims: z.number().int().min(0).optional().default(0),
     events: z.number().int().min(0).optional().default(0),
-  }).optional().default({}),
+  }).optional().default({ entities: 0, relations: 0, claims: 0, events: 0 }),
   entities: z.array(EntityExtractionSchema).optional().default([]),
   relations: z.array(RelationExtractionSchema).optional().default([]),
   claims: z.array(ClaimExtractionSchema).optional().default([]),
@@ -86,7 +86,7 @@ export const ExtractionResultSchema = z.object({
   topEntities: z.array(EntityExtractionSchema).optional().default([]),
 }).passthrough();
 
-export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
+type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
 
 export function validateExtractionOutput(data: unknown): {
   valid: boolean;

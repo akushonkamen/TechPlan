@@ -19,11 +19,6 @@ export interface SkillExecution {
 
 const MAX_CONCURRENT = 3;
 
-// Escape a string for use as a shell argument (single-quoted, safe for bash)
-function shellEscape(s: string): string {
-  return "'" + s.replace(/'/g, "'\\''") + "'";
-}
-
 // Strip ANSI escape codes (from `script` pseudo-TTY wrapper)
 function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');

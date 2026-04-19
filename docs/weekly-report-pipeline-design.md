@@ -1,8 +1,10 @@
- # 周报生成链路设计方案
+# 周报生成链路设计方案
 
 > 版本：v1.0
 > 创建日期：2026-03-30
-> 状态：设计中
+> 状态：历史设计草案
+
+> 注意：本文保留的是 2026-03-30 的规划方案，不代表当前运行时数据库结构。当前实现没有创建 `report_templates`、`report_reviews`、`report_feedback`、`report_graph_links`、`report_versions` 等规划表；运行时报告迁移只维护 `reports` 和 `topics` 上仍被代码使用的兼容字段。
 
 ---
 

@@ -2,22 +2,6 @@
  * MNEMOSYNE Editorial Chart Theme for Recharts
  */
 
-// ── Chart Colors (MNEMOSYNE palette) ─────────────────────────────
-export const CHART_COLORS = {
-  primary: '#1d1d1f',
-  primaryLight: 'rgba(15, 15, 15, 0.2)',
-  secondary: '#6B7B8D',
-  secondaryLight: 'rgba(107, 123, 141, 0.2)',
-  success: '#5B7553',
-  successLight: 'rgba(91, 117, 83, 0.2)',
-  warning: '#9C7B3C',
-  warningLight: 'rgba(156, 123, 60, 0.2)',
-  danger: '#A0453A',
-  dangerLight: 'rgba(160, 69, 58, 0.2)',
-  purple: '#7A5C6B',
-  purpleLight: 'rgba(122, 92, 107, 0.2)',
-} as const;
-
 // ── Axis Styling ───────────────────────────────────────────
 export const axisStyle = {
   axisLine: false,

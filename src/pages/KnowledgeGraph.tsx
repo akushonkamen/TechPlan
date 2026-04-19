@@ -1,11 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Search, ArrowRight, Activity, Clock, Network, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Search, ArrowRight, Clock, Network, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, RefreshCw, BarChart3 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-import GraphVisualization, {
-  GraphNode,
-  GraphEdge,
-  GraphNodeType,
-} from '../components/GraphVisualization';
+import GraphVisualization from '../components/GraphVisualization';
 import { rankNodesByImportance } from '../lib/graphLayout';
 import type { GraphLayoutMode } from '../lib/graphLayout';
 import {
@@ -14,6 +10,9 @@ import {
   getGraphRelationLabel,
   normalizeGraphNodeType,
   normalizeGraphRelationType,
+  type GraphEdge,
+  type GraphNode,
+  type GraphNodeType,
   type GraphSensemakingResult,
 } from '../types/graph';
 
@@ -109,15 +108,14 @@ export default function KnowledgeGraph() {
   const [nodeFilters, setNodeFilters] = useState<Set<GraphNodeType>>(new Set(['topic', 'technology', 'product', 'organization', 'entity', 'event']));
   const [showTopicLinks, setShowTopicLinks] = useState(false);
   const [relFilters, setRelFilters] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_RELATIONS));
-  const [showPulse, setShowPulse] = useState(true);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<GraphLayoutMode>('terrain');
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [sensemaking, setSensemaking] = useState<GraphSensemakingResult | null>(null);
   const [sensemakingLoading, setSensemakingLoading] = useState(false);
   const [sensemakingRefreshing, setSensemakingRefreshing] = useState(false);
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [leftCollapsed, setLeftCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
+  const [rightCollapsed, setRightCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(false);
@@ -129,6 +127,42 @@ export default function KnowledgeGraph() {
   const [showRecent, setShowRecent] = useState(false);
   const [recentData, setRecentData] = useState<RecentDevelopment | null>(null);
   const [recentLoading, setRecentLoading] = useState(false);
+  // Analysis state
+  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [analysisTab, setAnalysisTab] = useState<'stats' | 'path' | 'centrality' | 'communities' | 'predictions' | 'anomalies'>('stats');
+  const [graphStats, setGraphStats] = useState<any>(null);
+  const [pathResult, setPathResult] = useState<any>(null);
+  const [pathSource, setPathSource] = useState('');
+  const [pathTarget, setPathTarget] = useState('');
+  const [centralityData, setCentralityData] = useState<any[]>([]);
+  const [communityData, setCommunityData] = useState<any[]>([]);
+  const [predictionData, setPredictionData] = useState<any[]>([]);
+  const [anomalyData, setAnomalyData] = useState<any[]>([]);
+  const [leftWidth, setLeftWidth] = useState(() => Math.min(280, Math.round(window.innerWidth * 0.2)));
+  const [rightWidth, setRightWidth] = useState(() => Math.min(340, Math.round(window.innerWidth * 0.25)));
+  const resizing = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
+
+  const handleResizeStart = useCallback((side: 'left' | 'right', e: React.MouseEvent) => {
+    e.preventDefault();
+    resizing.current = { side, startX: e.clientX, startWidth: side === 'left' ? leftWidth : rightWidth };
+    const onMove = (ev: MouseEvent) => {
+      if (!resizing.current) return;
+      const vw = window.innerWidth;
+      const dx = ev.clientX - resizing.current.startX;
+      const lo = side === 'left' ? Math.max(200, Math.round(vw * 0.14)) : Math.max(260, Math.round(vw * 0.18));
+      const hi = side === 'left' ? Math.min(420, Math.round(vw * 0.28)) : Math.min(500, Math.round(vw * 0.32));
+      const raw = side === 'left' ? resizing.current.startWidth + dx : resizing.current.startWidth - dx;
+      const clamped = Math.max(lo, Math.min(hi, raw));
+      side === 'left' ? setLeftWidth(clamped) : setRightWidth(clamped);
+    };
+    const onUp = () => {
+      resizing.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [leftWidth, rightWidth]);
 
   useEffect(() => {
     fetchGraphStatus();
@@ -232,7 +266,14 @@ export default function KnowledgeGraph() {
     setSensemakingLoading(true);
     try {
       const res = await fetch(`/api/graph/sensemaking/${encodeURIComponent(topicId)}`);
-      if (res.ok) setSensemaking(await res.json());
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          setSensemaking(await res.json());
+        } else {
+          console.warn('Graph sensemaking returned non-JSON response:', contentType);
+        }
+      }
     } catch (error) {
       console.error('Failed to fetch graph sensemaking:', error);
     } finally {
@@ -245,7 +286,14 @@ export default function KnowledgeGraph() {
     setSensemakingRefreshing(true);
     try {
       const res = await fetch(`/api/graph/sensemaking/${encodeURIComponent(selectedTopic)}/refresh`, { method: 'POST' });
-      if (res.ok) setSensemaking(await res.json());
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          setSensemaking(await res.json());
+        } else {
+          console.warn('Graph sensemaking refresh returned non-JSON response:', contentType);
+        }
+      }
       window.setTimeout(() => fetchSensemaking(selectedTopic), 3000);
     } catch (error) {
       console.error('Failed to refresh graph sensemaking:', error);
@@ -263,13 +311,13 @@ export default function KnowledgeGraph() {
     } else {
       newExpanded.add(node.id);
       // Fetch neighbors for this node
-      await fetchNodeNeighbors(node.id, selectedTopic!);
+      await fetchNodeNeighbors(node.id);
     }
     setExpandedNodes(newExpanded);
   }
 
   // Fetch neighboring nodes for a given node
-  async function fetchNodeNeighbors(nodeId: string, topicId: string) {
+  async function fetchNodeNeighbors(nodeId: string) {
     try {
       // Find entity label from nodeId
       const entityNode = nodes.find(n => n.id === nodeId);
@@ -337,6 +385,41 @@ export default function KnowledgeGraph() {
     } catch {}
     finally { setRecentLoading(false) }
   }
+
+  async function fetchAnalysis() {
+    if (!selectedTopic) return;
+    const base = `/api/graph`;
+    try {
+      const [statsRes, centralityRes, communitiesRes, predictionsRes, anomaliesRes] = await Promise.all([
+        fetch(`${base}/stats/${selectedTopic}`),
+        fetch(`${base}/centrality/${selectedTopic}?top=20`),
+        fetch(`${base}/communities/${selectedTopic}`),
+        fetch(`${base}/predictions/${selectedTopic}?top=15`),
+        fetch(`${base}/anomalies/${selectedTopic}`),
+      ]);
+      if (statsRes.ok) setGraphStats(await statsRes.json());
+      if (centralityRes.ok) setCentralityData(await centralityRes.json());
+      if (communitiesRes.ok) setCommunityData(await communitiesRes.json());
+      if (predictionsRes.ok) setPredictionData(await predictionsRes.json());
+      if (anomaliesRes.ok) setAnomalyData(await anomaliesRes.json());
+    } catch (error) {
+      console.error('Failed to fetch analysis:', error);
+    }
+  }
+
+  async function fetchPath() {
+    if (!selectedTopic || !pathSource || !pathTarget) return;
+    try {
+      const res = await fetch(`/api/graph/path/${selectedTopic}/${encodeURIComponent(pathSource)}/${encodeURIComponent(pathTarget)}`);
+      if (res.ok) setPathResult(await res.json());
+    } catch (error) {
+      console.error('Failed to find path:', error);
+    }
+  }
+
+  useEffect(() => {
+    if (showAnalysis && selectedTopic) fetchAnalysis();
+  }, [showAnalysis, selectedTopic]);
 
   function relationKey(source: string, relation: string, target: string) {
     return `${source.trim().toLowerCase()}|${normalizeGraphRelationType(relation)}|${target.trim().toLowerCase()}`;
@@ -453,12 +536,14 @@ export default function KnowledgeGraph() {
       const sameCluster = sourceCluster === targetCluster;
       const cluster = sameCluster ? clusterById.get(sourceCluster) : undefined;
       const clusterFocus = Boolean(relation && cluster?.relationFocus.includes(relation));
-      const highConfidence = (edge.data?.confidence ?? 0.5) >= 0.75;
+      const edgeConfidence = edge.data?.confidence ?? 0.5;
+      const highConfidence = edgeConfidence >= 0.7;
+      const mediumConfidence = edgeConfidence >= 0.55;
       const bridge = sourceNode?.data.clusterRole === 'bridge' || targetNode?.data.clusterRole === 'bridge';
       const anchorPair = sourceNode?.data.clusterRole === 'anchor' || targetNode?.data.clusterRole === 'anchor';
       return sameCluster
-        ? clusterFocus || highConfidence || anchorPair
-        : highConfidence && (bridge || anchorPair);
+        ? clusterFocus || highConfidence || (mediumConfidence && anchorPair)
+        : (highConfidence && (bridge || anchorPair)) || (mediumConfidence && anchorPair);
     });
 
   const structuralEdges = candidateEdges.filter(edge =>
@@ -519,48 +604,53 @@ export default function KnowledgeGraph() {
   }, {} as Record<string, number>);
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col bg-[#F7F7F7] text-[#1A1A1A]"
+    <div className="min-h-[calc(100vh-8rem)] lg:h-[calc(100vh-4rem)] flex flex-col overflow-hidden bg-[#F7F7F7] text-[#1A1A1A]"
       style={{ fontFamily: "'Inter', 'Lexend', sans-serif" }}>
 
       {/* ═══ Header — Bauhaus thick border ═══ */}
-      <div className="px-8 py-3 flex items-center justify-between border-b-[3px] border-[#1A1A1A]">
-        <div className="flex items-center gap-6">
-          <div>
+      <div className="px-3 py-3 flex flex-col gap-3 border-b-[3px] border-[#1A1A1A] sm:px-5 lg:px-8 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+          <div className="min-w-0">
             <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-[#888]">Topology View</span>
-            <h1 className="text-[26px] font-extrabold tracking-[-1px] leading-none lowercase mt-0.5">
+            <h1 className="text-[24px] sm:text-[26px] font-extrabold tracking-[-1px] leading-none lowercase mt-0.5">
               knowledge graph
             </h1>
           </div>
-          <div className="h-8 w-px bg-[#1A1A1A]/15" />
+          <div className="hidden h-8 w-px bg-[#1A1A1A]/15 sm:block" />
           <select
             value={selectedTopic || ''}
             onChange={e => setSelectedTopic(e.target.value)}
-            className="bg-transparent border-[1.5px] border-[#1A1A1A] px-4 py-1.5 text-sm font-semibold cursor-pointer hover:bg-[#E6DBC6]/30 transition-colors"
+            className="w-full min-w-0 bg-transparent border-[1.5px] border-[#1A1A1A] px-4 py-1.5 text-sm font-semibold cursor-pointer hover:bg-[#E6DBC6]/30 transition-colors sm:w-64"
             style={{ borderRadius: '0 12px 12px 12px' }}
           >
             {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 border-[1.5px] border-[#1A1A1A]/20 p-0.5" style={{ borderRadius: '0 12px 12px 12px' }}>
-            {[
-              { value: 'terrain', label: '地形图' },
-              { value: 'focus', label: '聚焦' },
-              { value: 'timeline', label: '时间线' },
-              { value: 'grid', label: '网格' },
-            ].map(item => (
+        <div className="flex flex-wrap items-center gap-2 lg:gap-3">
+          <div className="max-w-full overflow-x-auto">
+            <div className="flex min-w-max items-center gap-1 border-[1.5px] border-[#1A1A1A]/20 p-0.5" style={{ borderRadius: '0 12px 12px 12px' }}>
+            {([
+              ['radar', '雷达'],
+              ['terrain', '地形图'],
+              ['focus', '聚焦'],
+              ['timeline', '时间线'],
+              ['grid', '网格'],
+              ['matrix', '矩阵'],
+              ['bundle', '环形'],
+            ] as const).map(([value, label]) => (
               <button
-                key={item.value}
-                onClick={() => setViewMode(item.value as GraphLayoutMode)}
+                key={value}
+                onClick={() => setViewMode(value as GraphLayoutMode)}
                 className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-[1px] transition-all ${
-                  viewMode === item.value ? 'bg-[#1A1A1A] text-[#F7F7F7]' : 'text-[#888] hover:text-[#1A1A1A]'
+                  viewMode === value ? 'bg-[#1A1A1A] text-[#F7F7F7]' : 'text-[#888] hover:text-[#1A1A1A]'
                 }`}
                 style={{ borderRadius: '0 8px 8px 8px' }}
               >
-                {item.label}
+                {label}
               </button>
             ))}
+            </div>
           </div>
           <button
             onClick={() => setShowTopicLinks(!showTopicLinks)}
@@ -575,18 +665,6 @@ export default function KnowledgeGraph() {
             {showTopicLinks ? 'LINKS ON' : 'LINKS OFF'}
           </button>
           <button
-            onClick={() => setShowPulse(!showPulse)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[1.5px] border-[1.5px] transition-all ${
-              showPulse
-                ? 'bg-[#1A1A1A] text-[#F7F7F7] border-[#1A1A1A]'
-                : 'bg-transparent border-[#1A1A1A]/20 text-[#888] hover:border-[#1A1A1A]/50'
-            }`}
-            style={{ borderRadius: '0 12px 12px 12px' }}
-          >
-            <Activity className="w-3 h-3" />
-            {showPulse ? 'PULSE ON' : 'PULSE OFF'}
-          </button>
-          <button
             onClick={() => setShowRecent(!showRecent)}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[1.5px] border-[1.5px] transition-all ${
               showRecent
@@ -598,21 +676,44 @@ export default function KnowledgeGraph() {
             <Clock className="w-3 h-3" />
             RECENT
           </button>
+          <button
+            onClick={() => setShowAnalysis(!showAnalysis)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[1.5px] border-[1.5px] transition-all ${
+              showAnalysis
+                ? 'bg-[#1A1A1A] text-[#F7F7F7] border-[#1A1A1A]'
+                : 'bg-transparent border-[#1A1A1A]/20 text-[#888] hover:border-[#1A1A1A]/50'
+            }`}
+            style={{ borderRadius: '0 12px 12px 12px' }}
+          >
+            <BarChart3 className="w-3 h-3" />
+            ANALYSIS
+          </button>
         </div>
       </div>
 
       {/* ═══ Main: 3-column Bauhaus grid ═══ */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden lg:flex-row">
 
-        {/* ── Left Panel: Entity Index (collapsible) ── */}
-        <div className={`border-r-[1.5px] border-[#1A1A1A] flex flex-col overflow-hidden shrink-0 transition-all duration-200 ${leftCollapsed ? 'w-10' : 'w-[280px]'}`}>
+        {/* ── Left Panel: Entity Index (collapsible + resizable) ── */}
+        <div
+          className={`relative w-full border-b-[1.5px] border-[#1A1A1A] flex flex-col overflow-hidden shrink-0 lg:border-b-0 lg:border-r-[1.5px] ${leftCollapsed ? 'h-10 lg:h-auto lg:w-10' : 'h-72 lg:h-auto'}`}
+          style={!leftCollapsed ? { width: leftWidth, minWidth: 200, maxWidth: 420 } : undefined}
+        >
+          {/* Resize handle */}
+          {!leftCollapsed && (
+            <div
+              onMouseDown={(e) => handleResizeStart('left', e)}
+              className="hidden lg:block absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-[#1A1A1A]/20 transition-colors z-10"
+            />
+          )}
           {/* Toggle button */}
           <button
             onClick={() => setLeftCollapsed(!leftCollapsed)}
-            className="flex items-center justify-center h-10 border-b border-[#1A1A1A]/10 text-[#888] hover:text-[#1A1A1A] transition-colors"
-            title={leftCollapsed ? '展开面板' : '收起面板'}
+            className="flex items-center justify-center gap-1.5 h-10 border-b border-[#1A1A1A]/10 text-[#888] hover:text-[#1A1A1A] hover:bg-[#1A1A1A]/[0.04] transition-colors"
+            title={leftCollapsed ? '展开侧栏' : '收起侧栏'}
           >
-            {leftCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            {leftCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-3.5 h-3.5" />}
+            {!leftCollapsed && <span className="text-[9px] font-bold uppercase tracking-wider">收起侧栏</span>}
           </button>
           {!leftCollapsed && (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -746,7 +847,7 @@ export default function KnowledgeGraph() {
         </div>
 
         {/* ── Center: Graph Viewport ── */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-[360px] min-w-[400px] flex flex-col overflow-hidden lg:min-h-0">
           {/* Viewport */}
           <div className="flex-1 bg-[#F7F7F7] relative overflow-hidden">
             {loading ? (
@@ -770,14 +871,12 @@ export default function KnowledgeGraph() {
               <GraphVisualization
                 nodes={filteredNodes}
                 edges={filteredEdges}
-                onNodeClick={node => {}}
+                viewMode={viewMode}
+                terrainClusters={terrainClusters}
+                onViewModeChange={setViewMode}
                 onNodeDoubleClick={handleNodeDoubleClick}
                 focusNodeIds={highlightEntities.length > 0 ? nodes.filter(n => n.data.highlighted).map(n => n.id) : undefined}
-                showPulse={showPulse}
-                layoutMode={viewMode}
-                onLayoutModeChange={setViewMode}
-                terrainClusters={terrainClusters}
-                selectedClusterId={selectedClusterId}
+                searchQuery={searchQuery}
               />
             )}
 
@@ -785,17 +884,216 @@ export default function KnowledgeGraph() {
           </div>
         </div>
 
-        {/* ── Right Panel: Stats & Details (collapsible) ── */}
-        <div className={`border-l-[1.5px] border-[#1A1A1A] flex flex-col overflow-hidden shrink-0 transition-all duration-200 ${rightCollapsed ? 'w-10' : 'w-[340px]'}`}>
+        {/* ── Right Panel: Stats & Details (collapsible + resizable) ── */}
+        <div
+          className={`relative w-full border-t-[1.5px] border-[#1A1A1A] flex flex-col overflow-hidden shrink-0 lg:border-l-[1.5px] lg:border-t-0 ${rightCollapsed ? 'h-10 lg:h-auto lg:w-10' : 'h-80 lg:h-auto'}`}
+          style={!rightCollapsed ? { width: rightWidth, minWidth: 260, maxWidth: 500 } : undefined}
+        >
+          {/* Resize handle */}
+          {!rightCollapsed && (
+            <div
+              onMouseDown={(e) => handleResizeStart('right', e)}
+              className="hidden lg:block absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-[#1A1A1A]/20 transition-colors z-10"
+            />
+          )}
           {/* Toggle button */}
           <button
             onClick={() => setRightCollapsed(!rightCollapsed)}
-            className="flex items-center justify-center h-10 border-b border-[#1A1A1A]/10 text-[#888] hover:text-[#1A1A1A] transition-colors"
+            className="flex items-center justify-center gap-1.5 h-10 border-b border-[#1A1A1A]/10 text-[#888] hover:text-[#1A1A1A] hover:bg-[#1A1A1A]/[0.04] transition-colors"
             title={rightCollapsed ? '展开面板' : '收起面板'}
           >
-            {rightCollapsed ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
+            {rightCollapsed ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-3.5 h-3.5" />}
+            {!rightCollapsed && <span className="text-[9px] font-bold uppercase tracking-wider">收起面板</span>}
           </button>
-          {!rightCollapsed && (showRecent ? (
+          {!rightCollapsed && (showAnalysis ? (
+            /* ── Analysis Panel ── */
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="px-5 pt-5 pb-2 border-b-[3px] border-[#1A1A1A]">
+                <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-[#888]">Graph Analysis</span>
+              </div>
+              {/* Analysis tabs */}
+              <div className="px-4 py-2 border-b border-[#1A1A1A]/10 flex flex-wrap gap-1">
+                {(['stats', 'path', 'centrality', 'communities', 'predictions', 'anomalies'] as const).map(tab => (
+                  <button key={tab} onClick={() => setAnalysisTab(tab)}
+                    className={`px-2 py-1 text-[8px] font-bold uppercase tracking-wider cursor-pointer transition-colors ${
+                      analysisTab === tab ? 'bg-[#1A1A1A] text-[#F7F7F7]' : 'bg-[#F7F7F7] text-[#888] hover:bg-[#1A1A1A]/10'
+                    }`}
+                    style={{ borderRadius: '0 6px 6px 6px' }}
+                  >
+                    {tab === 'stats' ? '统计' : tab === 'path' ? '路径' : tab === 'centrality' ? '中心性' : tab === 'communities' ? '社区' : tab === 'predictions' ? '预测' : '异常'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-4">
+                {/* Stats tab */}
+                {analysisTab === 'stats' && graphStats && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { label: 'Nodes', value: graphStats.nodeCount },
+                        { label: 'Edges', value: graphStats.edgeCount },
+                        { label: 'Density', value: graphStats.density.toFixed(4) },
+                        { label: 'Components', value: graphStats.connectedComponents },
+                        { label: 'Diameter', value: graphStats.diameter },
+                        { label: 'Clustering', value: graphStats.avgClusteringCoefficient.toFixed(3) },
+                        { label: 'Avg Degree', value: graphStats.avgDegree },
+                        { label: 'Max Degree', value: graphStats.maxDegree },
+                      ].map(item => (
+                        <div key={item.label} className="p-2 bg-[#1A1A1A]/[0.03]">
+                          <span className="font-mono text-[14px] font-extrabold block">{item.value}</span>
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-[#888]">{item.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {graphStats.topDegreeNodes?.length > 0 && (
+                      <div>
+                        <div className="text-[9px] font-bold uppercase tracking-[1.5px] text-[#888] mb-2">Top Nodes</div>
+                        {graphStats.topDegreeNodes.slice(0, 8).map((n: any) => (
+                          <div key={n.id} className="flex justify-between items-center py-1 border-b border-[#1A1A1A]/8">
+                            <span className="text-[11px] font-semibold truncate">{n.label}</span>
+                            <span className="font-mono text-[10px] text-[#888]">{n.degree}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {analysisTab === 'stats' && !graphStats && (
+                  <div className="text-center py-8 text-[#888] text-[10px] uppercase tracking-wider">Loading stats...</div>
+                )}
+
+                {/* Path tab */}
+                {analysisTab === 'path' && (
+                  <div className="space-y-3">
+                    <div className="text-[9px] text-[#888] uppercase tracking-wider">Find shortest path between two entities</div>
+                    <select value={pathSource} onChange={e => setPathSource(e.target.value)}
+                      className="w-full bg-transparent border-b-[1.5px] border-[#1A1A1A]/30 py-1.5 text-xs focus:outline-none focus:border-[#1A1A1A]">
+                      <option value="">Source entity...</option>
+                      {nodesWithSensemaking.filter(n => n.data.type !== 'topic').map(n => (
+                        <option key={n.id} value={n.id}>{n.data.label}</option>
+                      ))}
+                    </select>
+                    <select value={pathTarget} onChange={e => setPathTarget(e.target.value)}
+                      className="w-full bg-transparent border-b-[1.5px] border-[#1A1A1A]/30 py-1.5 text-xs focus:outline-none focus:border-[#1A1A1A]">
+                      <option value="">Target entity...</option>
+                      {nodesWithSensemaking.filter(n => n.data.type !== 'topic').map(n => (
+                        <option key={n.id} value={n.id}>{n.data.label}</option>
+                      ))}
+                    </select>
+                    <button onClick={fetchPath} disabled={!pathSource || !pathTarget}
+                      className="w-full py-2 bg-[#1A1A1A] text-[#F7F7F7] text-[10px] font-bold uppercase tracking-wider cursor-pointer disabled:opacity-30"
+                      style={{ borderRadius: '0 8px 8px 8px' }}
+                    >
+                      Find Path
+                    </button>
+                    {pathResult && (
+                      <div className="bg-[#1A1A1A]/[0.04] p-3">
+                        {pathResult.found ? (
+                          <div>
+                            <div className="text-[9px] font-bold uppercase tracking-wider text-[#888] mb-2">
+                              Path ({pathResult.path.length} hops, weight {pathResult.totalWeight.toFixed(2)})
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {pathResult.pathLabels?.map((label: string, i: number) => (
+                                <span key={i} className="flex items-center gap-1">
+                                  <span className="px-1.5 py-0.5 bg-[#1A1A1A] text-[#F7F7F7] text-[9px] font-bold" style={{ borderRadius: '0 6px 6px 6px' }}>{label}</span>
+                                  {i < pathResult.pathLabels.length - 1 && <ArrowRight className="w-3 h-3 text-[#D94F26]" />}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-[#888]">No path found</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Centrality tab */}
+                {analysisTab === 'centrality' && centralityData.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[9px] font-bold uppercase tracking-[1.5px] text-[#888] mb-2">PageRank Top 20</div>
+                    {centralityData.map((item: any) => (
+                      <div key={item.nodeId} className="flex items-center gap-2 py-1.5 border-b border-[#1A1A1A]/8">
+                        <span className="font-mono text-[9px] text-[#888] w-4">{item.rank}</span>
+                        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: NODE_FILTERS.find(f => f.value === item.type)?.color || '#9A7DA8' }} />
+                        <span className="text-[11px] font-semibold truncate flex-1">{item.label}</span>
+                        <span className="font-mono text-[9px] text-[#888]">{(item.score * 100).toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {analysisTab === 'centrality' && centralityData.length === 0 && (
+                  <div className="text-center py-8 text-[#888] text-[10px] uppercase tracking-wider">Loading...</div>
+                )}
+
+                {/* Communities tab */}
+                {analysisTab === 'communities' && communityData.length > 0 && (
+                  <div className="space-y-3">
+                    {communityData.slice(0, 8).map((community: any, i: number) => (
+                      <div key={community.id} className="pb-3 border-b border-[#1A1A1A]/8">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[11px] font-extrabold">{community.label}</span>
+                          <span className="font-mono text-[9px] text-[#888]">{community.size} nodes</span>
+                        </div>
+                        <div className="text-[9px] text-[#888]">
+                          Type: {community.dominantType} · Confidence: {Math.round(community.avgConfidence * 100)}%
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {analysisTab === 'communities' && communityData.length === 0 && (
+                  <div className="text-center py-8 text-[#888] text-[10px] uppercase tracking-wider">Loading...</div>
+                )}
+
+                {/* Predictions tab */}
+                {analysisTab === 'predictions' && predictionData.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold uppercase tracking-[1.5px] text-[#888] mb-2">Predicted Links</div>
+                    {predictionData.map((pred: any, i: number) => (
+                      <div key={i} className="py-2 border-b border-[#1A1A1A]/8">
+                        <div className="text-[11px] font-semibold flex items-center gap-1">
+                          <span className="truncate">{pred.sourceLabel}</span>
+                          <ArrowRight className="w-3 h-3 text-[#D94F26] shrink-0" />
+                          <span className="truncate">{pred.targetLabel}</span>
+                        </div>
+                        <div className="mt-0.5 font-mono text-[9px] text-[#888]">
+                          {pred.method} · score {pred.score.toFixed(3)} · {pred.commonNeighbors} shared neighbors
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {analysisTab === 'predictions' && predictionData.length === 0 && (
+                  <div className="text-center py-8 text-[#888] text-[10px] uppercase tracking-wider">Loading...</div>
+                )}
+
+                {/* Anomalies tab */}
+                {analysisTab === 'anomalies' && anomalyData.length > 0 && (
+                  <div className="space-y-2">
+                    {anomalyData.map((anomaly: any) => (
+                      <div key={anomaly.nodeId} className="py-2 border-b border-[#1A1A1A]/8">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[11px] font-semibold">{anomaly.label}</span>
+                          <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase ${
+                            anomaly.severity > 0.7 ? 'bg-[#ff3b30] text-white' : anomaly.severity > 0.4 ? 'bg-[#ff9f0a] text-white' : 'bg-[#1A1A1A]/10 text-[#888]'
+                          }`} style={{ borderRadius: '0 4px 4px 4px' }}>
+                            {anomaly.anomalyType.replace('_', ' ')}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-[#888] mt-0.5">{anomaly.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {analysisTab === 'anomalies' && anomalyData.length === 0 && (
+                  <div className="text-center py-8 text-[#888] text-[10px] uppercase tracking-wider">No anomalies detected</div>
+                )}
+              </div>
+            </div>
+          ) : showRecent ? (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Time Range */}
               <div className="px-5 pt-5 pb-3 border-b-[3px] border-[#1A1A1A]">

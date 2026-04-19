@@ -14,40 +14,12 @@ Topic operations:
 fetchTopics(): Promise<Topic[]>
 ```
 
-### graphService.ts
-
-Graph database operations:
-
-```typescript
-getTopicGraph(topicId: string, depth?: number): Promise<GraphSubgraph>
-findRelatedEntities(entityId: string, depth?: number): Promise<GraphNode[]>
-findClaimsByTopic(topicId: string): Promise<GraphNode[]>
-getEntityNeighborhood(entityId: string): Promise<EntityNeighborhood>
-findPath(fromId: string, toId: string, maxDepth?: number): Promise<GraphNode[]>
-getSyncStatus(): Promise<SyncStatus>
-save(): Promise<void>
-```
-
 ### reportService.ts
 
-Report generation:
+Report migration helpers:
 
 ```typescript
-generateReport(request: ReportGenerationRequest): Promise<Report>
-getReports(topicId?: string): Promise<Report[]>
-getReport(id: string): Promise<Report>
-deleteReport(id: string): Promise<void>
-publishReport(id: string): Promise<Report>
-```
-
-### reportGraphService.ts
-
-Report-to-graph integration:
-
-```typescript
-linkReportToGraph(reportId: string): Promise<void>
-extractEntityReferences(content: string): Promise<string[]>
-updateGraphFromReport(reportId: string): Promise<void>
+migrateReportTables(db: Database): Promise<void>
 ```
 
 ### fileUploadService.ts
@@ -55,8 +27,7 @@ updateGraphFromReport(reportId: string): Promise<void>
 File upload handling:
 
 ```typescript
-uploadFile(file: File, topicId: string): Promise<UploadResult>
-uploadAndAnalyze(file: File, topicId: string): Promise<UploadResult>
+processUploadedFile(file: Express.Multer.File, uploadsDir: string): Promise<UploadResult>
 ```
 
 ## API Base URL

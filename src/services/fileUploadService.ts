@@ -22,7 +22,7 @@ async function loadParsers() {
   }
 }
 
-export interface UploadedFile {
+interface UploadedFile {
   id: string;
   originalName: string;
   mimeType: string;
@@ -32,7 +32,7 @@ export interface UploadedFile {
   extractedAt: string;
 }
 
-export interface UploadResult {
+interface UploadResult {
   success: boolean;
   file?: UploadedFile;
   error?: string;
@@ -54,14 +54,14 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 /**
  * 检查文件类型是否支持
  */
-export function isSupportedFileType(mimeType: string): boolean {
+function isSupportedFileType(mimeType: string): boolean {
   return mimeType in SUPPORTED_TYPES;
 }
 
 /**
  * 检查文件大小是否合法
  */
-export function isValidFileSize(size: number): boolean {
+function isValidFileSize(size: number): boolean {
   return size > 0 && size <= MAX_FILE_SIZE;
 }
 
@@ -190,33 +190,4 @@ export async function processUploadedFile(
       error: error instanceof Error ? error.message : '文件处理失败',
     };
   }
-}
-
-/**
- * 删除上传的文件
- */
-export function deleteUploadedFile(fileId: string, uploadsDir: string): boolean {
-  try {
-    // 查找文件（尝试不同扩展名）
-    const extensions = ['.pdf', '.docx', '.doc', '.txt', '.md'];
-    for (const ext of extensions) {
-      const filePath = path.join(uploadsDir, `${fileId}${ext}`);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        return true;
-      }
-    }
-    return false;
-  } catch (error) {
-    console.error('File deletion error:', error);
-    return false;
-  }
-}
-
-/**
- * 获取文件存储路径
- */
-export function getStoredFilePath(fileId: string, mimeType: string, uploadsDir: string): string {
-  const extension = SUPPORTED_TYPES[mimeType]?.extension || '';
-  return path.join(uploadsDir, `${fileId}${extension}`);
 }

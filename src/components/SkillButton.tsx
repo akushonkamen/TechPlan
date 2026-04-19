@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Loader2, CheckCircle2, RefreshCw, Clock } from 'lucide-react';
+import { Loader2, CheckCircle2, RefreshCw } from 'lucide-react';
 
 type SkillStatus = 'idle' | 'running' | 'completed' | 'failed' | 'timeout';
 

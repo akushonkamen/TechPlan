@@ -127,7 +127,7 @@ This allows LLMs to interact with databases without custom code.
 - **events**: Timeline events
 - **reports**: Generated reports
 
-### Neo4j Graph (optional)
+### Kuzu Graph Cache
 - Nodes: Topic, Entity, Event, Claim, Document, Person, Organization
 - Relationships: DEVELOPS, COMPETES_WITH, PUBLISHED_BY, USES, INVESTS_IN
 
@@ -137,7 +137,7 @@ This allows LLMs to interact with databases without custom code.
 |----------|--------|-------------|
 | research | research | Multi-source document collection |
 | extraction | extract | Entity/relation/claim/event extraction |
-| sync | sync-graph | SQLite to Neo4j synchronization |
+| sync | sync-graph | SQLite to Kuzu synchronization |
 | reporting | report-* | Daily/weekly/monthly/quarterly reports |
 | analysis | optimize | Topic optimization suggestions |
 
@@ -184,9 +184,6 @@ This allows LLMs to interact with databases without custom code.
 | `PORT` | 3000 | Server port |
 | `ADMIN_TOKEN` | - | Admin authentication token |
 | `MAX_UPLOAD_SIZE_MB` | 10 | File upload limit |
-| `NEO4J_URI` | - | Neo4j connection URI |
-| `NEO4J_USERNAME` | - | Neo4j username |
-| `NEO4J_PASSWORD` | - | Neo4j password |
 
 ## Development
 
@@ -207,7 +204,7 @@ npm start
 ## Tech Stack
 
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
-- **Backend**: Express, SQLite, better-sqlite3
-- **Graph**: Neo4j (optional, JSON file fallback)
+- **Backend**: Express, SQLite (`sqlite` + `sqlite3`)
+- **Graph**: Kuzu local graph cache with SQLite fallback
 - **AI**: Claude CLI with stream-json output
 - **Real-time**: WebSocket (ws)

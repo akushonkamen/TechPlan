@@ -592,11 +592,11 @@ export default function Reports() {
       />
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <select
           value={selectedTopicId}
           onChange={e => setSelectedTopicId(e.target.value)}
-          className={INPUT}
+          className={`${INPUT} sm:w-auto`}
         >
           <option value="">选择主题...</option>
           {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -604,7 +604,7 @@ export default function Reports() {
         <select
           value={reportType}
           onChange={e => setReportType(e.target.value)}
-          className={`${INPUT} w-auto`}
+          className={`${INPUT} sm:w-auto`}
         >
           {reportTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
@@ -617,7 +617,7 @@ export default function Reports() {
               setCustomEndDate('');
             }
           }}
-          className={`${INPUT} w-auto`}
+          className={`${INPUT} sm:w-auto`}
         >
           <option value="auto">自动（根据报告类型）</option>
           <option value="24h">过去24小时</option>
@@ -631,14 +631,14 @@ export default function Reports() {
               type="date"
               value={customStartDate}
               onChange={e => setCustomStartDate(e.target.value)}
-              className={INPUT}
+              className={`${INPUT} sm:w-auto`}
               placeholder="开始日期"
             />
             <input
               type="date"
               value={customEndDate}
               onChange={e => setCustomEndDate(e.target.value)}
-              className={INPUT}
+              className={`${INPUT} sm:w-auto`}
               placeholder="结束日期"
             />
           </>
@@ -647,9 +647,9 @@ export default function Reports() {
           {isSubmitting ? '提交中...' : `生成${getTypeLabel(reportType)}`}
         </SkillButton>
         {errorMsg && (
-          <span className="text-xs text-[#A0453A] max-w-xs">{errorMsg}</span>
+          <span className="text-xs text-[#A0453A] sm:max-w-xs">{errorMsg}</span>
         )}
-        <div className="w-px h-8 bg-[#1d1d1f]/30 mx-1" />
+        <div className="hidden sm:block w-px h-8 bg-[#1d1d1f]/30 mx-1" />
         <button
           onClick={() => setAutoRefresh(!autoRefresh)}
           className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
@@ -666,7 +666,7 @@ export default function Reports() {
           <select
             value={refreshInterval.toString()}
             onChange={e => setRefreshInterval(Number(e.target.value))}
-            className={`${INPUT} w-auto`}
+            className={`${INPUT} sm:w-auto`}
             title="刷新间隔"
           >
             <option value="30">30秒</option>
@@ -720,7 +720,7 @@ export default function Reports() {
               <div key={report.id} className={`${CARD} overflow-hidden transition-all duration-200`}>
                 {/* Header */}
                 <div
-                  className="px-6 py-5 flex items-center justify-between cursor-pointer hover:bg-[#1d1d1f]/5 transition-colors"
+                  className="px-4 py-5 flex flex-col gap-4 cursor-pointer hover:bg-[#1d1d1f]/5 transition-colors sm:px-6 sm:flex-row sm:items-center sm:justify-between"
                   onClick={() => setExpandedId(isExpanded ? null : report.id)}
                 >
                   <div className="flex items-center gap-4 min-w-0">
@@ -728,11 +728,11 @@ export default function Reports() {
                       <FileText className="w-5 h-5 text-[#2A5A6B]" />
                     </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <h4 className="text-sm font-medium text-[#1d1d1f] truncate">{report.title}</h4>
                         <FreshnessBadge freshness={freshness} />
                       </div>
-                      <div className="mt-1 flex items-center gap-3 text-xs text-[#888]">
+                      <div className="mt-1 flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-[#888]">
                         <span className="px-2 py-0.5 bg-[#1d1d1f]/5 border border-[#1d1d1f]/20 rounded-full">{getTypeLabel(report.type)}</span>
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
@@ -747,7 +747,7 @@ export default function Reports() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-end gap-2 sm:shrink-0">
                     <button
                       onClick={e => { e.stopPropagation(); handleDelete(report.id); }}
                       className="p-2 text-[#aaa] hover:text-[#A0453A] rounded-full hover:bg-[#A0453A]/5 transition-all"
@@ -761,7 +761,7 @@ export default function Reports() {
 
                 {/* Expanded Content */}
                 {isExpanded && (
-                  <div className="px-6 pb-6 pt-2 border-t border-[#1d1d1f]/20 animate-fade-in space-y-6">
+                  <div className="px-4 pb-5 pt-2 border-t border-[#1d1d1f]/20 animate-fade-in space-y-6 sm:px-6 sm:pb-6">
 
                     {/* Executive Summary */}
                     {content?.executiveSummary ? (
@@ -836,10 +836,10 @@ export default function Reports() {
                     {/* Data Timestamp & Staleness Warning */}
                     {report.generated_at && (
                       <div className={`rounded-xl p-4 ${freshness.level === 'stale' ? 'bg-[#A0453A]/5 border border-[#A0453A]/20' : 'bg-[#F7F7F7]'}`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-3 min-w-0">
                             <Clock className="w-4 h-4 text-[#888]" />
-                            <div className="text-xs text-[#888]">
+                            <div className="text-xs text-[#888] min-w-0">
                               <span>数据时间: </span>
                               <span className="font-medium text-[#1d1d1f]">
                                 {new Date(report.generated_at).toLocaleString('zh-CN')}

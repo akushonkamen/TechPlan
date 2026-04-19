@@ -2,12 +2,12 @@
 
 import type { SkillExecution } from './skillExecutor.js';
 
-export interface SchedulerConfig {
+interface SchedulerConfig {
   enabled: boolean;
   checkIntervalMinutes: number; // 5..1440
 }
 
-export interface SchedulerStatus {
+interface SchedulerStatus {
   running: boolean;
   checkIntervalMinutes: number;
   lastCheckAt: string | null;
@@ -16,7 +16,7 @@ export interface SchedulerStatus {
   recentTriggers: RecentTrigger[];
 }
 
-export interface PendingTopic {
+interface PendingTopic {
   topicId: string;
   topicName: string;
   schedule: 'daily' | 'weekly' | 'monthly' | 'quarterly';
@@ -24,7 +24,7 @@ export interface PendingTopic {
   dueInMinutes: number;
 }
 
-export interface RecentTrigger {
+interface RecentTrigger {
   topicId: string;
   topicName: string;
   triggeredAt: string;
@@ -256,7 +256,7 @@ export class SchedulerService {
     if (topicSchedulePairs.length === 0) return [];
 
     const unionQueries = topicSchedulePairs.map(
-      (_, i) => `SELECT ? as topic_id, ? as schedule_type, MAX(generated_at) as lastAt FROM reports WHERE topic_id = ? AND type = ?`
+      () => `SELECT ? as topic_id, ? as schedule_type, MAX(generated_at) as lastAt FROM reports WHERE topic_id = ? AND type = ?`
     ).join(' UNION ALL ');
 
     const batchParams = topicSchedulePairs.flatMap(pair => [pair.topicId, pair.schedule, pair.topicId, pair.schedule]);

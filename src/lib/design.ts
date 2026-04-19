@@ -3,39 +3,6 @@
  * macOS cool-gray style: #F7F7F7 bg, pure black borders, clean minimal palette.
  */
 
-// ── Colors ──────────────────────────────────────────────
-export const COLORS = {
-  primary: '#1d1d1f',
-  primaryHover: '#1a1a1a',
-  primaryActive: '#2a2a2a',
-  accent: '#D1D1D1',
-  accentHover: '#b8b8b8',
-  success: '#5B7553',
-  successLight: '#7A9B72',
-  warning: '#9C7B3C',
-  warningLight: '#B8995A',
-  danger: '#A0453A',
-  dangerLight: '#B8584E',
-  info: '#6B7B8D',
-  text: {
-    primary: '#1d1d1f',
-    secondary: '#888',
-    tertiary: '#aaa',
-    quaternary: '#ccc',
-  },
-  bg: {
-    primary: '#F7F7F7',
-    secondary: '#E8E8E8',
-    tertiary: '#DEDEDE',
-    elevated: '#FAFAFA',
-  },
-  border: {
-    default: '#1d1d1f',
-    light: '#1d1d1f',
-    medium: '#1d1d1f',
-  },
-} as const;
-
 // ── Reusable Tailwind class constants ───────────────────
 
 export const CARD = 'bg-[#F7F7F7] border border-[#1d1d1f]/60 rounded-3xl transition-all duration-200 ease-out';

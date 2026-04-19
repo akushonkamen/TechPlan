@@ -2,7 +2,9 @@
 
 > 版本：v1.0
 > 创建日期：2026-03-30
-> 状态：规划中
+> 状态：历史规划草案
+
+> 注意：本文描述的 `report_type_configs`、`trigger_rules`、`trigger_events`、`report_distributions`、`report_archives` 等表未进入当前运行时实现。当前代码只保留实际被报告生成、调度和旧库兼容使用的字段迁移。
 
 ---
 
@@ -1770,7 +1772,7 @@ interface TriggerRulesPageProps {
 | 资源类型 | 规格 | 用途 |
 |----------|------|------|
 | 服务器 | 4核8G | 应用服务 |
-| 数据库 | SQLite + Neo4j | 数据存储 |
+| 数据库 | SQLite + Kuzu | 数据存储 |
 | 存储 | 100GB SSD | 报告归档 |
 | 消息队列 | 内存队列 | 异步任务 |
 
