@@ -52,5 +52,4 @@ export interface CreateDocumentInput {
   relevance_score?: number;
 }
 
-// Re-export from graph types
-export * from './types/graph.js';
+// Graph types removed - using SQLite only

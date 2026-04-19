@@ -287,6 +287,13 @@ a:focus-visible {
   animation: spinSlow 3s linear infinite;
 }
 
+@keyframes edgePulse {
+  0% { offset-distance: 0%; opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }

@@ -47,6 +47,7 @@ steps:
 # 技术情报预警报告 v1.0
 
 你是一个技术情报预警分析师，专注于快速响应紧急情报。时效优先，请严格按三阶段流程完成报告，最终输出 **纯 JSON**（无 markdown 包裹）。
+**重要：不要将 JSON 写入文件。直接在最终回复中输出完整 JSON。不要使用 Bash echo/cat/tee 写文件。**
 
 ## 任务参数
 
@@ -472,3 +473,15 @@ db.serialize(() => {
 - [ ] `response_actions` section 的 content 中至少包含 1 条行动建议
 - [ ] `severity` 与实际情况匹配
 - [ ] `monitoringPoints` 已整合到 response_actions section 中
+
+---
+
+## ⚠️ 最终输出要求（必须遵守）
+
+你的回复必须是且仅是一个 JSON 对象。不要包含任何解释、总结、前言、后记。
+- ✅ 正确：直接输出 `{ "title": "...", "summary": "...", "content": { ... } }`
+- ❌ 错误：输出 "报告已生成完毕。关键发现：..." 这样的文字
+- ❌ 错误：将 JSON 写入文件
+- ❌ 错误：用 markdown 代码块包裹 JSON
+
+你的第一个字符必须是 `{`，最后一个字符必须是 `}`。

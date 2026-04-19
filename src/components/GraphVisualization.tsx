@@ -1,37 +1,7 @@
-import type { FC, MouseEvent } from 'react';
-import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
-import ReactFlow, {
-  Node,
-  Edge,
-  Background,
-  Controls,
-  MiniMap,
-  useNodesState,
-  useEdgesState,
-  addEdge,
-  Connection,
-  NodeTypes,
-  Position,
-  getRectOfNodes,
-  getTransformForBounds,
-} from 'reactflow';
-import 'reactflow/dist/style.css';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 
-// Node Types
-export type GraphNodeType = 'topic' | 'entity' | 'event' | 'claim' | 'document';
-
-// Export format types
-export type GraphExportFormat = 'json' | 'png';
-
-export interface GraphExportData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  metadata?: {
-    exportedAt: string;
-    nodeCount: number;
-    edgeCount: number;
-  };
-}
+// Node Types — includes entity subtypes for visual differentiation
+export type GraphNodeType = 'topic' | 'entity' | 'technology' | 'product' | 'organization' | 'event' | 'claim' | 'document';
 
 export interface GraphNodeData {
   label: string;
@@ -41,15 +11,39 @@ export interface GraphNodeData {
   metadata?: Record<string, any>;
   topicId?: string;
   highlighted?: boolean;
+  importance?: number;
+  fullLabel?: string;
+  canonicalName?: string;
+  searchMatched?: boolean;
+  dimmed?: boolean;
+  recent?: boolean;
+  clusterId?: string;
+  clusterLabel?: string;
+  clusterRole?: string;
 }
 
 export interface GraphEdgeData {
   label?: string;
-  type: 'has_entity' | 'has_claim' | 'supports' | 'contradicts' | 'related_to';
+  type: 'has_entity' | 'has_claim' | 'has_event' | 'supports' | 'contradicts' | 'related_to' | 'participated_in';
+  relationType?: string;
+  confidence?: number;
+  recent?: boolean;
+  dimmed?: boolean;
 }
 
-export type GraphNode = Node<GraphNodeData>;
-export type GraphEdge = Edge<GraphEdgeData>;
+export interface GraphNode {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: GraphNodeData;
+}
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  data?: GraphEdgeData;
+}
 
 export interface GraphVisualizationProps {
   nodes: GraphNode[];
@@ -57,223 +51,273 @@ export interface GraphVisualizationProps {
   onNodeClick?: (node: GraphNode) => void;
   onNodeDoubleClick?: (node: GraphNode) => void;
   focusNodeIds?: string[];
+  showPulse?: boolean;
+  layoutMode?: string;
+  onLayoutModeChange?: (mode: string) => void;
+  terrainClusters?: any[];
+  selectedClusterId?: string | null;
 }
 
-// MNEMOSYNE-style node colors (warm tones for cream bg on black canvas)
+// Bauhaus palette — node accent colors
 const NODE_ACCENT: Record<string, string> = {
-  topic: '#4A8B9E',
+  topic: '#1A1A1A',
+  technology: '#D94F26',
+  product: '#D94F26',
+  organization: '#F29F05',
+  event: '#6B9E7A',
+  claim: '#6B9E7A',
+  document: '#9A7DA8',
   entity: '#9A7DA8',
-  event: '#C49A5C',
-  claim: '#C46B5C',
-  document: '#6B9E7A',
 };
 
-// Custom Node Component — MNEMOSYNE editorial style
-const CustomNode: FC<{ data: GraphNodeData }> = ({ data }) => {
-  const hasHighlightContext = data.highlighted !== undefined;
-  const isHighlighted = data.highlighted === true;
-  const accent = NODE_ACCENT[data.type] || '#86868b';
-
-  // Type badge label
-  const typeLabel: Record<string, string> = {
-    topic: 'TOPIC', entity: 'ENTITY', event: 'EVENT',
-    claim: 'CLAIM', document: 'DOC',
-  };
-
-  if (hasHighlightContext && !isHighlighted) {
-    return (
-      <div className="px-3 py-1.5 rounded-full border border-white/20 bg-white/5 text-white/30 text-xs font-medium text-center min-w-[60px] transition-all duration-300 scale-75">
-        {data.label}
-      </div>
-    );
-  }
-
-  return (
-    <div className={`group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all duration-300 min-w-[60px] ${
-      isHighlighted
-        ? 'bg-[#F7F7F7] border-[#1d1d1f] border-[2px] shadow-lg text-[#1d1d1f] scale-110'
-        : 'bg-[#F7F7F7]/95 border-[#1d1d1f]/60 text-[#1d1d1f] hover:border-[#1d1d1f]'
-    }`}>
-      <span
-        className="w-2 h-2 rounded-full shrink-0"
-        style={{ background: accent }}
-      />
-      <span className="truncate max-w-[120px]">{data.label}</span>
-      <span
-        className="hidden group-hover:inline text-[8px] font-mono tracking-wider opacity-50 ml-1"
-        style={{ color: accent }}
-      >
-        {typeLabel[data.type] || 'NODE'}
-      </span>
-    </div>
-  );
+// Edge colors by relation type
+const EDGE_COLORS: Record<string, string> = {
+  DEVELOPS: '#2D6B30',
+  COMPETES_WITH: '#A0453A',
+  USES: '#2A5A6B',
+  INVESTS_IN: '#7A5C2A',
+  RELATED_TO: '#4A4A6B',
+  SUPPORTS: '#3A7A4A',
+  CONTRADICTS: '#8B3A2A',
+  HAS_ENTITY: '#1A1A1A',
+  HAS_EVENT: '#666666',
+  HAS_CLAIM: '#666666',
+  PARTICIPATED_IN: '#6B5A2A',
+  MENTIONS: '#5A3A6B',
 };
 
-const nodeTypes: NodeTypes = {
-  custom: CustomNode,
+// Type labels
+const TYPE_LABEL: Record<string, string> = {
+  topic: '主题', entity: '实体', technology: '技术', product: '产品',
+  organization: '组织', event: '事件', claim: '主张', document: '文档',
 };
 
-// Layout algorithms
-const applyLayout = (
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  layoutType: 'force' | 'hierarchical' | 'circular' | 'grid' | 'concentric' | 'radial'
-): { nodes: GraphNode[]; edges: GraphEdge[] } => {
-  const layoutedNodes = [...nodes];
+// Is type colored (filled background)
+const FILLED_TYPES = new Set(['topic', 'technology', 'product', 'organization']);
+
+// Compute radial layout: topic at center, entities radiate outward
+function computeRadialLayout(nodes: GraphNode[]): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
   const centerX = 500;
   const centerY = 350;
 
-  switch (layoutType) {
-    case 'hierarchical': {
-      const levels: Record<string, number> = {};
-      const visited = new Set<string>();
-      const getLevel = (nodeId: string): number => {
-        if (visited.has(nodeId)) return levels[nodeId] ?? 0;
-        visited.add(nodeId);
-        const incoming = edges.filter(e => e.target === nodeId);
-        if (incoming.length === 0) { levels[nodeId] = 0; return 0; }
-        const parentLevels = incoming.map(e => getLevel(e.source));
-        levels[nodeId] = Math.max(...parentLevels) + 1;
-        return levels[nodeId];
-      };
-      nodes.forEach(n => getLevel(n.id));
-      const byLevel: Record<number, GraphNode[]> = {};
-      Object.entries(levels).forEach(([nid, level]) => {
-        if (!byLevel[level]) byLevel[level] = [];
-        const node = layoutedNodes.find(n => n.id === nid);
-        if (node) byLevel[level].push(node);
-      });
-      Object.entries(byLevel).forEach(([level, lnodes]) => {
-        const y = parseInt(level) * 150;
-        lnodes.forEach((node, i) => {
-          node.position = { x: (i - (lnodes.length - 1) / 2) * 200, y };
-        });
-      });
-      break;
-    }
-    case 'circular': {
-      const radius = Math.min(250, 60 + nodes.length * 12);
-      layoutedNodes.forEach((node, i) => {
-        const angle = (2 * Math.PI * i) / nodes.length;
-        node.position = { x: centerX + radius * Math.cos(angle), y: centerY + radius * Math.sin(angle) };
-      });
-      break;
-    }
-    case 'concentric': {
-      const typeOrder: GraphNodeType[] = ['topic', 'entity', 'event', 'claim', 'document'];
-      const radii = [0, 140, 220, 300, 380];
-      const byType: Record<string, GraphNode[]> = { topic: [], entity: [], event: [], claim: [], document: [] };
-      nodes.forEach(n => { (byType[n.data.type] || byType.entity).push(n); });
-      typeOrder.forEach((type, idx) => {
-        const tnodes = byType[type];
-        const r = radii[idx] || 200;
-        tnodes.forEach((node, i) => {
-          const angle = (2 * Math.PI * i) / Math.max(tnodes.length, 1);
-          node.position = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
-        });
-      });
-      break;
-    }
-    case 'radial':
-      layoutedNodes.forEach((node, i) => {
-        if (i === 0) { node.position = { x: centerX, y: centerY }; }
-        else {
-          const angle = (2 * Math.PI * (i - 1)) / (nodes.length - 1);
-          const r = 180 + nodes.length * 8;
-          node.position = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
-        }
-      });
-      break;
-    case 'grid': {
-      const cols = Math.ceil(Math.sqrt(nodes.length));
-      layoutedNodes.forEach((node, i) => {
-        node.position = { x: (i % cols) * 220, y: Math.floor(i / cols) * 160 };
-      });
-      break;
-    }
-    case 'force':
-    default:
-      layoutedNodes.forEach((node) => {
-        const angle = Math.random() * 2 * Math.PI;
-        const distance = 80 + Math.random() * 250;
-        node.position = { x: centerX + distance * Math.cos(angle), y: centerY + distance * Math.sin(angle) };
-      });
-      break;
+  const topicNode = nodes.find(n => n.data.type === 'topic');
+  const entityNodes = nodes.filter(n => n.data.type !== 'topic');
+
+  if (topicNode) {
+    positions.set(topicNode.id, { x: centerX, y: centerY });
   }
 
-  return { nodes: layoutedNodes, edges };
-};
+  // Sort by importance descending so important nodes get better positions
+  const sorted = [...entityNodes].sort((a, b) => (b.data.importance ?? 0) - (a.data.importance ?? 0));
+  const count = sorted.length;
+  const radius = Math.max(220, 80 + count * 14);
 
-export function exportGraphAsJSON(nodes: GraphNode[], edges: GraphEdge[]): string {
-  return JSON.stringify({ nodes, edges, metadata: { exportedAt: new Date().toISOString(), nodeCount: nodes.length, edgeCount: edges.length } }, null, 2);
+  sorted.forEach((node, i) => {
+    const angle = (2 * Math.PI * i) / count - Math.PI / 2;
+    positions.set(node.id, {
+      x: centerX + radius * Math.cos(angle),
+      y: centerY + radius * Math.sin(angle),
+    });
+  });
+
+  return positions;
 }
 
-export async function exportGraphAsPNG(nodes: GraphNode[], edges: GraphEdge[], filename = 'knowledge-graph.png'): Promise<void> {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Could not create canvas');
-  const padding = 50;
-  const rect = getRectOfNodes(nodes);
-  canvas.width = Math.max(800, rect.width + padding * 2);
-  canvas.height = Math.max(600, rect.height + padding * 2);
-  ctx.fillStyle = '#1d1d1f';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = 'rgba(243,238,231,0.3)';
-  ctx.lineWidth = 1.5;
-  edges.forEach(edge => {
-    const s = nodes.find(n => n.id === edge.source);
-    const t = nodes.find(n => n.id === edge.target);
-    if (s && t) {
-      ctx.beginPath();
-      ctx.moveTo(s.position.x - rect.x + padding, s.position.y - rect.y + padding);
-      ctx.lineTo(t.position.x - rect.x + padding, t.position.y - rect.y + padding);
-      ctx.stroke();
-    }
-  });
-  nodes.forEach(node => {
-    const x = node.position.x - rect.x + padding;
-    const y = node.position.y - rect.y + padding;
-    ctx.fillStyle = '#F7F7F7';
-    ctx.beginPath();
-    ctx.roundRect(x - 40, y - 12, 80, 24, 12);
-    ctx.fill();
-    ctx.strokeStyle = '#1d1d1f';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = '#1d1d1f';
-    ctx.font = '600 11px Inter, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const label = (node.data.label || node.id).slice(0, 12);
-    ctx.fillText(label, x, y);
-  });
-  canvas.toBlob(blob => {
-    if (blob) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-  });
+// Get node radius based on importance
+function getNodeRadius(importance?: number): number {
+  const imp = importance ?? 0;
+  return Math.round(20 + imp * 14); // 20px (no connections) to 34px (most connected)
 }
 
-export const GraphVisualization: FC<GraphVisualizationProps> = ({
+// Get font size based on importance
+function getNodeFontSize(importance?: number): number {
+  const imp = importance ?? 0;
+  if (imp > 0.7) return 11;
+  if (imp > 0.3) return 10;
+  return 9;
+}
+
+export const GraphVisualization = ({
   nodes: initialNodes,
   edges: initialEdges,
   onNodeClick,
   onNodeDoubleClick,
   focusNodeIds,
-}) => {
-  const [layout, setLayout] = useState<'force' | 'hierarchical' | 'circular' | 'grid' | 'concentric' | 'radial'>('concentric');
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const rfInstance = useRef<any>(null);
-  const autoFitTimerRef = useRef<NodeJS.Timeout | null>(null);
+  showPulse = false,
+}: GraphVisualizationProps) => {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const lastClickTime = useRef<Map<string, number>>(new Map());
+
+  // Viewport state
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+
+  // Node positions — mutable for drag
+  const [nodePositions, setNodePositions] = useState<Map<string, { x: number; y: number }>>(new Map());
+  const [dragging, setDragging] = useState<string | null>(null);
+  const dragOffset = useRef({ x: 0, y: 0 });
+
+  // Initialize positions when nodes change
+  useEffect(() => {
+    const layout = computeRadialLayout(initialNodes);
+    setNodePositions(layout);
+    // Auto-fit: center the viewport
+    if (initialNodes.length > 0) {
+      const svg = svgRef.current;
+      if (svg) {
+        const rect = svg.getBoundingClientRect();
+        setPan({ x: rect.width / 2 - 500, y: rect.height / 2 - 350 });
+      }
+    }
+  }, [initialNodes]);
+
+  // Focus on specific nodes
+  useEffect(() => {
+    if (focusNodeIds && focusNodeIds.length > 0 && nodePositions.size > 0) {
+      const pos = nodePositions.get(focusNodeIds[0]);
+      if (pos && svgRef.current) {
+        const rect = svgRef.current.getBoundingClientRect();
+        setPan({ x: rect.width / 2 - pos.x * zoom, y: rect.height / 2 - pos.y * zoom });
+      }
+    }
+  }, [focusNodeIds, nodePositions, zoom]);
+
+  // Selected node data
+  const selectedNode = selectedId ? initialNodes.find(n => n.id === selectedId) ?? null : null;
+
+  // Mouse handlers
+  const handleSvgMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.target === svgRef.current || (e.target as Element).tagName === 'svg' || (e.target as Element).classList?.contains('svg-bg')) {
+      isPanning.current = true;
+      panStart.current = { x: e.clientX, y: e.clientY };
+      setSelectedId(null);
+    }
+  }, []);
+
+  const handleNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string) => {
+    e.stopPropagation();
+    const pos = nodePositions.get(nodeId);
+    if (!pos) return;
+
+    setDragging(nodeId);
+    setSelectedId(nodeId);
+    dragOffset.current = { x: e.clientX / zoom - pos.x, y: e.clientY / zoom - pos.y };
+
+    // Double-click detection
+    const now = Date.now();
+    const last = lastClickTime.current.get(nodeId) ?? 0;
+    if (now - last < 350) {
+      const node = initialNodes.find(n => n.id === nodeId);
+      if (node) onNodeDoubleClick?.(node);
+    }
+    lastClickTime.current.set(nodeId, now);
+  }, [nodePositions, zoom, initialNodes, onNodeDoubleClick]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (dragging) {
+      const newX = e.clientX / zoom - dragOffset.current.x;
+      const newY = e.clientY / zoom - dragOffset.current.y;
+      setNodePositions(prev => {
+        const next = new Map(prev);
+        next.set(dragging, { x: newX, y: newY });
+        return next;
+      });
+    } else if (isPanning.current) {
+      setPan(p => ({
+        x: p.x + e.clientX - panStart.current.x,
+        y: p.y + e.clientY - panStart.current.y,
+      }));
+      panStart.current = { x: e.clientX, y: e.clientY };
+    }
+  }, [dragging, zoom]);
+
+  const handleMouseUp = useCallback(() => {
+    if (dragging) {
+      const node = initialNodes.find(n => n.id === dragging);
+      if (node) onNodeClick?.(node);
+    }
+    setDragging(null);
+    isPanning.current = false;
+  }, [dragging, initialNodes, onNodeClick]);
+
+  useEffect(() => {
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, [handleMouseUp]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    setZoom(z => Math.min(2, Math.max(0.3, z - e.deltaY * 0.001)));
+  }, []);
+
+  // Build edge paths
+  const edgeElements = useMemo(() => {
+    return initialEdges.map(edge => {
+      const sourcePos = nodePositions.get(edge.source);
+      const targetPos = nodePositions.get(edge.target);
+      if (!sourcePos || !targetPos) return null;
+
+      const sourceNode = initialNodes.find(n => n.id === edge.source);
+      const targetNode = initialNodes.find(n => n.id === edge.target);
+
+      const r1 = getNodeRadius(sourceNode?.data.importance);
+      const r2 = getNodeRadius(targetNode?.data.importance);
+
+      const dx = targetPos.x - sourcePos.x;
+      const dy = targetPos.y - sourcePos.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+
+      const x1 = sourcePos.x + ux * r1;
+      const y1 = sourcePos.y + uy * r1;
+      const x2 = targetPos.x - ux * r2;
+      const y2 = targetPos.y - uy * r2;
+
+      // Quadratic bezier with perpendicular offset
+      const mx = (x1 + x2) / 2 - uy * 20;
+      const my = (y1 + y2) / 2 + ux * 20;
+
+      const relKey = (edge.data?.relationType || '').toUpperCase();
+      const baseColor = EDGE_COLORS[relKey] || '#1A1A1A';
+      const isSelected = selectedId === edge.source || selectedId === edge.target;
+      const isHovered = hoveredEdgeId === edge.id;
+
+      return {
+        id: edge.id,
+        path: `M${x1},${y1} Q${mx},${my} ${x2},${y2}`,
+        color: isSelected || isHovered ? baseColor : baseColor,
+        opacity: isSelected || isHovered ? 0.8 : 0.35,
+        strokeWidth: isSelected || isHovered ? 2.5 : 1.5,
+        isSelected,
+        label: edge.data?.label,
+        labelX: mx,
+        labelY: my,
+        showLabel: isSelected || isHovered,
+      };
+    }).filter(Boolean);
+  }, [initialEdges, nodePositions, initialNodes, selectedId, hoveredEdgeId]);
+
+  // Node list with positions
+  const nodesWithPositions = useMemo(() => {
+    return initialNodes.map(node => ({
+      ...node,
+      pos: nodePositions.get(node.id) ?? { x: 0, y: 0 },
+    }));
+  }, [initialNodes, nodePositions]);
 
   const handleExportJSON = useCallback(() => {
-    const json = exportGraphAsJSON(initialNodes, initialEdges);
-    const blob = new Blob([json], { type: 'application/json' });
+    const data = {
+      nodes: initialNodes,
+      edges: initialEdges,
+      metadata: { exportedAt: new Date().toISOString(), nodeCount: initialNodes.length, edgeCount: initialEdges.length },
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -282,172 +326,330 @@ export const GraphVisualization: FC<GraphVisualizationProps> = ({
     URL.revokeObjectURL(url);
   }, [initialNodes, initialEdges]);
 
-  const handleExportPNG = useCallback(async () => {
-    try { await exportGraphAsPNG(initialNodes, initialEdges); } catch (err) { console.error('Export PNG failed:', err); }
-  }, [initialNodes, initialEdges]);
-
-  useEffect(() => {
-    if (focusNodeIds?.length && rfInstance.current) {
-      autoFitTimerRef.current = setTimeout(() => {
-        rfInstance.current?.fitView({ nodes: focusNodeIds.map(id => ({ id })), padding: 0.3, duration: 600 });
-      }, 400);
-      return () => { if (autoFitTimerRef.current) clearTimeout(autoFitTimerRef.current); };
-    }
-  }, [focusNodeIds]);
-
-  const transformedNodes = useMemo(() =>
-    initialNodes.map(node => ({ ...node, type: 'custom', sourcePosition: Position.Right, targetPosition: Position.Left, data: { ...node.data, label: node.data.label || node.id } })),
-    [initialNodes]
-  );
-
-  const transformedEdges = useMemo(() =>
-    initialEdges.map(edge => ({
-      ...edge,
-      type: 'smoothstep' as const,
-      animated: edge.data?.type === 'contradicts',
-      style: {
-        stroke: edge.data?.type === 'contradicts' ? '#C46B5C' :
-                edge.data?.type === 'supports' ? '#6B9E7A' : 'rgba(243,238,231,0.35)',
-        strokeWidth: 1.5,
-      },
-      label: edge.data?.label,
-      labelStyle: { fontSize: 9, fontWeight: 600, fill: 'rgba(243,238,231,0.6)' },
-      labelBgStyle: { fill: 'rgba(15,15,15,0.7)', fillOpacity: 1 },
-      labelBgPadding: [4, 6] as [number, number],
-      labelBgBorderRadius: 4,
-    })),
-    [initialEdges]
-  );
-
-  const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() =>
-    applyLayout(transformedNodes, transformedEdges, layout),
-    [transformedNodes, transformedEdges, layout]
-  );
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
-
-  useEffect(() => {
-    const cur = JSON.stringify(nodes);
-    const nxt = JSON.stringify(layoutedNodes);
-    if (cur !== nxt) setNodes(layoutedNodes);
-  }, [layoutedNodes, setNodes]);
-
-  useEffect(() => { setEdges(layoutedEdges); }, [layoutedEdges, setEdges]);
-
-  const onConnect = useCallback((params: Connection) => setEdges(eds => addEdge(params, eds)), [setEdges]);
-
-  const handleNodeClick = useCallback((_e: MouseEvent, node: GraphNode) => {
-    setSelectedNode(node);
-    onNodeClick?.(node);
-  }, [onNodeClick]);
-
-  const handleNodeDoubleClick = useCallback((_e: MouseEvent, node: GraphNode) => {
-    onNodeDoubleClick?.(node);
-    if (node.data.url) window.open(node.data.url, '_blank');
-  }, [onNodeDoubleClick]);
-
   return (
-    <div className="w-full h-full relative">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onNodeClick={handleNodeClick}
-        onNodeDoubleClick={handleNodeDoubleClick}
-        onInit={inst => { rfInstance.current = inst; }}
-        nodeTypes={nodeTypes}
-        fitView
-        attributionPosition="bottom-left"
-        proOptions={{ hideAttribution: true }}
+    <div className="w-full h-full relative" style={{ background: '#F7F7F7' }}>
+      {/* SVG Canvas */}
+      <svg
+        ref={svgRef}
+        className="svg-bg"
+        style={{ width: '100%', height: '100%', cursor: isPanning.current ? 'grabbing' : dragging ? 'grabbing' : 'grab' }}
+        onMouseMove={handleMouseMove}
+        onMouseDown={handleSvgMouseDown}
+        onWheel={handleWheel}
       >
-        <Background color="rgba(243,238,231,0.08)" gap={24} />
-        <Controls
-          className="!border-[#1d1d1f] !rounded-xl !shadow-none !bg-[#F7F7F7]"
-        />
-        <MiniMap
-          nodeColor={node => NODE_ACCENT[node.data?.type] || '#888'}
-          className="!bg-[#1a1a1a] !border !border-[#1d1d1f] !rounded-xl"
-          maskColor="rgba(15,15,15,0.85)"
-        />
-      </ReactFlow>
+        <defs>
+          {/* Arrow markers */}
+          <marker id="arrow-default" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#1A1A1A" opacity="0.5" />
+          </marker>
+          <marker id="arrow-active" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#1A1A1A" opacity="0.9" />
+          </marker>
+        </defs>
 
-      {/* Layout Controls — MNEMOSYNE pill style */}
-      <div className="absolute top-4 right-4 bg-[#F7F7F7] rounded-2xl border border-[#1d1d1f] p-2.5 z-10">
-        <div className="text-[9px] font-extrabold uppercase tracking-widest text-[#888] mb-1.5 px-1">Layout</div>
-        <div className="grid grid-cols-3 gap-1 mb-1.5">
-          {[
-            { value: 'force', label: 'Force' },
-            { value: 'hierarchical', label: 'Level' },
-            { value: 'concentric', label: 'Ring' },
-            { value: 'circular', label: 'Circle' },
-            { value: 'grid', label: 'Grid' },
-            { value: 'radial', label: 'Star' },
-          ].map(({ value, label }) => (
-            <button
-              key={value}
-              onClick={() => setLayout(value as any)}
-              className={`px-2 py-1 text-[10px] font-semibold rounded-lg transition-all ${
-                layout === value
-                  ? 'bg-[#1d1d1f] text-[#F7F7F7]'
-                  : 'text-[#888] hover:bg-[#D1D1D1]'
-              }`}
-            >
-              {label}
-            </button>
+        <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+          {/* Dot grid */}
+          <pattern id="dot-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <circle cx="20" cy="20" r="1" fill="#1A1A1A" opacity="0.15" />
+          </pattern>
+          <rect x="-2000" y="-2000" width="6000" height="6000" fill="url(#dot-grid)" />
+
+          {/* Edges */}
+          {edgeElements.map(e => (
+            <g key={e!.id}>
+              <path
+                d={e!.path}
+                fill="none"
+                stroke={e!.color}
+                strokeWidth={e!.strokeWidth}
+                opacity={e!.opacity}
+                markerEnd={`url(#${e!.isSelected ? 'arrow-active' : 'arrow-default'})`}
+                style={{ transition: 'stroke 0.15s, opacity 0.15s' }}
+                onMouseEnter={() => setHoveredEdgeId(e!.id)}
+                onMouseLeave={() => setHoveredEdgeId(null)}
+              />
+              {/* Edge label on hover/select */}
+              {e!.showLabel && e!.label && (
+                <>
+                  <rect
+                    x={e!.labelX - (e!.label.length * 3.5 + 8)}
+                    y={e!.labelY - 9}
+                    width={e!.label.length * 7 + 16}
+                    height={18}
+                    rx={2}
+                    fill="#F7F7F7"
+                    fillOpacity={0.95}
+                    stroke={e!.color}
+                    strokeWidth={1}
+                  />
+                  <text
+                    x={e!.labelX}
+                    y={e!.labelY}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize={10}
+                    fontWeight={700}
+                    fill="#1A1A1A"
+                    style={{ fontFamily: 'var(--font-family)', pointerEvents: 'none' }}
+                  >
+                    {e!.label}
+                  </text>
+                </>
+              )}
+            </g>
           ))}
-        </div>
-        <div className="border-t border-[#1d1d1f]/20 pt-1.5 mt-1">
-          <div className="flex gap-1">
-            <button onClick={handleExportJSON} className="flex-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-[#D1D1D1] hover:bg-[#b8b8b8] transition-colors">JSON</button>
-            <button onClick={handleExportPNG} className="flex-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-[#D1D1D1] hover:bg-[#b8b8b8] transition-colors">PNG</button>
-          </div>
-        </div>
+
+          {/* Nodes */}
+          {nodesWithPositions.map(node => {
+            const accent = NODE_ACCENT[node.data.type] || '#9A7DA8';
+            const isFilled = FILLED_TYPES.has(node.data.type);
+            const radius = getNodeRadius(node.data.importance);
+            const fontSize = getNodeFontSize(node.data.importance);
+            const isSelected = selectedId === node.id;
+            const isHighlighted = node.data.highlighted;
+            const hasHighlightContext = node.data.highlighted !== undefined;
+            const isDimmed = hasHighlightContext && !isHighlighted;
+            const textColor = isFilled ? '#F7F7F7' : '#1A1A1A';
+            const label = node.data.label || node.id;
+
+            return (
+              <g
+                key={node.id}
+                transform={`translate(${node.pos.x}, ${node.pos.y})`}
+                className="node-circle"
+                onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                style={{
+                  cursor: 'grab',
+                  opacity: isDimmed ? 0.2 : 1,
+                  transition: 'opacity 0.3s',
+                }}
+              >
+                {/* Selection ring */}
+                {isSelected && (
+                  <circle r={radius + 8} fill="none" stroke={accent} strokeWidth={2} opacity={0.4}
+                    style={{ animation: 'pulse-glow 2s ease-in-out infinite' }} />
+                )}
+                {/* Main circle */}
+                <circle
+                  r={radius}
+                  fill={isFilled ? accent : '#F7F7F7'}
+                  stroke={isSelected ? accent : `${accent}99`}
+                  strokeWidth={isSelected ? 2.5 : 1.5}
+                  style={{ transition: 'stroke 0.15s' }}
+                />
+                {/* Node label */}
+                <text
+                  textAnchor="middle"
+                  dy={-3}
+                  fontSize={fontSize}
+                  fontWeight={700}
+                  fill={textColor}
+                  style={{ fontFamily: 'var(--font-family)', pointerEvents: 'none' }}
+                >
+                  {label.length > 8 ? label.slice(0, 8) + '…' : label}
+                </text>
+                {/* Full label below node */}
+                <text
+                  textAnchor="middle"
+                  dy={radius + 16}
+                  fontSize={10}
+                  fill="#888"
+                  style={{ fontFamily: 'var(--font-family)', pointerEvents: 'none' }}
+                >
+                  {label.length > 14 ? label.slice(0, 14) + '…' : label}
+                </text>
+                {/* Type badge */}
+                <text
+                  textAnchor="middle"
+                  dy={fontSize + 3}
+                  fontSize={7}
+                  fontWeight={700}
+                  fill={isFilled ? 'rgba(247,247,247,0.6)' : accent}
+                  style={{ fontFamily: 'var(--font-family)', pointerEvents: 'none', textTransform: 'uppercase', letterSpacing: '1px' }}
+                >
+                  {TYPE_LABEL[node.data.type] || 'NODE'}
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+
+      {/* Zoom controls — Bauhaus style */}
+      <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
+        {[
+          { label: '+', fn: () => setZoom(z => Math.min(2, z + 0.15)) },
+          { label: '−', fn: () => setZoom(z => Math.max(0.3, z - 0.15)) },
+          { label: '⊙', fn: () => { setZoom(1); setPan({ x: 0, y: 0 }); } },
+        ].map(({ label, fn }) => (
+          <button
+            key={label}
+            onClick={fn}
+            className="w-8 h-8 flex items-center justify-center text-base cursor-pointer bg-[#F7F7F7] border-[1.5px] border-[#1A1A1A] text-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-[#F7F7F7] transition-colors"
+            style={{ borderRadius: '0 8px 8px 8px', fontFamily: 'var(--font-family)' }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {/* Node Details — MNEMOSYNE module style */}
-      {selectedNode && (
-        <div className="absolute bottom-4 right-4 bg-[#F7F7F7] rounded-2xl border border-[#1d1d1f] p-4 z-10 max-w-xs">
-          <div className="flex justify-between items-start mb-2">
-            <h3 className="font-bold text-[#1d1d1f] text-sm">{selectedNode.data.label}</h3>
-            <button onClick={() => setSelectedNode(null)} className="text-[#888] hover:text-[#1d1d1f] text-xs font-mono">✕</button>
-          </div>
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NODE_ACCENT[selectedNode.data.type] || '#888' }} />
-              <span className="font-mono text-[#888] uppercase tracking-wider">{selectedNode.data.type}</span>
+      {/* Export button */}
+      <div className="absolute top-4 right-4 z-10">
+        <button
+          onClick={handleExportJSON}
+          className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider bg-[#F7F7F7] border-[1.5px] border-[#1A1A1A] text-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-[#F7F7F7] transition-colors cursor-pointer"
+          style={{ borderRadius: '0 8px 8px 8px' }}
+        >
+          Export JSON
+        </button>
+      </div>
+
+      {/* Hint */}
+      <div className="absolute bottom-4 left-4 text-[10px] text-[#aaa] z-10">
+        拖拽节点 · 滚轮缩放 · 空白区域平移 · 点击节点查看详情
+      </div>
+
+      {/* Node Detail Panel */}
+      {selectedNode && (() => {
+        const accent = NODE_ACCENT[selectedNode.data.type] || '#9A7DA8';
+        const connCount = initialEdges.filter(e => e.source === selectedNode.id || e.target === selectedNode.id).length;
+        return (
+          <div
+            className="absolute bottom-14 right-14 bg-[#F7F7F7] border-[1.5px] border-[#1A1A1A] p-4 z-20 w-[260px] animate-fade-in"
+            style={{ borderRadius: '0 12px 12px 12px' }}
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center pb-2 mb-3 border-b-[3px] border-[#1A1A1A]">
+              <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-[#888]">Node Detail</span>
+              <button
+                onClick={() => setSelectedId(null)}
+                className="text-[#888] hover:text-[#1A1A1A] text-xs font-mono cursor-pointer"
+              >✕</button>
             </div>
+
+            {/* Name + type */}
+            <div className="flex items-center gap-2 mb-3">
+              <div
+                className="w-3 h-3 shrink-0 rounded-full"
+                style={{ background: accent }}
+              />
+              <h3 className="font-extrabold text-[#1A1A1A] text-sm truncate">{selectedNode.data.label}</h3>
+            </div>
+            <div className="font-mono text-[9px] text-[#888] uppercase tracking-wider mb-3">
+              {TYPE_LABEL[selectedNode.data.type] || selectedNode.data.type}
+            </div>
+
+            {/* Stats */}
+            {selectedNode.data.metadata && (
+              <div>
+                {selectedNode.data.metadata.docCount != null && (
+                  <div className="flex justify-between items-baseline py-2 border-b-[1.5px] border-[#1A1A1A]">
+                    <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-[#888]">Docs</span>
+                    <span className="font-mono text-[18px] font-extrabold">{selectedNode.data.metadata.docCount}</span>
+                  </div>
+                )}
+                {selectedNode.data.metadata.confidence != null && (
+                  <div>
+                    <div className="flex justify-between items-baseline py-2 border-b-[1.5px] border-[#1A1A1A]">
+                      <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-[#888]">Confidence</span>
+                      <span className="font-mono text-[18px] font-extrabold">{Math.round(selectedNode.data.metadata.confidence * 100)}%</span>
+                    </div>
+                    <div className="h-[10px] bg-[#1A1A1A]/5 w-full mt-1 mb-2">
+                      <div className="h-full bg-[#1A1A1A]" style={{ width: `${Math.round(selectedNode.data.metadata.confidence * 100)}%` }} />
+                    </div>
+                  </div>
+                )}
+                {selectedNode.data.metadata.firstSeen && (
+                  <div className="flex justify-between items-baseline py-2 border-b-[1.5px] border-[#1A1A1A]">
+                    <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-[#888]">First Seen</span>
+                    <span className="font-mono text-[11px]">{new Date(selectedNode.data.metadata.firstSeen).toLocaleDateString('zh-CN')}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Connections */}
+            {connCount > 0 && (
+              <div className="flex justify-between items-baseline py-2 border-b-[1.5px] border-[#1A1A1A]">
+                <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-[#888]">Connections</span>
+                <span className="font-mono text-[18px] font-extrabold">{connCount}</span>
+              </div>
+            )}
+
+            {/* Importance */}
+            {selectedNode.data.importance != null && (
+              <div className="flex justify-between items-baseline py-2 border-b-[1.5px] border-[#1A1A1A]">
+                <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-[#888]">Importance</span>
+                <span className="font-mono text-[18px] font-extrabold">{Math.round(selectedNode.data.importance * 100)}%</span>
+              </div>
+            )}
+
+            {/* Description */}
             {selectedNode.data.description && (
-              <p className="text-[#1d1d1f]/70 leading-relaxed">{selectedNode.data.description}</p>
+              <div className="bg-[#1A1A1A]/[0.04] p-3 mt-3">
+                <p className="text-[11px] leading-relaxed text-[#1A1A1A]/70">{selectedNode.data.description}</p>
+              </div>
             )}
+
+            {/* Connected entities */}
+            {(() => {
+              const connected = initialEdges
+                .filter(e => e.source === selectedNode.id || e.target === selectedNode.id)
+                .map(e => {
+                  const otherId = e.source === selectedNode.id ? e.target : e.source;
+                  const other = initialNodes.find(n => n.id === otherId);
+                  return other ? { node: other, rel: e.data?.label || '' } : null;
+                })
+                .filter(Boolean)
+                .slice(0, 6);
+              if (connected.length === 0) return null;
+              return (
+                <div className="mt-3">
+                  <div className="text-[9px] font-bold uppercase tracking-[1.5px] text-[#888] mb-2">Connected</div>
+                  {connected.map(({ node: cn, rel }) => {
+                    const cAccent = NODE_ACCENT[cn!.data.type] || '#9A7DA8';
+                    return (
+                      <div
+                        key={cn!.id}
+                        className="flex items-center gap-2 py-1.5 border-b border-[#1A1A1A]/8 last:border-0 cursor-pointer hover:bg-[#1A1A1A]/[0.03]"
+                        onClick={() => { setSelectedId(cn!.id); onNodeClick?.(cn!); }}
+                      >
+                        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: cAccent }} />
+                        <span className="text-[11px] font-semibold truncate flex-1">{cn!.data.label}</span>
+                        {rel && <span className="text-[8px] text-[#888] font-mono">{rel}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
             {selectedNode.data.url && (
-              <a href={selectedNode.data.url} target="_blank" rel="noopener noreferrer" className="text-[#2A5A6B] hover:underline font-medium">Open link →</a>
+              <button
+                onClick={() => window.open(selectedNode.data.url, '_blank')}
+                className="w-full mt-3 py-2 bg-[#1A1A1A] text-[#F7F7F7] border-none text-[10px] font-bold uppercase tracking-wider cursor-pointer"
+                style={{ borderRadius: '0 8px 8px 8px' }}
+              >
+                Open Link →
+              </button>
             )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
-      {/* Legend — MNEMOSYNE tag style */}
-      <div className="absolute bottom-4 left-4 bg-[#F7F7F7]/90 backdrop-blur-sm rounded-2xl border border-[#1d1d1f] p-3 z-10">
-        <div className="text-[9px] font-extrabold uppercase tracking-widest text-[#888] mb-2">Legend</div>
-        <div className="space-y-1.5">
-          {[
-            { type: 'topic', label: 'TOPIC' },
-            { type: 'entity', label: 'ENTITY' },
-            { type: 'event', label: 'EVENT' },
-            { type: 'claim', label: 'CLAIM' },
-          ].map(({ type, label }) => (
-            <div key={type} className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: NODE_ACCENT[type] }} />
-              <span className="text-[10px] font-semibold text-[#1d1d1f]">{label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Pulse animation keyframes */}
+      <style>{`
+        .node-circle:active { cursor: grabbing; }
+        .node-circle:hover { filter: brightness(1.05); }
+        @keyframes pulse-glow { 0%,100%{opacity:.4} 50%{opacity:.8} }
+      `}</style>
     </div>
   );
 };
+
+// Export helpers
+export function exportGraphAsJSON(nodes: GraphNode[], edges: GraphEdge[]): string {
+  return JSON.stringify({ nodes, edges, metadata: { exportedAt: new Date().toISOString(), nodeCount: nodes.length, edgeCount: edges.length } }, null, 2);
+}
 
 export default GraphVisualization;

@@ -1,238 +1,166 @@
-# 图数据库集成文档
+# 图数据库与知识图谱
 
-TechPlan 项目集成了图数据库功能，用于存储和查询知识图谱（实体、关系、事件、声明等）。
+TechPlan 的知识图谱以 SQLite 为事实源，以 Kuzu 作为本地图数据库缓存，并用 ReactFlow 在前端渲染。图谱目标是帮助用户快速理解一个技术主题的结构：核心技术、产品/组织、关键关系、事件与证据。
 
 ## 架构
 
-图数据库模块支持三种后端存储模式：
-
-1. **Neo4j 模式** - 连接到真实的 Neo4j 数据库（完整功能）
-2. **JSON 文件模式** - 使用本地 JSON 文件存储（默认 fallback）
-3. **Mock 模式** - 内存存储，用于开发和测试
-
-系统会自动选择最佳后端：
-- 如果配置了 Neo4j 连接信息且连接成功 → 使用 Neo4j
-- 如果 JSON 文件存在或可创建 → 使用 JSON 文件
-- 否则 → 使用 Mock 内存模式
-
-## 环境变量配置
-
-```bash
-# Neo4j 连接配置（可选）
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=your_password
-
-# JSON 存储路径（可选，默认 ./data/graph-data.json）
-GRAPH_JSON_PATH=./data/graph-data.json
-
-# 启用 Mock 模式（可选，默认 false）
-GRAPH_MOCK_MODE=false
-```
+- **SQLite**：主存储，保存 `topics`、`documents`、`entities`、`relations`、`claims`、`events`。
+- **Kuzu**：可选本地图数据库缓存，文件位于项目根目录 `database.kuzu`。当主题图谱没有 Kuzu 数据时，接口会触发后台同步并立即使用 SQLite fallback 返回数据。
+- **Graph Sensemaking**：语义地形缓存，保存 LLM 生成的簇、节点角色和阅读路径；缓存缺失或刷新失败时使用规则 fallback。
+- **ReactFlow**：前端图谱画布，默认使用技术地形布局；搜索默认高亮，不删除上下文。
 
 ## 数据模型
 
-### 节点类型 (NodeLabel)
+节点类型：
 
-- `Topic` - 主题/话题
-- `Entity` - 实体（技术、公司、产品等）
-- `Event` - 事件
-- `Claim` - 声明/观点
-- `Document` - 文档
-- `Person` - 人物
-- `Organization` - 机构组织
+- `topic`：技术追踪主题
+- `technology`：技术、方法、算法、机制
+- `product`：产品、模型、库、工具
+- `organization`：公司、机构、实验室
+- `entity`：其他实体
+- `event`：事件
+- `claim`：观点、判断、主张
+- `document`：文档
 
-### 关系类型 (RelationType)
+关系类型：
 
-- `HAS_ENTITY` - 主题包含实体
-- `HAS_CLAIM` - 主题/文档包含声明
-- `SUPPORTS` - 支持
-- `CONTRADICTS` - 矛盾
-- `MENTIONS` - 提及
-- `ABOUT` - 关于
-- `AUTHORED_BY` - 由...创作
-- `PUBLISHED_BY` - 由...发布
-- `RELATED_TO` - 相关
+- 结构关系：`HAS_ENTITY`、`HAS_EVENT`、`HAS_CLAIM`、`PARTICIPATED_IN`
+- 常规关系：`DEVELOPS`、`COMPETES_WITH`、`USES`、`INVESTS_IN`、`PARTNERS_WITH`、`PUBLISHED_BY`、`SUPPORTS`、`CONTRADICTS`、`MENTIONS`、`RELATED_TO`
+- 技术关系：`COMPRESSES`、`EXTENDS`、`MODIFIES`、`IMPROVES`、`EVOLVES_FROM`、`BENCHMARKS`
 
-## API 端点
+前端统一类型定义在 `src/types/graph.ts`。新增节点或关系类型时，应先更新该文件，再更新 Kuzu schema、同步逻辑和前端筛选列表。
 
-### 图数据库状态
+## API
 
-```
+### 图谱状态
+
+```http
 GET /api/graph/status
 ```
 
-响应：
+返回当前活跃 backend、SQLite 计数和 Kuzu 计数：
+
 ```json
 {
-  "backend": "json",
-  "lastSyncAt": "2025-01-15T10:30:00Z",
-  "nodeCount": 42,
-  "relationshipCount": 85,
-  "pendingUpdates": 0
+  "backend": "kuzu",
+  "nodeCount": 52,
+  "relationshipCount": 84,
+  "sqliteNodeCount": 41,
+  "sqliteRelationshipCount": 28,
+  "kuzuNodeCount": 52,
+  "kuzuRelCount": 84,
+  "claimCount": 19,
+  "eventCount": 8,
+  "lastSyncAt": "2026-04-17T10:00:00.000Z"
 }
 ```
 
 ### 获取主题图谱
 
-```
-GET /api/graph/topic/:id?depth=2
+```http
+GET /api/graph/topic/:id?hop=1
 ```
 
+- `hop=0`：主题到实体/事件/claim 的 spoke view。
+- `hop=1`：额外返回主题内实体之间的语义关系，前端默认使用。
+
 响应：
+
 ```json
 {
   "nodes": [
-    { "id": "1", "label": "端侧大模型", "type": "topic", "properties": {...} }
+    { "id": "1776260701289", "label": "Agent上下文管理", "type": "topic", "properties": {} }
   ],
   "links": [
-    { "id": "r1", "source": "1", "target": "2", "label": "HAS_ENTITY", "properties": {} }
-  ]
+    { "id": "r0", "source": "e_a", "target": "e_b", "label": "COMPRESSES", "properties": { "confidence": 0.95 } }
+  ],
+  "metadata": {
+    "backend": "sqlite",
+    "topicId": "1776260701289",
+    "hop": 1,
+    "nodeCount": 42,
+    "linkCount": 36
+  }
 }
 ```
 
 ### 获取实体邻域
 
-```
-GET /api/graph/entity/:id
-```
-
-### 查找主题相关 Claims
-
-```
-GET /api/graph/claims/:topicId
+```http
+GET /api/graph/neighbor/:entityName?hop=1&limit=30
 ```
 
-### 查找相关实体
+返回顶层 `nodes` / `links`，并保留 `graph.nodes` / `graph.links` 兼容旧调用。
 
-```
-GET /api/graph/related/:entityId?depth=2
-```
+### 最近发展
 
-### 同步 SQLite 数据到图数据库
-
-```
-POST /api/graph/sync
+```http
+GET /api/graph/recent/:topicId?hours=24
 ```
 
-### 创建节点
+用于前端 Recent 面板和 pulse 标记，返回最近文档、活跃实体和新兴关系。
 
+### 获取语义地形
+
+```http
+GET /api/graph/sensemaking/:topicId
 ```
-POST /api/graph/nodes
-Content-Type: application/json
 
+返回 LLM 缓存或规则 fallback：
+
+```json
 {
-  "label": "Entity",
-  "properties": {
-    "name": "GPT-4",
-    "type": "technology"
-  }
+  "topicId": "1776260701289",
+  "graphHash": "...",
+  "status": "cache",
+  "source": "llm",
+  "clusters": [
+    {
+      "id": "kv-cache-compression",
+      "label": "KV Cache / 压缩",
+      "summary": "围绕 KV cache 和上下文压缩的技术路线。",
+      "priority": 10,
+      "nodeIds": ["e_xxx"],
+      "relationFocus": ["COMPRESSES", "USES"]
+    }
+  ],
+  "assignments": [
+    { "nodeId": "e_xxx", "clusterId": "kv-cache-compression", "role": "anchor" }
+  ],
+  "readingPath": [
+    { "title": "KV Cache / 压缩", "nodeIds": ["e_xxx"], "relationIds": ["r1"] }
+  ]
 }
 ```
 
-### 更新节点
-
-```
-PUT /api/graph/nodes/:id
-Content-Type: application/json
-
-{
-  "properties": {
-    "name": "GPT-4 Turbo",
-    "description": "Updated description"
-  }
-}
+```http
+POST /api/graph/sensemaking/:topicId/refresh
 ```
 
-### 删除节点
+异步触发 LLM 刷新。接口立即返回当前 fallback/cache，前端可继续轮询 `GET` 查看刷新结果。
 
-```
-DELETE /api/graph/nodes/:id
-```
+### 同步到 Kuzu
 
-### 创建关系
-
-```
-POST /api/graph/relationships
-Content-Type: application/json
-
-{
-  "from": "node_id_1",
-  "to": "node_id_2",
-  "type": "SUPPORTS",
-  "properties": {
-    "confidence": 0.9
-  }
-}
+```http
+POST /api/graph/sync/:topicId
 ```
 
-### 查找路径
+从 SQLite 去重实体和关系，写入 Kuzu。同步会保留技术关系类型，例如 `compresses` 会映射为 `COMPRESSES`，不会降级为 `RELATED_TO`。
 
-```
-GET /api/graph/path?from=node1&to=node2&maxDepth=4
-```
+## 前端布局规则
 
-### 保存图数据
+- 默认布局是“技术地形图”：Topic 和核心语义簇共同构成主题地图，产品/组织分区展示，事件在底部时间带。
+- 首屏核心优先：默认展示 top 实体、强关系和少量事件；claim 默认隐藏，可通过类型过滤打开。
+- 左侧面板展示语义簇、摘要、节点数和关键关系；点击簇会高亮簇内节点并淡化其他簇。
+- 搜索默认只高亮匹配节点并弱化其他节点；切换到 filter 模式时才隐藏非匹配节点。
+- 双击实体进入 1-hop focus mode，并使用完整 canonical name 请求邻域，不使用截断 label。
 
-```
-POST /api/graph/save
-```
+## 验证
 
-## 前端使用
-
-```typescript
-import {
-  getTopicGraph,
-  getEntityNeighborhood,
-  syncGraphData
-} from '../services/graphApi';
-
-// 获取主题图谱
-const graph = await getTopicGraph('topic_id', 2);
-
-// 同步数据
-const result = await syncGraphData();
-console.log(`Created ${result.nodesCreated} nodes`);
-```
-
-## 开发指南
-
-### 添加新的节点类型
-
-1. 在 `src/types/graph.ts` 中添加新的 `NodeLabel` 类型
-2. 创建对应的节点接口（如 `XxxNode extends GraphNode`）
-3. 在 `Neo4jClient` 中更新标签白名单
-
-### 添加新的关系类型
-
-1. 在 `src/types/graph.ts` 中添加新的 `RelationType` 类型
-2. 在需要的地方使用新关系类型
-
-## 故障排查
-
-### Neo4j 连接失败
-
-如果 Neo4j 连接失败，系统会自动降级到 JSON 文件存储。检查：
-
-1. Neo4j 服务是否运行
-2. 连接 URI 是否正确
-3. 用户名和密码是否正确
-
-### JSON 文件权限
-
-确保应用有权限创建和写入 `data/graph-data.json`：
+图谱相关改动至少运行：
 
 ```bash
-mkdir -p data
-chmod 755 data
+npm run lint
+npx vitest run
+npm run build
 ```
-
-### 数据丢失
-
-JSON 文件模式需要手动调用保存操作：
-
-```bash
-curl -X POST http://localhost:3000/api/graph/save
-```
-
-或在设置调度器时定期自动保存。

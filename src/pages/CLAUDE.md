@@ -49,10 +49,13 @@ handleCollect(topic):
 **Purpose**: Visualize entity relationships
 
 **Features**:
-- ReactFlow-based graph visualization
-- Node/edge filtering
-- Layout options (force-directed, hierarchical)
-- Export capabilities
+- ReactFlow graph visualization
+- Node/edge filtering with highlight-first search
+- Deterministic terrain layout with focus, timeline, and grid modes
+- LLM-backed graph sensemaking clusters with fallback
+- Interactive viewport (pan/zoom)
+- Node detail panel with metadata
+- Export capabilities (JSON)
 
 ### Reports (`Reports.tsx`)
 

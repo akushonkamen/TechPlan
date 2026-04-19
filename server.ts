@@ -15,7 +15,11 @@ import { SkillExecutor } from "./src/skillExecutor.js";
 import type { SkillExecution } from "./src/skillExecutor.js";
 import { SkillWebSocket } from "./src/websocket.js";
 import { validateReportOutput } from "./src/schemas/report.js";
+import { validateExtractionOutput } from "./src/schemas/extraction.js";
 import { SchedulerService } from "./src/scheduler.js";
+import { getKuzuConnection, kuzuQuery, closeKuzu } from "./src/db/kuzu.js";
+import { GRAPH_RELATION_TYPES, normalizeGraphRelationType } from "./src/types/graph.js";
+import { GraphSensemakingService } from "./src/services/graphSensemaking.js";
 
 // 配置文件上传（使用内存存储）
 const MAX_UPLOAD_SIZE = parseInt(process.env.MAX_UPLOAD_SIZE_MB || '10') * 1024 * 1024;
@@ -136,6 +140,10 @@ async function startServer() {
     filename: dbPath,
     driver: sqlite3.Database,
   });
+
+  // Initialize Kuzu graph database
+  const kuzuConn = await getKuzuConnection();
+  console.log('[Kuzu] Graph database initialized');
 
   // Create tables if they don't exist
   await db.exec(`
@@ -394,7 +402,23 @@ async function startServer() {
     CREATE INDEX IF NOT EXISTS idx_report_time_periods_report_id ON report_time_periods(report_id);
     CREATE INDEX IF NOT EXISTS idx_report_time_periods_period_start ON report_time_periods(period_start);
     CREATE INDEX IF NOT EXISTS idx_report_time_periods_period_end ON report_time_periods(period_end);
+
+    CREATE TABLE IF NOT EXISTS graph_sensemaking_cache (
+      topic_id TEXT NOT NULL,
+      graph_hash TEXT NOT NULL,
+      result_json TEXT,
+      status TEXT DEFAULT 'ready',
+      error TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (topic_id, graph_hash)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_graph_sensemaking_topic ON graph_sensemaking_cache(topic_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_sensemaking_updated ON graph_sensemaking_cache(updated_at);
   `);
+
+  const graphSensemaking = new GraphSensemakingService(db);
 
   // Migration: Add timeliness columns to documents table
   try {
@@ -1314,14 +1338,33 @@ async function startServer() {
     try {
       const { id } = req.params;
 
-      const entities = await db.all(
-        `SELECT e.*, d.title as document_title, d.source
-         FROM entities e
-         JOIN documents d ON e.document_id = d.id
-         WHERE d.topic_id = ?
-         ORDER BY e.confidence DESC`,
-        [id]
-      );
+      // Get entities with degree centrality (importance)
+      const entities = await db.all(`
+        SELECT e.*, d.title as document_title, d.source,
+          COALESCE(ec.incoming_count + ec.outgoing_count, 0) as importance
+        FROM entities e
+        JOIN documents d ON e.document_id = d.id
+        LEFT JOIN (
+          SELECT
+            LOWER(TRIM(source_text)) as entity_name,
+            COUNT(*) as outgoing_count
+          FROM relations r
+          JOIN documents d ON r.document_id = d.id
+          WHERE d.topic_id = ?
+          GROUP BY LOWER(TRIM(source_text))
+        ) outgoing ON LOWER(TRIM(e.text)) = outgoing.entity_name
+        LEFT JOIN (
+          SELECT
+            LOWER(TRIM(target_text)) as entity_name,
+            COUNT(*) as incoming_count
+          FROM relations r
+          JOIN documents d ON r.document_id = d.id
+          WHERE d.topic_id = ?
+          GROUP BY LOWER(TRIM(target_text))
+        ) incoming ON LOWER(TRIM(e.text)) = incoming.entity_name
+        WHERE d.topic_id = ?
+        ORDER BY importance DESC, e.confidence DESC
+      `, [id, id, id]);
 
       const parsedEntities = entities.map((e: any) => ({
         ...e,
@@ -1348,64 +1391,6 @@ async function startServer() {
   });
 
   // ===== Graph Data (ReactFlow) =====
-
-  /**
-   * GET /api/topics/:id/graph
-   * 获取主题的知识图谱（节点和边）
-   */
-  app.get("/api/topics/:id/graph", async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      // 获取所有实体作为节点
-      const entities = await db.all(
-        `SELECT DISTINCT e.text, e.type
-         FROM entities e
-         JOIN documents d ON e.document_id = d.id
-         WHERE d.topic_id = ?
-         ORDER BY e.text`,
-        [id]
-      );
-
-      // 获取所有关系作为边
-      const relations = await db.all(
-        `SELECT r.source_text, r.target_text, r.relation, r.confidence
-         FROM relations r
-         JOIN documents d ON r.document_id = d.id
-         WHERE d.topic_id = ?`,
-        [id]
-      );
-
-      const nodes = entities.map((e: any, idx: number) => ({
-        id: `node_${idx}`,
-        label: e.text,
-        type: e.type
-      }));
-
-      const nodeMap = new Map(entities.map((e: any, idx: number) => [e.text.toLowerCase(), `node_${idx}`]));
-
-      const links = relations
-        .map((r: any) => {
-          const sourceId = nodeMap.get(r.source_text.toLowerCase());
-          const targetId = nodeMap.get(r.target_text.toLowerCase());
-          if (sourceId && targetId) {
-            return {
-              source: sourceId,
-              target: targetId,
-              label: r.relation,
-              confidence: r.confidence
-            };
-          }
-          return null;
-        })
-        .filter((l): l is NonNullable<typeof l> => l !== null);
-
-      res.json({ nodes, links });
-    } catch (error) {
-      console.error("Failed to fetch topic graph:", error);
-      res.status(500).json({ error: "Failed to fetch topic graph" });
-    }
-  });
 
   /**
    * GET /api/topics/:id/scoring
@@ -1437,26 +1422,46 @@ async function startServer() {
 
   // ===== Graph Database API =====
 
-  // Import graph service
-  const { getGraphService } = await import('./src/services/graphService.js');
-  const graphService = getGraphService();
-  await graphService.init();
-
-  console.log(`Graph database initialized with backend: ${graphService.getBackendType()}`);
-
   /**
    * GET /api/graph/status
    * 获取图数据库状态
    */
   app.get("/api/graph/status", async (req, res) => {
     try {
-      const syncStatus = await graphService.getSyncStatus();
+      const entityCount = await db.get("SELECT COUNT(*) as count FROM entities");
+      const relCount = await db.get("SELECT COUNT(*) as count FROM relations");
+      const claimCount = await db.get("SELECT COUNT(*) as count FROM claims");
+      const eventCount = await db.get("SELECT COUNT(*) as count FROM events");
+      const lastEntity = await db.get("SELECT MAX(created_at) as last FROM entities");
+
+      // Kuzu counts
+      let kuzuNodeCount = 0, kuzuRelCount = 0;
+      try {
+        const nodeRows = await kuzuQuery(`MATCH (n) RETURN COUNT(n) as cnt`);
+        kuzuNodeCount = nodeRows[0]?.cnt || 0;
+
+        const relTables = GRAPH_RELATION_TYPES;
+        for (const rt of relTables) {
+          try {
+            const rows = await kuzuQuery(`MATCH ()-[r:${rt}]->() RETURN COUNT(r) as cnt`);
+            kuzuRelCount += rows[0]?.cnt || 0;
+          } catch {}
+        }
+      } catch {}
+
       res.json({
-        backend: graphService.getBackendType(),
-        ...syncStatus,
+        backend: kuzuNodeCount > 0 ? "kuzu" : "sqlite",
+        nodeCount: kuzuNodeCount > 0 ? kuzuNodeCount : (entityCount?.count || 0),
+        relationshipCount: kuzuNodeCount > 0 ? kuzuRelCount : (relCount?.count || 0),
+        claimCount: claimCount?.count || 0,
+        eventCount: eventCount?.count || 0,
+        lastSyncAt: lastEntity?.last || null,
+        sqliteNodeCount: entityCount?.count || 0,
+        sqliteRelationshipCount: relCount?.count || 0,
+        kuzuNodeCount,
+        kuzuRelCount,
       });
     } catch (error) {
-      console.error("Failed to get graph status:", error);
       res.status(500).json({ error: "Failed to get graph status" });
     }
   });
@@ -1472,119 +1477,263 @@ async function startServer() {
 
   /**
    * GET /api/graph/topic/:id
-   * 获取主题图谱 — SQLite-direct (entities, relations, events, claims)
+   * 获取主题图谱 — Kuzu graph query with SQLite fallback
    */
   app.get("/api/graph/topic/:id", async (req, res) => {
     try {
       const topicId = req.params.id;
-
       const topic = await db.get("SELECT * FROM topics WHERE id = ?", [topicId]);
       if (!topic) return res.status(404).json({ error: "Topic not found" });
 
+      // Get hop parameter (default 0 = spoke only, 1 = include inter-entity relations)
+      const hop = parseInt(req.query.hop as string) || 0;
+
+      // Check if Kuzu has data for this topic
+      let kuzuHasData = false;
+      try {
+        const checkRows = await kuzuQuery(
+          `MATCH (t:Topic {id: $id})-[:HAS_ENTITY]->(e:Entity) RETURN COUNT(e) as cnt`,
+          { id: topicId }
+        );
+        kuzuHasData = checkRows[0]?.cnt > 0;
+      } catch {}
+
+      // If no Kuzu data, trigger sync in background and use SQLite fallback
+      if (!kuzuHasData) {
+        // Background sync for next query
+        fetch(`http://localhost:${PORT}/api/graph/sync/${topicId}`, { method: 'POST' }).catch(() => {});
+
+        // SQLite fallback — original logic
+        const nodes: Array<{ id: string; label: string; type: string; properties: Record<string, any> }> = [];
+        const links: Array<{ id: string; source: string; target: string; label: string; properties: Record<string, any> }> = [];
+
+        nodes.push({ id: topicId, label: topic.name, type: 'topic', properties: { description: topic.description } });
+
+        const entities = await db.all(`
+          SELECT e.text, e.type, COUNT(DISTINCT e.document_id) as doc_count,
+                 MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen
+          FROM entities e JOIN documents d ON e.document_id = d.id
+          WHERE d.topic_id = ?
+          GROUP BY e.text ORDER BY doc_count DESC LIMIT 80
+        `, [topicId]);
+
+        const entityTexts = new Set(entities.map(e => e.text));
+        for (const ent of entities) {
+          const nid = entityNodeId(ent.text);
+          nodes.push({ id: nid, label: ent.text, type: (ent.type || 'entity').toLowerCase(), properties: { docCount: ent.doc_count, confidence: ent.confidence, firstSeen: ent.first_seen } });
+          links.push({ id: `t-${nid}`, source: topicId, target: nid, label: 'HAS_ENTITY', properties: {} });
+        }
+
+        // Only include inter-entity relations when hop >= 1 (include neighbors)
+        if (hop >= 1) {
+          const rawRels = await db.all(`
+            SELECT r.source_text, r.target_text, r.relation, MAX(r.confidence) as confidence
+            FROM relations r JOIN documents d ON r.document_id = d.id
+            WHERE d.topic_id = ? AND r.source_text != r.target_text
+            GROUP BY r.source_text, r.target_text, r.relation
+            ORDER BY confidence DESC LIMIT 60
+          `, [topicId]);
+
+          let relIdx = 0;
+          for (const rel of rawRels) {
+            if (!entityTexts.has(rel.source_text) || !entityTexts.has(rel.target_text)) continue;
+            links.push({
+              id: `r${relIdx++}`,
+              source: entityNodeId(rel.source_text),
+              target: entityNodeId(rel.target_text),
+              label: normalizeGraphRelationType(rel.relation),
+              properties: { confidence: rel.confidence },
+            });
+          }
+        }
+
+        const events = await db.all(`SELECT ev.id, ev.title, ev.type, ev.event_time, ev.participants, ev.confidence FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? ORDER BY ev.confidence DESC, ev.event_time DESC LIMIT 15`, [topicId]);
+        for (const ev of events) {
+          const evId = `ev_${ev.id}`;
+          nodes.push({ id: evId, label: ev.title || ev.type, type: 'event', properties: { eventType: ev.type, eventTime: ev.event_time, confidence: ev.confidence } });
+          links.push({ id: `ev-${evId}`, source: topicId, target: evId, label: 'HAS_EVENT', properties: {} });
+        }
+
+        const claims = await db.all(`SELECT c.id, c.text, c.polarity, c.confidence FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ? ORDER BY c.confidence DESC LIMIT 10`, [topicId]);
+        for (const cl of claims) {
+          const clId = `cl_${cl.id}`;
+          nodes.push({ id: clId, label: cl.text?.length > 60 ? cl.text.slice(0, 60) + '…' : cl.text, type: 'claim', properties: { polarity: cl.polarity, confidence: cl.confidence, fullText: cl.text } });
+          links.push({ id: `cl-${clId}`, source: topicId, target: clId, label: 'HAS_CLAIM', properties: {} });
+        }
+
+        res.json({ nodes, links, metadata: { backend: 'sqlite', topicId, hop, nodeCount: nodes.length, linkCount: links.length } });
+        return;
+      }
+
+      // ── Kuzu graph query ──
+      // Note: hop variable is already declared above for SQLite fallback
+      const centerEntity = req.query.center as string | undefined;
       const nodes: Array<{ id: string; label: string; type: string; properties: Record<string, any> }> = [];
       const links: Array<{ id: string; source: string; target: string; label: string; properties: Record<string, any> }> = [];
 
-      // Topic center node
-      nodes.push({
-        id: topicId,
-        label: topic.name,
-        type: 'topic',
-        properties: { description: topic.description },
-      });
+      // Topic node
+      nodes.push({ id: topicId, label: topic.name, type: 'topic', properties: { description: topic.description } });
 
-      // Deduplicated entity nodes (top 80 by document count)
-      const entities = await db.all(`
-        SELECT e.text, e.type, COUNT(DISTINCT e.document_id) as doc_count,
-               MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen
-        FROM entities e JOIN documents d ON e.document_id = d.id
-        WHERE d.topic_id = ?
-        GROUP BY e.text ORDER BY doc_count DESC LIMIT 80
-      `, [topicId]);
+      // Entities with HAS_ENTITY
+      const entityRows = await kuzuQuery(
+        `MATCH (t:Topic {id: $id})-[:HAS_ENTITY]->(e:Entity) RETURN e.name, e.type, e.confidence, e.docCount, e.firstSeen ORDER BY e.docCount DESC LIMIT 80`,
+        { id: topicId }
+      );
 
-      const entityTexts = new Set(entities.map(e => e.text));
-      for (const ent of entities) {
-        const nid = entityNodeId(ent.text);
+      const entityNames = new Set<string>();
+
+      // Compute degree centrality
+      const degreeMap = new Map<string, number>();
+      const relTables = GRAPH_RELATION_TYPES.filter(rt => !['HAS_ENTITY', 'HAS_EVENT', 'HAS_CLAIM', 'ABOUT'].includes(rt));
+      const allEntityNames = entityRows.map((r: any) => r['e.name']);
+      for (const relType of relTables) {
+        try {
+          const degRows = await kuzuQuery(
+            `MATCH (a:Entity)-[:${relType}]->(b:Entity) WHERE a.name IN $names AND b.name IN $names RETURN a.name, b.name`,
+            { names: allEntityNames }
+          );
+          for (const row of degRows) {
+            degreeMap.set(row['a.name'], (degreeMap.get(row['a.name']) || 0) + 1);
+            degreeMap.set(row['b.name'], (degreeMap.get(row['b.name']) || 0) + 1);
+          }
+        } catch {}
+      }
+      const maxDegree = Math.max(...Array.from(degreeMap.values()), 1);
+
+      for (const row of entityRows) {
+        const name = row['e.name'];
+        const nid = entityNodeId(name);
+        entityNames.add(name);
+        const degree = degreeMap.get(name) || 0;
         nodes.push({
-          id: nid, label: ent.text,
-          type: (ent.type || 'entity').toLowerCase(),
-          properties: { docCount: ent.doc_count, confidence: ent.confidence, firstSeen: ent.first_seen },
+          id: nid, label: name,
+          type: row['e.type'] || 'entity',
+          properties: {
+            docCount: row['e.docCount'], confidence: row['e.confidence'], firstSeen: row['e.firstSeen'],
+            importance: Math.round((degree / maxDegree) * 100) / 100, degree,
+          },
         });
         links.push({ id: `t-${nid}`, source: topicId, target: nid, label: 'HAS_ENTITY', properties: {} });
       }
 
-      // Relations between deduplicated entities (best confidence per pair+type)
-      const rawRels = await db.all(`
-        SELECT r.source_text, r.target_text, r.relation, MAX(r.confidence) as confidence
-        FROM relations r JOIN documents d ON r.document_id = d.id
-        WHERE d.topic_id = ? AND r.source_text != r.target_text
-        GROUP BY r.source_text, r.target_text, r.relation
-        ORDER BY confidence DESC LIMIT 60
-      `, [topicId]);
-
+      // Inter-entity relations — only when hop >= 1 (include neighbors)
       let relIdx = 0;
-      for (const rel of rawRels) {
-        if (!entityTexts.has(rel.source_text) || !entityTexts.has(rel.target_text)) continue;
-        links.push({
-          id: `r${relIdx++}`,
-          source: entityNodeId(rel.source_text),
-          target: entityNodeId(rel.target_text),
-          label: (rel.relation || 'RELATED_TO').toUpperCase(),
-          properties: { confidence: rel.confidence },
-        });
-      }
-
-      // Event nodes (top 15)
-      const events = await db.all(`
-        SELECT ev.id, ev.title, ev.type, ev.event_time, ev.participants, ev.confidence
-        FROM events ev JOIN documents d ON ev.document_id = d.id
-        WHERE d.topic_id = ?
-        ORDER BY ev.confidence DESC, ev.event_time DESC LIMIT 15
-      `, [topicId]);
-
-      for (const ev of events) {
-        const evId = `ev_${ev.id}`;
-        nodes.push({
-          id: evId, label: ev.title || ev.type, type: 'event',
-          properties: { eventType: ev.type, eventTime: ev.event_time, confidence: ev.confidence },
-        });
-        links.push({ id: `ev-${evId}`, source: topicId, target: evId, label: 'HAS_EVENT', properties: {} });
-        // Link participants to event
-        if (ev.participants) {
+      if (hop >= 1 || centerEntity) {
+        const targetNames = centerEntity
+          ? [centerEntity, ...Array.from(entityNames).filter(n => n !== centerEntity).slice(0, 19)]
+          : Array.from(entityNames);
+        for (const relType of relTables) {
           try {
-            const parts = typeof ev.participants === 'string' ? JSON.parse(ev.participants) : ev.participants;
-            for (const p of Array.isArray(parts) ? parts : []) {
-              const name = typeof p === 'string' ? p : (p.name || p.text);
-              if (name && entityTexts.has(name)) {
-                links.push({ id: `ep-${evId}-${entityNodeId(name)}`, source: entityNodeId(name), target: evId, label: 'PARTICIPATED_IN', properties: {} });
-              }
+            const relRows = await kuzuQuery(
+              `MATCH (a:Entity)-[r:${relType}]->(b:Entity)
+               WHERE a.name IN $names AND b.name IN $names
+               RETURN a.name, b.name, r.confidence LIMIT 60`,
+              { names: targetNames }
+            );
+            for (const row of relRows) {
+              links.push({
+                id: `r${relIdx++}`,
+                source: entityNodeId(row['a.name']),
+                target: entityNodeId(row['b.name']),
+                label: relType,
+                properties: { confidence: row['r.confidence'] },
+              });
             }
-          } catch { /* skip malformed participants */ }
+          } catch {}
         }
       }
 
-      // Claim nodes (top 10)
-      const claims = await db.all(`
-        SELECT c.id, c.text, c.polarity, c.confidence
-        FROM claims c JOIN documents d ON c.document_id = d.id
-        WHERE d.topic_id = ?
-        ORDER BY c.confidence DESC LIMIT 10
-      `, [topicId]);
-
-      for (const cl of claims) {
-        const clId = `cl_${cl.id}`;
+      // Events
+      const eventRows = await kuzuQuery(
+        `MATCH (t:Topic {id: $id})-[:HAS_EVENT]->(e:Event) RETURN e.id, e.title, e.eventType, e.eventTime, e.confidence, e.participants LIMIT 15`,
+        { id: topicId }
+      );
+      for (const row of eventRows) {
+        const evId = row['e.id'];
         nodes.push({
-          id: clId,
-          label: cl.text?.length > 60 ? cl.text.slice(0, 60) + '…' : cl.text,
-          type: 'claim',
-          properties: { polarity: cl.polarity, confidence: cl.confidence, fullText: cl.text },
+          id: evId, label: row['e.title'] || row['e.eventType'], type: 'event',
+          properties: { eventType: row['e.eventType'], eventTime: row['e.eventTime'], confidence: row['e.confidence'] },
+        });
+        links.push({ id: `ev-${evId}`, source: topicId, target: evId, label: 'HAS_EVENT', properties: {} });
+        // Link participants
+        try {
+          const parts = JSON.parse(row['e.participants'] || '[]');
+          for (const p of Array.isArray(parts) ? parts : []) {
+            const name = typeof p === 'string' ? p : (p.name || p.text);
+            if (name && entityNames.has(name)) {
+              links.push({ id: `ep-${evId}-${entityNodeId(name)}`, source: entityNodeId(name), target: evId, label: 'PARTICIPATED_IN', properties: {} });
+            }
+          }
+        } catch {}
+      }
+
+      // Claims
+      const claimRows = await kuzuQuery(
+        `MATCH (t:Topic {id: $id})-[:HAS_CLAIM]->(c:Claim) RETURN c.id, c.text, c.polarity, c.confidence LIMIT 10`,
+        { id: topicId }
+      );
+      for (const row of claimRows) {
+        const clId = row['c.id'];
+        const text = row['c.text'] || '';
+        nodes.push({
+          id: clId, label: text.length > 60 ? text.slice(0, 60) + '…' : text, type: 'claim',
+          properties: { polarity: row['c.polarity'], confidence: row['c.confidence'], fullText: text },
         });
         links.push({ id: `cl-${clId}`, source: topicId, target: clId, label: 'HAS_CLAIM', properties: {} });
       }
 
-      res.json({ nodes, links });
+      res.json({ nodes, links, metadata: { backend: 'kuzu', topicId, hop, nodeCount: nodes.length, linkCount: links.length } });
     } catch (error) {
       console.error("Failed to get topic graph:", error);
       res.status(500).json({ error: "Failed to get topic graph" });
+    }
+  });
+
+  async function getTopicGraphPayload(topicId: string): Promise<{ nodes: any[]; links: any[] }> {
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/graph/topic/${encodeURIComponent(topicId)}?hop=1`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch topic graph: ${response.status}`);
+    }
+    const payload = await response.json();
+    return {
+      nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
+      links: Array.isArray(payload.links) ? payload.links : [],
+    };
+  }
+
+  /**
+   * GET /api/graph/sensemaking/:topicId
+   * Return cached LLM terrain clusters, or a deterministic fallback while cache is missing/stale.
+   */
+  app.get("/api/graph/sensemaking/:topicId", async (req, res) => {
+    try {
+      const topicId = req.params.topicId;
+      const graph = await getTopicGraphPayload(topicId);
+      const sensemaking = await graphSensemaking.get(topicId, graph);
+      res.json(sensemaking);
+    } catch (error: any) {
+      console.error("Failed to get graph sensemaking:", error);
+      res.status(500).json({ error: "Failed to get graph sensemaking", details: error?.message });
+    }
+  });
+
+  /**
+   * POST /api/graph/sensemaking/:topicId/refresh
+   * Start an async LLM refresh. The UI can continue using fallback/cache and poll GET.
+   */
+  app.post("/api/graph/sensemaking/:topicId/refresh", async (req, res) => {
+    try {
+      const topicId = req.params.topicId;
+      const graph = await getTopicGraphPayload(topicId);
+      await graphSensemaking.markRefreshing(topicId, graph);
+      graphSensemaking.refresh(topicId, graph).catch((error: any) => {
+        console.error(`[GraphSensemaking] Refresh failed for ${topicId}:`, error?.message || error);
+      });
+      const sensemaking = await graphSensemaking.get(topicId, graph);
+      res.status(202).json(sensemaking);
+    } catch (error: any) {
+      console.error("Failed to refresh graph sensemaking:", error);
+      res.status(500).json({ error: "Failed to refresh graph sensemaking", details: error?.message });
     }
   });
 
@@ -1947,20 +2096,272 @@ async function startServer() {
   });
 
   /**
+   * GET /api/graph/neighbor/:entityName
+   * 获取实体的邻域图 — entity neighbors with relationships
+   */
+  app.get("/api/graph/neighbor/:entityName", async (req, res) => {
+    try {
+      const entityName = decodeURIComponent(req.params.entityName);
+      const hop = Math.max(1, Math.min(3, parseInt(req.query.hop as string) || 1)); // 默认1跳，最多3跳
+      const limit = Math.max(10, Math.min(100, parseInt(req.query.limit as string) || 30)); // 默认30个节点
+
+      // Get main entity info
+      const mainEntity = await db.get("SELECT text, type, confidence, COUNT(DISTINCT document_id) as doc_count FROM entities WHERE text = ? GROUP BY text", [entityName]);
+      if (!mainEntity) {
+        return res.status(404).json({ error: "Entity not found" });
+      }
+
+      const nodes: Array<{ id: string; label: string; type: string; properties: Record<string, any> }> = [];
+      const links: Array<{ id: string; source: string; target: string; label: string; properties: Record<string, any> }> = [];
+      const visitedNodes = new Set<string>();
+      const visitedLinks = new Set<string>();
+
+      // Add center node
+      const centerId = entityNodeId(entityName);
+      nodes.push({
+        id: centerId,
+        label: entityName,
+        type: (mainEntity.type || 'entity').toLowerCase(),
+        properties: {
+          docCount: mainEntity.doc_count,
+          confidence: mainEntity.confidence,
+          isCenter: true,
+        },
+      });
+      visitedNodes.add(entityName);
+
+      // BFS to collect neighbors up to hop levels
+      let currentLevel = new Set<string>([entityName]);
+      let level = 0;
+
+      while (currentLevel.size > 0 && level < hop && nodes.length < limit) {
+        level++;
+        const nextLevel = new Set<string>();
+
+        for (const sourceEntity of currentLevel) {
+          // Get relations where this entity is source or target
+          const relations = await db.all(`
+            SELECT r.source_text, r.target_text, r.relation, MAX(r.confidence) as confidence
+            FROM relations r
+            WHERE (r.source_text = ? OR r.target_text = ?)
+            AND r.source_text != r.target_text
+            GROUP BY r.source_text, r.target_text, r.relation
+            ORDER BY confidence DESC
+            LIMIT 20
+          `, [sourceEntity, sourceEntity]);
+
+          for (const rel of relations) {
+            const otherEntity = rel.source_text === sourceEntity ? rel.target_text : rel.source_text;
+
+            // Skip if already visited or limit reached
+            if (visitedNodes.has(otherEntity) || nodes.length >= limit) continue;
+
+            // Get entity info
+            const entityInfo = await db.get("SELECT type, MAX(confidence) as confidence FROM entities WHERE text = ?", [otherEntity]);
+
+            // Add node
+            const nodeId = entityNodeId(otherEntity);
+            nodes.push({
+              id: nodeId,
+              label: otherEntity,
+              type: (entityInfo?.type || 'entity').toLowerCase(),
+              properties: {
+                confidence: entityInfo?.confidence,
+              },
+            });
+            visitedNodes.add(otherEntity);
+            nextLevel.add(otherEntity);
+
+            // Add link
+            const sourceId = entityNodeId(rel.source_text);
+            const targetId = entityNodeId(rel.target_text);
+            const linkId = `${sourceId}-${targetId}-${rel.relation}`;
+
+            if (!visitedLinks.has(linkId)) {
+              links.push({
+                id: linkId,
+                source: sourceId,
+                target: targetId,
+                label: normalizeGraphRelationType(rel.relation),
+                properties: { confidence: rel.confidence },
+              });
+              visitedLinks.add(linkId);
+            }
+          }
+        }
+
+        currentLevel = nextLevel;
+      }
+
+      res.json({
+        centerEntity: {
+          id: centerId,
+          name: entityName,
+          type: mainEntity.type,
+          properties: {
+            docCount: mainEntity.doc_count,
+            confidence: mainEntity.confidence,
+          },
+        },
+        nodes,
+        links,
+        graph: {
+          nodes,
+          links,
+        },
+        metadata: {
+          hop,
+          totalNodes: nodes.length,
+          totalLinks: links.length,
+          centerName: entityName,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to get entity neighborhood:", error);
+      res.status(500).json({ error: "Failed to get entity neighborhood" });
+    }
+  });
+
+  /**
    * POST /api/graph/sync/:topicId
-   * 触发主题图谱同步到 Neo4j/JSON 存储
+   * Sync topic graph data from SQLite to Kuzu
    */
   app.post("/api/graph/sync/:topicId", async (req, res) => {
     try {
-      const { topicId } = req.params;
+      const topicId = req.params.topicId;
       const topic = await db.get("SELECT * FROM topics WHERE id = ?", [topicId]);
-      if (!topic) return res.status(404).json({ error: "Topic not found" });
+      if (!topic) {
+        res.status(404).json({ error: "Topic not found" });
+        return;
+      }
 
-      const result = await graphService.syncFromSQLite(db);
-      res.json({ success: true, topicId, ...result });
-    } catch (error) {
+      let nodesCreated = 0;
+      let relationshipsCreated = 0;
+
+      // 1. Create/update Topic node
+      await kuzuQuery(
+        `MERGE (t:Topic {id: $id}) ON CREATE SET t.name = $name, t.description = $descr ON MATCH SET t.name = $name, t.description = $descr`,
+        { id: topicId, name: topic.name || '', descr: topic.description || '' }
+      );
+      nodesCreated++;
+
+      // 2. Get deduplicated entities (normalized by LOWER(TRIM))
+      const entities = await db.all(`
+        SELECT LOWER(TRIM(e.text)) as text, e.type, COUNT(DISTINCT e.document_id) as doc_count,
+               MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen
+        FROM entities e JOIN documents d ON e.document_id = d.id
+        WHERE d.topic_id = ?
+        GROUP BY LOWER(TRIM(e.text)), e.type ORDER BY doc_count DESC LIMIT 200
+      `, [topicId]);
+
+      // 3. Create Entity nodes
+      for (const ent of entities) {
+        try {
+          await kuzuQuery(
+            `MERGE (e:Entity {name: $name}) ON CREATE SET e.type = $type, e.confidence = $conf, e.docCount = $docs, e.firstSeen = $first ON MATCH SET e.type = $type, e.confidence = $conf, e.docCount = $docs, e.firstSeen = $first`,
+            {
+              name: ent.text,
+              type: (ent.type || 'entity').toLowerCase(),
+              conf: ent.confidence || 0.5,
+              docs: ent.doc_count || 0,
+              first: ent.first_seen || '',
+            }
+          );
+          nodesCreated++;
+        } catch (e: any) {
+          console.error(`[Kuzu] Failed to create entity: ${ent.text}`, e?.message);
+        }
+      }
+
+      // 4. Create HAS_ENTITY relationships
+      const entityNames = entities.map(e => e.text);
+      for (const entName of entityNames) {
+        try {
+          await kuzuQuery(
+            `MATCH (t:Topic {id: $tid}), (e:Entity {name: $name}) MERGE (t)-[:HAS_ENTITY]->(e)`,
+            { tid: topicId, name: entName }
+          );
+          relationshipsCreated++;
+        } catch {}
+      }
+
+      // 5. Create inter-entity relationships (normalized names)
+      const rawRels = await db.all(`
+        SELECT LOWER(TRIM(r.source_text)) as source_text, LOWER(TRIM(r.target_text)) as target_text,
+               r.relation, MAX(r.confidence) as confidence
+        FROM relations r JOIN documents d ON r.document_id = d.id
+        WHERE d.topic_id = ? AND LOWER(TRIM(r.source_text)) != LOWER(TRIM(r.target_text))
+        GROUP BY LOWER(TRIM(r.source_text)), LOWER(TRIM(r.target_text)), r.relation
+        ORDER BY confidence DESC LIMIT 200
+      `, [topicId]);
+
+      const entityTextSet = new Set(entityNames);
+      for (const rel of rawRels) {
+        if (!entityTextSet.has(rel.source_text) || !entityTextSet.has(rel.target_text)) continue;
+        const relType = normalizeGraphRelationType(rel.relation);
+        try {
+          await kuzuQuery(
+            `MATCH (a:Entity {name: $src}), (b:Entity {name: $tgt})
+             MERGE (a)-[:${relType} {confidence: $conf}]->(b)`,
+            { src: rel.source_text, tgt: rel.target_text, conf: rel.confidence || 0.5 }
+          );
+          relationshipsCreated++;
+        } catch {}
+      }
+
+      // 6. Create Event nodes
+      const events = await db.all(`
+        SELECT ev.id, ev.title, ev.type, ev.event_time, ev.participants, ev.confidence
+        FROM events ev JOIN documents d ON ev.document_id = d.id
+        WHERE d.topic_id = ? ORDER BY ev.confidence DESC LIMIT 50
+      `, [topicId]);
+
+      for (const ev of events) {
+        try {
+          await kuzuQuery(
+            `MERGE (e:Event {id: $id}) ON CREATE SET e.title = $title, e.eventType = $type, e.eventTime = $time, e.participants = $parts, e.confidence = $conf ON MATCH SET e.title = $title, e.eventType = $type, e.eventTime = $time, e.participants = $parts, e.confidence = $conf`,
+            { id: `ev_${ev.id}`, title: ev.title || ev.type || '', type: ev.type || '', time: ev.event_time || '', parts: typeof ev.participants === 'string' ? ev.participants : JSON.stringify(ev.participants || []), conf: ev.confidence || 0.5 }
+          );
+          nodesCreated++;
+          await kuzuQuery(
+            `MATCH (t:Topic {id: $tid}), (e:Event {id: $eid}) MERGE (t)-[:HAS_EVENT]->(e)`,
+            { tid: topicId, eid: `ev_${ev.id}` }
+          );
+          relationshipsCreated++;
+        } catch {}
+      }
+
+      // 7. Create Claim nodes
+      const claims = await db.all(`
+        SELECT c.id, c.text, c.polarity, c.confidence
+        FROM claims c JOIN documents d ON c.document_id = d.id
+        WHERE d.topic_id = ? ORDER BY c.confidence DESC LIMIT 50
+      `, [topicId]);
+
+      for (const cl of claims) {
+        try {
+          await kuzuQuery(
+            `MERGE (c:Claim {id: $id}) ON CREATE SET c.text = $text, c.polarity = $pol, c.confidence = $conf ON MATCH SET c.text = $text, c.polarity = $pol, c.confidence = $conf`,
+            { id: `cl_${cl.id}`, text: (cl.text || '').slice(0, 500), pol: cl.polarity || 'neutral', conf: cl.confidence || 0.5 }
+          );
+          nodesCreated++;
+          await kuzuQuery(
+            `MATCH (t:Topic {id: $tid}), (c:Claim {id: $cid}) MERGE (t)-[:HAS_CLAIM]->(c)`,
+            { tid: topicId, cid: `cl_${cl.id}` }
+          );
+          relationshipsCreated++;
+        } catch {}
+      }
+
+      res.json({
+        topicId,
+        topicName: topic.name,
+        syncStats: { nodesCreated, relationshipsCreated },
+        errors: [],
+      });
+    } catch (error: any) {
       console.error("Failed to sync graph:", error);
-      res.status(500).json({ error: "Failed to sync graph" });
+      res.status(500).json({ error: "Failed to sync graph", details: error?.message });
     }
   });
 
@@ -2287,9 +2688,6 @@ async function startServer() {
   const { migrateReportTables } = await import('./src/services/reportService.js');
   await migrateReportTables(db);
 
-  const { ReportGraphService } = await import('./src/services/reportGraphService.js');
-  const reportGraphService = new ReportGraphService(db);
-
   // ── Unified Report Generation ──
   const REPORT_TYPE_TO_SKILL: Record<string, string> = {
     daily: 'report-daily',
@@ -2545,24 +2943,37 @@ async function startServer() {
         params.alertType = 'risk';
       }
 
-      // Step 1: Collect data first (blocking) — report needs data to be useful
+      // Step 1: Collect data — non-blocking to avoid client timeout (ERR_ABORTED)
       const autoCollect = options?.autoCollect !== false;
       let collectionResult = { executionId: '', collected: 0, duplicatesSkipped: 0 };
 
       if (autoCollect) {
-        console.log(`[ReportGenerate] Auto-collection for topic ${topicId}, period ${computedPeriod.start} - ${computedPeriod.end}`);
-        try {
-          collectionResult = await triggerCollectionForPeriod(
+        const existingDocs = await db.get(
+          `SELECT COUNT(*) as count FROM documents
+           WHERE topic_id = ? AND published_date >= ? AND published_date <= ?`,
+          [topicId, computedPeriod.start, computedPeriod.end]
+        );
+        const existingCount = existingDocs?.count || 0;
+        const MIN_DOCS_THRESHOLD = 5;
+
+        if (existingCount >= MIN_DOCS_THRESHOLD) {
+          console.log(`[ReportGenerate] Skipping collection for topic ${topicId}: ${existingCount} docs already exist`);
+          collectionResult = { executionId: 'skip', collected: 0, duplicatesSkipped: 0 };
+        } else {
+          console.log(`[ReportGenerate] Queuing background collection for topic ${topicId}`);
+          triggerCollectionForPeriod(
             topicId,
             topic.name,
             computedPeriod.start,
             computedPeriod.end,
             options?.keywords || [],
             options?.organizations || []
-          );
-          console.log(`[ReportGenerate] Collection result:`, collectionResult);
-        } catch (collectErr: any) {
-          console.error(`[ReportGenerate] Collection failed:`, collectErr?.message || collectErr);
+          ).then((result) => {
+            console.log(`[ReportGenerate] Background collection done:`, result);
+          }).catch((collectErr: any) => {
+            console.error(`[ReportGenerate] Background collection failed:`, collectErr?.message || collectErr);
+          });
+          collectionResult = { executionId: 'pending', collected: 0, duplicatesSkipped: 0 };
         }
       }
 
@@ -3111,6 +3522,69 @@ async function startServer() {
           if (quoteCount % 2 === 1 && i > 0) return '\\n' + line;
           return line;
         }).join(''),
+      // Level 4: fix unclosed strings — when a line starts a new JSON property but we're inside a string
+      (() => {
+        const lines = candidate.split('\n');
+        const fixed: string[] = [];
+        let inStr = false;
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          const qc = (line.match(/(?<!\\)"/g) || []).length;
+          const newProp = /^\s*"[a-zA-Z_]+":\s*/.test(line.trim());
+          // If inside a string and next line looks like a new property, close the string
+          if (inStr && newProp) {
+            // Append closing quote + comma to previous line
+            if (fixed.length > 0) {
+              const prev = fixed[fixed.length - 1].trimEnd();
+              fixed[fixed.length - 1] = prev + '"' + (prev.endsWith(',') ? '' : ',');
+            }
+            inStr = false;
+            fixed.push(line);
+            if (qc % 2 === 1) inStr = true;
+          } else if (!inStr) {
+            fixed.push(line);
+            if (qc % 2 === 1) inStr = true;
+          } else {
+            fixed.push('\\n' + line);
+            if (qc % 2 === 1) inStr = false;
+          }
+        }
+        return fixed.join('\n')
+          .replace(/,\s*([}\]])/g, '$1')
+          .replace(/\t/g, '\\t');
+      })(),
+      // Level 5: escape unescaped quotes inside JSON string values
+      (() => {
+        let result = '';
+        let inString = false;
+        let i = 0;
+        while (i < candidate.length) {
+          const ch = candidate[i];
+          if (ch === '\\' && inString && i + 1 < candidate.length) {
+            result += ch + candidate[i + 1];
+            i += 2;
+            continue;
+          }
+          if (ch === '"') {
+            if (!inString) {
+              inString = true;
+              result += '"';
+            } else {
+              const afterStr = candidate.slice(i + 1).replace(/^\s+/, '');
+              if (/^[,}\]:]/.test(afterStr) || afterStr === '' || /^:/.test(afterStr)) {
+                inString = false;
+                result += '"';
+              } else {
+                result += '\\"';
+              }
+            }
+          } else {
+            result += ch;
+          }
+          i++;
+        }
+        return result;
+      })(),
     ];
 
     for (const repaired of repairs) {
@@ -3144,6 +3618,23 @@ async function startServer() {
     }
 
     return null;
+  }
+
+  function readReportOutputFile(): any {
+    const filePath = path.join(process.cwd(), 'report-output.json');
+    try {
+      if (!fs.existsSync(filePath)) return null;
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const report = tryParseReportJson(raw);
+      if (report) {
+        fs.unlinkSync(filePath);
+        console.log('[Report] Recovered report from report-output.json');
+      }
+      return report;
+    } catch (error: any) {
+      console.error('[Report] Failed to read report-output.json:', error?.message);
+      return null;
+    }
   }
 
   function extractReportFromStdout(stdout: string): any {
@@ -3225,6 +3716,87 @@ async function startServer() {
     return String(obj);
   }
 
+  // ── Parse markdown summary into basic report structure ──
+  function parseMarkdownReport(markdown: string, params: Record<string, any>): { overview: string; keyPoints: string[]; sections: any[] } | null {
+    if (!markdown || markdown.length < 100) return null;
+
+    const lines = markdown.split('\n').map(l => l.trim()).filter(Boolean);
+
+    // Extract overview: first substantial paragraph (not a heading, not a list item)
+    let overview = '';
+    for (const line of lines) {
+      if (line.length > 30 && !line.startsWith('#') && !line.startsWith('```') && !line.startsWith('{') && !line.startsWith('|') && !line.startsWith('-') && !line.startsWith('*') && !/^\d+\./.test(line)) {
+        overview = line.replace(/\*\*/g, '');
+        break;
+      }
+    }
+
+    // Extract key points: numbered items like "1. **突破**：..."
+    const keyPoints: string[] = [];
+    for (const line of lines) {
+      const match = line.match(/^\d+\.\s+\*\*(.+?)\*\*[：:]\s*(.+)/);
+      if (match) {
+        keyPoints.push(`${match[1]}：${match[2]}`);
+      }
+    }
+
+    // Split into sections by **bold headings**
+    const sections: any[] = [];
+    let currentTitle = '';
+    let currentLines: string[] = [];
+
+    for (const line of lines) {
+      const headingMatch = line.match(/^\*\*(.+?)\*\*[：:]?\s*(.*)/);
+      if (headingMatch && headingMatch[1].length <= 20) {
+        // Flush previous section
+        if (currentTitle && currentLines.length > 0) {
+          sections.push({
+            id: `md_section_${sections.length}`,
+            title: currentTitle,
+            thesis: '',
+            content: currentLines.join('\n'),
+            highlights: currentLines.filter(l => l.startsWith('-') || /^\d+\./.test(l)).map(l => l.replace(/^[-\d.]+\s*/, '')),
+            signals: [],
+            entityRefs: [],
+          });
+        }
+        currentTitle = headingMatch[1];
+        currentLines = headingMatch[2] ? [headingMatch[2]] : [];
+      } else if (currentTitle) {
+        currentLines.push(line.replace(/\*\*/g, ''));
+      }
+    }
+    // Flush last section
+    if (currentTitle && currentLines.length > 0) {
+      sections.push({
+        id: `md_section_${sections.length}`,
+        title: currentTitle,
+        thesis: '',
+        content: currentLines.join('\n'),
+        highlights: currentLines.filter(l => l.startsWith('-') || /^\d+\./.test(l)).map(l => l.replace(/^[-\d.]+\s*/, '')),
+        signals: [],
+        entityRefs: [],
+      });
+    }
+
+    // If no sections found but we have key points, create a single analysis section
+    if (sections.length === 0 && keyPoints.length > 0) {
+      sections.push({
+        id: 'md_analysis',
+        title: '分析发现',
+        thesis: '',
+        content: lines.join('\n'),
+        highlights: keyPoints,
+        signals: [],
+        entityRefs: [],
+      });
+    }
+
+    if (!overview && sections.length === 0) return null;
+
+    return { overview, keyPoints, sections };
+  }
+
   // ── Extracted report persistence handler (shared by HTTP endpoint & scheduler) ──
   async function handleReportResult(
     execution: SkillExecution,
@@ -3243,12 +3815,8 @@ async function startServer() {
         const first = cleaned.indexOf('{');
         const last = cleaned.lastIndexOf('}');
         if (first !== -1 && last > first) cleaned = cleaned.slice(first, last + 1);
-        try {
-          parsed = JSON.parse(cleaned);
-        } catch {
-          console.error('[Report] Failed to parse Claude output as JSON');
-          parsed = {};
-        }
+        // Use robust parser with multi-level repair (handles unescaped newlines, trailing commas, etc.)
+        parsed = tryParseReportJson(cleaned) ?? {};
       } else if (typeof rawOutput === 'object' && rawOutput !== null) {
         parsed = rawOutput;
       } else {
@@ -3289,6 +3857,11 @@ async function startServer() {
         if (report) {
           parsed = report;
           console.log('[Report] Recovered report JSON from stdout fallback');
+        } else {
+          const fileReport = readReportOutputFile();
+          if (fileReport) {
+            parsed = fileReport;
+          }
         }
       }
 
@@ -3344,22 +3917,31 @@ async function startServer() {
           normalizedContent.timeline = nestedContent.timeline ?? [];
           normalizedContent.metrics = nestedContent.metrics ?? {};
         } else {
-          // Last resort: store as raw markdown
-          const lastFenceEnd = rawStr.lastIndexOf('```');
-          const markdownBody = lastFenceEnd > 0 ? rawStr.slice(lastFenceEnd + 3).trim() : rawStr;
-          const overviewLine = rawStr.split('\n').find((l: string) =>
-            l.trim().length > 20 && !l.startsWith('#') && !l.startsWith('```') && !l.startsWith('{')
-          );
-          normalizedContent.executiveSummary.overview = overviewLine ?? '';
-          normalizedContent.sections = [{
-            id: 'raw_report',
-            title: '完整报告',
-            thesis: '',
-            content: markdownBody,
-            highlights: [],
-            signals: [],
-            entityRefs: [],
-          }];
+          // Smart fallback: try to parse markdown summary into report structure
+          const mdReport = parseMarkdownReport(rawStr, params);
+          if (mdReport && mdReport.sections.length > 0) {
+            normalizedContent.executiveSummary.overview = mdReport.overview || '';
+            normalizedContent.executiveSummary.keyPoints = mdReport.keyPoints;
+            normalizedContent.sections = mdReport.sections;
+            console.log('[Report] Recovered report from markdown summary:', mdReport.sections.length, 'sections,', mdReport.keyPoints.length, 'keyPoints');
+          } else {
+            // Last resort: store as raw markdown
+            const lastFenceEnd = rawStr.lastIndexOf('```');
+            const markdownBody = lastFenceEnd > 0 ? rawStr.slice(lastFenceEnd + 3).trim() : rawStr;
+            const overviewLine = rawStr.split('\n').find((l: string) =>
+              l.trim().length > 20 && !l.startsWith('#') && !l.startsWith('```') && !l.startsWith('{')
+            );
+            normalizedContent.executiveSummary.overview = overviewLine ?? '';
+            normalizedContent.sections = [{
+              id: 'raw_report',
+              title: '完整报告',
+              thesis: '',
+              content: markdownBody,
+              highlights: [],
+              signals: [],
+              entityRefs: [],
+            }];
+          }
         }
       }
 
@@ -3468,14 +4050,7 @@ async function startServer() {
         // Non-critical error, continue with report processing
       }
 
-      if (params.topicId && normalizedContent.sections) {
-        try {
-          const links = await reportGraphService.buildGraphLinks(rptId, params.topicId, normalizedContent);
-          console.log(`[Report] Built ${links.length} graph links`);
-        } catch (graphErr) {
-          console.error('[Report] Failed to build graph links:', graphErr);
-        }
-      }
+      // Graph links removed - using SQLite only
     } catch (err) {
       console.error('[Report] Failed to persist report:', err);
     }
@@ -3568,6 +4143,25 @@ async function startServer() {
 
       if (name === 'report' || name.startsWith('report-')) {
         await handleReportResult(execution, params);
+      }
+
+      if (name === 'extract') {
+        const validation = validateExtractionOutput(execution.result);
+        if (validation.warnings.length > 0) {
+          console.warn('[Extract] Schema validation warnings:', validation.warnings);
+        }
+
+        if (!validation.valid) {
+          execution.status = 'failed';
+          execution.error = `Extraction schema validation failed: ${validation.warnings.slice(0, 3).join('; ')}`;
+          await db.run(
+            "UPDATE skill_executions SET status = 'failed', error = ? WHERE id = ?",
+            [execution.error, execution.id]
+          );
+          ws.send(execution.id, 'error', execution.error);
+        } else {
+          execution.result = validation.data;
+        }
       }
 
       ws.send(execution.id, 'result', JSON.stringify(execution.result ?? { error: execution.error }));
@@ -3741,8 +4335,8 @@ async function startServer() {
     scheduler.stop();
     httpServer.close(() => {
       console.log('HTTP server closed');
-      db.close().then(() => {
-        console.log('Database closed');
+      Promise.all([db.close(), closeKuzu()]).then(() => {
+        console.log('Databases closed');
         process.exit(0);
       });
     });
