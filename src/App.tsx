@@ -11,6 +11,8 @@ import KnowledgeGraph from './pages/KnowledgeGraph';
 import Reports from './pages/Reports';
 import DataSources from './pages/DataSources';
 import ReviewConsole from './pages/ReviewConsole';
+import Settings from './pages/Settings';
+import DecisionSupport from './pages/DecisionSupport';
 
 export default function App() {
   return (
@@ -23,6 +25,8 @@ export default function App() {
           <Route path="/reports" element={<Reports />} />
           <Route path="/sources" element={<DataSources />} />
           <Route path="/review" element={<ReviewConsole />} />
+          <Route path="/decision" element={<DecisionSupport />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </Layout>
     </Router>

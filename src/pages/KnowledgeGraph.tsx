@@ -1,252 +1,32 @@
-import { useState } from 'react';
-import { Search, Filter } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, Filter, RefreshCw } from 'lucide-react';
 import GraphVisualization, {
   GraphNode,
   GraphEdge,
   GraphNodeType,
 } from '../components/GraphVisualization';
 
-// Mock data for evidence graph
-const mockEvidenceNodes: GraphNode[] = [
-  {
-    id: 'topic-1',
-    type: 'custom',
-    position: { x: 400, y: 300 },
-    data: {
-      label: '端侧大模型',
-      type: 'topic' as GraphNodeType,
-      description: '运行在终端设备上的轻量化大语言模型',
-    },
-  },
-  {
-    id: 'entity-1',
-    type: 'custom',
-    position: { x: 200, y: 200 },
-    data: {
-      label: 'Apple',
-      type: 'entity' as GraphNodeType,
-      description: '苹果公司，端侧AI领导者',
-      url: 'https://machinelearning.apple.com/',
-    },
-  },
-  {
-    id: 'entity-2',
-    type: 'custom',
-    position: { x: 600, y: 200 },
-    data: {
-      label: 'Google',
-      type: 'entity' as GraphNodeType,
-      description: '谷歌，Gemini Nano模型',
-      url: 'https://ai.google.dev/',
-    },
-  },
-  {
-    id: 'entity-3',
-    type: 'custom',
-    position: { x: 400, y: 150 },
-    data: {
-      label: 'Qualcomm',
-      type: 'entity' as GraphNodeType,
-      description: '高通，端侧AI芯片提供商',
-    },
-  },
-  {
-    id: 'document-1',
-    type: 'custom',
-    position: { x: 150, y: 400 },
-    data: {
-      label: 'arXiv:2310.01222',
-      type: 'document' as GraphNodeType,
-      description: 'LLM in a Flash: Efficient Large Language Model Inference',
-      url: 'https://arxiv.org/abs/2310.01222',
-    },
-  },
-  {
-    id: 'document-2',
-    type: 'custom',
-    position: { x: 650, y: 400 },
-    data: {
-      label: 'Gemini Nano',
-      type: 'document' as GraphNodeType,
-      description: 'Google的端侧大模型技术报告',
-      url: 'https://blog.google/technology/ai/google-gemini-ai/',
-    },
-  },
-  {
-    id: 'claim-1',
-    type: 'custom',
-    position: { x: 300, y: 450 },
-    data: {
-      label: '内存占用降低40%',
-      type: 'claim' as GraphNodeType,
-      description: '通过闪存存储优化，内存占用显著降低',
-    },
-  },
-  {
-    id: 'claim-2',
-    type: 'custom',
-    position: { x: 500, y: 450 },
-    data: {
-      label: '推理速度提升2x',
-      type: 'claim' as GraphNodeType,
-      description: '硬件加速和模型优化使推理速度翻倍',
-    },
-  },
-  {
-    id: 'event-1',
-    type: 'custom',
-    position: { x: 700, y: 300 },
-    data: {
-      label: 'WWDC 2024',
-      type: 'event' as GraphNodeType,
-      description: 'Apple发布端侧AI新功能',
-    },
-  },
-];
+interface ApiNode {
+  id: string;
+  label: string;
+  type: string;
+  properties: Record<string, any>;
+}
 
-const mockEvidenceEdges: GraphEdge[] = [
-  {
-    id: 'e1',
-    source: 'topic-1',
-    target: 'entity-1',
-    data: { type: 'has_entity', label: '相关' },
-  },
-  {
-    id: 'e2',
-    source: 'topic-1',
-    target: 'entity-2',
-    data: { type: 'has_entity', label: '相关' },
-  },
-  {
-    id: 'e3',
-    source: 'topic-1',
-    target: 'entity-3',
-    data: { type: 'has_entity', label: '相关' },
-  },
-  {
-    id: 'e4',
-    source: 'topic-1',
-    target: 'document-1',
-    data: { type: 'related_to', label: '支持' },
-  },
-  {
-    id: 'e5',
-    source: 'topic-1',
-    target: 'document-2',
-    data: { type: 'related_to', label: '支持' },
-  },
-  {
-    id: 'e6',
-    source: 'document-1',
-    target: 'claim-1',
-    data: { type: 'supports', label: '支持' },
-  },
-  {
-    id: 'e7',
-    source: 'document-2',
-    target: 'claim-2',
-    data: { type: 'supports', label: '支持' },
-  },
-  {
-    id: 'e8',
-    source: 'entity-1',
-    target: 'event-1',
-    data: { type: 'related_to', label: '发布' },
-  },
-  {
-    id: 'e9',
-    source: 'claim-1',
-    target: 'claim-2',
-    data: { type: 'supports', label: '互补' },
-  },
-];
+interface ApiEdge {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  properties: Record<string, any>;
+}
 
-// Mock data for planning graph
-const mockPlanningNodes: GraphNode[] = [
-  {
-    id: 'plan-1',
-    type: 'custom',
-    position: { x: 400, y: 300 },
-    data: {
-      label: '端侧AI规划',
-      type: 'topic' as GraphNodeType,
-      description: '端侧AI技术战略规划',
-    },
-  },
-  {
-    id: 'action-1',
-    type: 'custom',
-    position: { x: 200, y: 200 },
-    data: {
-      label: '跟踪Apple',
-      type: 'claim' as GraphNodeType,
-      description: '持续跟踪Apple的端侧AI进展',
-    },
-  },
-  {
-    id: 'action-2',
-    type: 'custom',
-    position: { x: 600, y: 200 },
-    data: {
-      label: '评估Gemini',
-      type: 'claim' as GraphNodeType,
-      description: '评估Google Gemini Nano的可用性',
-    },
-  },
-  {
-    id: 'action-3',
-    type: 'custom',
-    position: { x: 400, y: 450 },
-    data: {
-      label: '技术验证',
-      type: 'event' as GraphNodeType,
-      description: '开展端侧AI技术验证项目',
-    },
-  },
-  {
-    id: 'doc-1',
-    type: 'custom',
-    position: { x: 150, y: 400 },
-    data: {
-      label: '技术报告',
-      type: 'document' as GraphNodeType,
-      description: '端侧AI技术调研报告',
-    },
-  },
-];
-
-const mockPlanningEdges: GraphEdge[] = [
-  {
-    id: 'p1',
-    source: 'plan-1',
-    target: 'action-1',
-    data: { type: 'has_claim', label: '包含' },
-  },
-  {
-    id: 'p2',
-    source: 'plan-1',
-    target: 'action-2',
-    data: { type: 'has_claim', label: '包含' },
-  },
-  {
-    id: 'p3',
-    source: 'action-1',
-    target: 'action-3',
-    data: { type: 'supports', label: '推动' },
-  },
-  {
-    id: 'p4',
-    source: 'action-2',
-    target: 'action-3',
-    data: { type: 'supports', label: '推动' },
-  },
-  {
-    id: 'p5',
-    source: 'action-3',
-    target: 'doc-1',
-    data: { type: 'related_to', label: '产出' },
-  },
-];
+interface GraphStatus {
+  backend: string;
+  nodeCount?: number;
+  edgeCount?: number;
+  lastSync?: string;
+}
 
 export default function KnowledgeGraph() {
   const [activeTab, setActiveTab] = useState<'evidence' | 'planning'>('evidence');
@@ -254,12 +34,123 @@ export default function KnowledgeGraph() {
   const [nodeFilters, setNodeFilters] = useState<Set<GraphNodeType>>(
     new Set(['topic', 'entity', 'event', 'claim', 'document'])
   );
+  const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [edges, setEdges] = useState<GraphEdge[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [graphStatus, setGraphStatus] = useState<GraphStatus | null>(null);
+  const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
+  const [topics, setTopics] = useState<Array<{ id: string; name: string }>>([]);
 
-  const currentNodes = activeTab === 'evidence' ? mockEvidenceNodes : mockPlanningNodes;
-  const currentEdges = activeTab === 'evidence' ? mockEvidenceEdges : mockPlanningEdges;
+  useEffect(() => {
+    fetchGraphStatus();
+    fetchTopics();
+  }, []);
 
-  // Filter nodes based on search query and type filters
-  const filteredNodes = currentNodes.filter(node => {
+  useEffect(() => {
+    if (selectedTopic) {
+      fetchTopicGraph(selectedTopic);
+    }
+  }, [selectedTopic]);
+
+  async function fetchGraphStatus() {
+    try {
+      const res = await fetch('/api/graph/status');
+      if (res.ok) {
+        setGraphStatus(await res.json());
+      }
+    } catch (error) {
+      console.error('Failed to fetch graph status:', error);
+    }
+  }
+
+  async function fetchTopics() {
+    try {
+      const res = await fetch('/api/topics');
+      if (res.ok) {
+        const data = await res.json();
+        setTopics(data);
+        if (data.length > 0 && !selectedTopic) {
+          setSelectedTopic(data[0].id);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch topics:', error);
+    }
+  }
+
+  async function fetchTopicGraph(topicId: string) {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/graph/topic/${topicId}?depth=2`);
+      if (res.ok) {
+        const data = await res.json();
+        
+        const processedNodes: GraphNode[] = data.nodes.map((n: ApiNode, index: number) => ({
+          id: n.id,
+          type: 'custom',
+          position: { 
+            x: 400 + (index % 5) * 150, 
+            y: 200 + Math.floor(index / 5) * 100 
+          },
+          data: {
+            label: n.label,
+            type: mapNodeType(n.type),
+            description: n.properties?.description || n.properties?.title || '',
+            url: n.properties?.url,
+          },
+        }));
+
+        const processedEdges: GraphEdge[] = data.links.map((e: ApiEdge) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          data: {
+            type: e.label.toLowerCase().replace(/_/g, '_'),
+            label: e.label,
+          },
+        }));
+
+        setNodes(processedNodes);
+        setEdges(processedEdges);
+      }
+    } catch (error) {
+      console.error('Failed to fetch topic graph:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSyncGraph() {
+    try {
+      const res = await fetch('/api/graph/sync', { method: 'POST' });
+      if (res.ok) {
+        await fetchGraphStatus();
+        if (selectedTopic) {
+          await fetchTopicGraph(selectedTopic);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to sync graph:', error);
+    }
+  }
+
+  function mapNodeType(type: string): GraphNodeType {
+    const typeMap: Record<string, GraphNodeType> = {
+      'topic': 'topic',
+      'entity': 'entity',
+      'event': 'event',
+      'claim': 'claim',
+      'document': 'document',
+      'organization': 'entity',
+      'person': 'entity',
+      'technology': 'entity',
+      'paper': 'document',
+      'article': 'document',
+    };
+    return typeMap[type.toLowerCase()] || 'entity';
+  }
+
+  const filteredNodes = nodes.filter(node => {
     const matchesSearch = !searchQuery ||
       node.data.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
       node.data.description?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -267,8 +158,7 @@ export default function KnowledgeGraph() {
     return matchesSearch && matchesFilter;
   });
 
-  // Filter edges to only include connections between filtered nodes
-  const filteredEdges = currentEdges.filter(edge => {
+  const filteredEdges = edges.filter(edge => {
     const sourceNode = filteredNodes.find(n => n.id === edge.source);
     const targetNode = filteredNodes.find(n => n.id === edge.target);
     return sourceNode && targetNode;
@@ -286,7 +176,6 @@ export default function KnowledgeGraph() {
 
   const handleNodeClick = (node: GraphNode) => {
     console.log('Node clicked:', node);
-    // TODO: Show node details in a sidebar or modal
   };
 
   const handleNodeDoubleClick = (node: GraphNode) => {
@@ -303,21 +192,53 @@ export default function KnowledgeGraph() {
           <h2 className="text-2xl font-bold text-gray-900">知识图谱探索</h2>
           <p className="mt-1 text-sm text-gray-500">探索事实证据链与规划建议网络。</p>
         </div>
-        <div className="flex bg-gray-100 p-1 rounded-lg">
-          <button
-            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'evidence' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setActiveTab('evidence')}
+        <div className="flex items-center gap-4">
+          <select
+            value={selectedTopic || ''}
+            onChange={(e) => setSelectedTopic(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
           >
-            证据图谱 (事实层)
-          </button>
+            {topics.map((topic) => (
+              <option key={topic.id} value={topic.id}>
+                {topic.name}
+              </option>
+            ))}
+          </select>
           <button
-            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'planning' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setActiveTab('planning')}
+            onClick={handleSyncGraph}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
           >
-            规划图谱 (业务层)
+            <RefreshCw className="w-4 h-4" />
+            同步图谱
           </button>
+          <div className="flex bg-gray-100 p-1 rounded-lg">
+            <button
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'evidence' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setActiveTab('evidence')}
+            >
+              证据图谱 (事实层)
+            </button>
+            <button
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'planning' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setActiveTab('planning')}
+            >
+              规划图谱 (业务层)
+            </button>
+          </div>
         </div>
       </div>
+
+      {graphStatus && (
+        <div className="flex items-center gap-4 text-sm text-gray-500">
+          <span>后端: <span className="font-medium text-gray-700">{graphStatus.backend}</span></span>
+          {graphStatus.nodeCount !== undefined && (
+            <span>节点: <span className="font-medium text-gray-700">{graphStatus.nodeCount}</span></span>
+          )}
+          {graphStatus.edgeCount !== undefined && (
+            <span>关系: <span className="font-medium text-gray-700">{graphStatus.edgeCount}</span></span>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
         {/* Toolbar */}
@@ -333,19 +254,19 @@ export default function KnowledgeGraph() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <div className="relative">
+            <div className="relative group">
               <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
                 <Filter className="w-4 h-4" />
                 节点类型
               </button>
               {/* Filter Dropdown */}
-              <div className="absolute top-full left-0 mt-1 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-20 min-w-[140px]">
+              <div className="absolute top-full left-0 mt-1 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-20 min-w-[140px] hidden group-hover:block">
                 {[
-                  { value: 'topic' as GraphNodeType, label: '主题 (Topic)', color: 'bg-indigo-600' },
-                  { value: 'entity' as GraphNodeType, label: '实体 (Entity)', color: 'bg-blue-500' },
-                  { value: 'event' as GraphNodeType, label: '事件 (Event)', color: 'bg-purple-500' },
-                  { value: 'claim' as GraphNodeType, label: '主张 (Claim)', color: 'bg-amber-500' },
-                  { value: 'document' as GraphNodeType, label: '文献 (Document)', color: 'bg-emerald-500' },
+                  { value: 'topic' as GraphNodeType, label: '主题', color: 'bg-indigo-600' },
+                  { value: 'entity' as GraphNodeType, label: '实体', color: 'bg-blue-500' },
+                  { value: 'event' as GraphNodeType, label: '事件', color: 'bg-purple-500' },
+                  { value: 'claim' as GraphNodeType, label: '主张', color: 'bg-amber-500' },
+                  { value: 'document' as GraphNodeType, label: '文献', color: 'bg-emerald-500' },
                 ].map(({ value, label, color }) => (
                   <label
                     key={value}
@@ -371,12 +292,28 @@ export default function KnowledgeGraph() {
 
         {/* Graph Area */}
         <div className="flex-1 relative">
-          <GraphVisualization
-            nodes={filteredNodes}
-            edges={filteredEdges}
-            onNodeClick={handleNodeClick}
-            onNodeDoubleClick={handleNodeDoubleClick}
-          />
+          {loading ? (
+            <div className="flex items-center justify-center h-full text-gray-400">
+              加载中...
+            </div>
+          ) : filteredNodes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400">
+              <p className="mb-4">暂无图谱数据</p>
+              <button
+                onClick={handleSyncGraph}
+                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+              >
+                同步数据到图谱
+              </button>
+            </div>
+          ) : (
+            <GraphVisualization
+              nodes={filteredNodes}
+              edges={filteredEdges}
+              onNodeClick={handleNodeClick}
+              onNodeDoubleClick={handleNodeDoubleClick}
+            />
+          )}
         </div>
       </div>
     </div>

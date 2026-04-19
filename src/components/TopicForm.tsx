@@ -1,10 +1,11 @@
+import type { FormEvent } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import type { Topic } from '../types';
 
 interface TopicFormProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (e: React.FormEvent) => Promise<void>;
+  onSubmit: (e: FormEvent) => Promise<void>;
   formData: {
     name: string;
     description: string;

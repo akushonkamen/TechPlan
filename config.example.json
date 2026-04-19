@@ -1,0 +1,14 @@
+{
+  "aiProvider": "openai",
+  "openaiApiKey": "your-openai-api-key-here",
+  "openaiBaseUrl": "https://api.openai.com/v1",
+  "openaiModel": "gpt-4o-mini",
+  "geminiApiKey": "your-gemini-api-key-here",
+  "geminiModel": "gemini-2.5-flash-preview",
+  "customApiKey": "",
+  "customBaseUrl": "",
+  "customModel": "",
+  "neo4jUri": "bolt://localhost:7687",
+  "neo4jUser": "neo4j",
+  "neo4jPassword": ""
+}

@@ -13,6 +13,30 @@ import type {
   NodeLabel,
   RelationType,
 } from '../types/graph.js';
+import fs from 'fs';
+import path from 'path';
+
+async function loadConfig(): Promise<{
+  neo4jUri?: string;
+  neo4jUser?: string;
+  neo4jPassword?: string;
+}> {
+  try {
+    const configPath = path.join(process.cwd(), 'config.json');
+    if (fs.existsSync(configPath)) {
+      const content = fs.readFileSync(configPath, 'utf-8');
+      const config = JSON.parse(content);
+      return {
+        neo4jUri: config.neo4jUri,
+        neo4jUser: config.neo4jUser,
+        neo4jPassword: config.neo4jPassword,
+      };
+    }
+  } catch (error) {
+    console.error('Failed to load config for graph service:', error);
+  }
+  return {};
+}
 
 class GraphService {
   private client: Neo4jClient | null = null;
@@ -21,10 +45,12 @@ class GraphService {
    * 初始化服务
    */
   async init(): Promise<void> {
+    const config = await loadConfig();
+
     this.client = await getNeo4jClient({
-      uri: process.env.NEO4J_URI,
-      username: process.env.NEO4J_USER || 'neo4j',
-      password: process.env.NEO4J_PASSWORD,
+      uri: process.env.NEO4J_URI || config.neo4jUri,
+      username: process.env.NEO4J_USER || config.neo4jUser || 'neo4j',
+      password: process.env.NEO4J_PASSWORD || config.neo4jPassword,
       jsonStoragePath: process.env.GRAPH_JSON_PATH,
       enableMockMode: process.env.GRAPH_MOCK_MODE === 'true',
     });

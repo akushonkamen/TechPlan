@@ -1,277 +1,289 @@
 import { useState, useEffect } from 'react';
-import { Database, Upload, RefreshCw, ExternalLink, FileText, Globe, BookOpen, Loader2, Trash2, FilterX } from 'lucide-react';
+import { Search, RefreshCw, ExternalLink, Trash2, Database, Sparkles, Settings, AlertTriangle } from 'lucide-react';
 import { fetchRealTimeTechNews, type FetchedDocument } from '../services/agentService';
 import { fetchAllDocuments, saveFetchedDocuments, deleteDocument, type DbDocument } from '../services/documentService';
+import { fetchTopics } from '../services/topicService';
+import { getAIConfig } from '../services/aiService';
 
 interface DedupResult {
   unique: FetchedDocument[];
   duplicates: Array<{
     document: FetchedDocument;
     reason: string;
-    duplicateOf?: FetchedDocument;
   }>;
   stats: {
     original: number;
     unique: number;
     removed: number;
-    byUrl: number;
-    byTitleSimilarity: number;
   };
-}
-
-interface Source {
-  id: number;
-  name: string;
-  type: string;
-  status: 'active' | 'syncing' | 'error';
-  lastSync: Date;
-  count: number;
-  icon: any;
-}
-
-const initialSources: Source[] = [
-  { id: 1, name: 'arXiv', type: '论文库', status: 'active', lastSync: new Date(Date.now() - 10 * 60000), count: 12450, icon: BookOpen },
-  { id: 2, name: 'OpenAlex', type: '论文库', status: 'active', lastSync: new Date(Date.now() - 60 * 60000), count: 45200, icon: BookOpen },
-  { id: 3, name: 'GDELT', type: '新闻源', status: 'active', lastSync: new Date(Date.now() - 5 * 60000), count: 8930, icon: Globe },
-  { id: 4, name: '内部竞品分析库', type: '内部文档', status: 'active', lastSync: new Date(Date.now() - 24 * 60 * 60000), count: 124, icon: FileText },
-];
-
-const initialDocs: FetchedDocument[] = [
-  { title: 'LLaMA-3: Open Foundation and Fine-Tuned Chat Models', source: 'arXiv', type: '论文', date: '2026-03-26', url: '#' },
-  { title: 'Apple 宣布在 iOS 19 中全面集成端侧 AI', source: 'TechCrunch', type: '新闻', date: '2026-03-25', url: '#' },
-  { title: '宁德时代发布凝聚态电池量产计划', source: '官网新闻', type: '新闻', date: '2026-03-24', url: '#' },
-  { title: '2026年Q1竞品技术路线追踪报告.pdf', source: '人工上传', type: '内部文档', date: '2026-03-23', url: '#' },
-];
-
-function getRelativeTime(date: Date, now: number) {
-  const diffInSeconds = (date.getTime() - now) / 1000;
-  if (Math.abs(diffInSeconds) < 60) return '刚刚';
-
-  const rtf = new Intl.RelativeTimeFormat('zh', { numeric: 'auto' });
-  if (Math.abs(diffInSeconds) < 3600) return rtf.format(Math.round(diffInSeconds / 60), 'minute');
-  if (Math.abs(diffInSeconds) < 86400) return rtf.format(Math.round(diffInSeconds / 3600), 'hour');
-  return rtf.format(Math.round(diffInSeconds / 86400), 'day');
 }
 
 export default function DataSources() {
-  const [sources, setSources] = useState<Source[]>(initialSources);
-  const [recentDocs, setRecentDocs] = useState<FetchedDocument[]>(initialDocs);
+  const [topics, setTopics] = useState<any[]>([]);
+  const [selectedTopicId, setSelectedTopicId] = useState<string>('');
+  const [customQuery, setCustomQuery] = useState<string>('');
+  const [isSearching, setIsSearching] = useState(false);
   const [dbDocuments, setDbDocuments] = useState<DbDocument[]>([]);
-  const [now, setNow] = useState(Date.now());
-  const [isManualSyncing, setIsManualSyncing] = useState(false);
-  const [isLoadingDbDocs, setIsLoadingDbDocs] = useState(false);
-  const [dedupResult, setDedupResult] = useState<DedupResult | null>(null);
-  const [showDedupToast, setShowDedupToast] = useState(false);
+  const [recentFetched, setRecentFetched] = useState<FetchedDocument[]>([]);
+  const [dedupMessage, setDedupMessage] = useState<string>('');
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
 
-  // Update 'now' every second to refresh relative times more responsively
+  // Load topics and documents on mount
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    loadData();
+    checkAIConfig();
   }, []);
 
-  // Load documents from database on mount
-  useEffect(() => {
-    loadDbDocuments();
-  }, []);
-
-  const loadDbDocuments = async () => {
-    setIsLoadingDbDocs(true);
+  const checkAIConfig = async () => {
     try {
-      const docs = await fetchAllDocuments();
-      setDbDocuments(docs);
-    } catch (error) {
-      console.error("Failed to load documents from database:", error);
+      const config = await getAIConfig();
+      setAiConfigured(!!config.apiKey);
+    } catch {
+      setAiConfigured(false);
+    }
+  };
+
+  const loadData = async () => {
+    try {
+      const [topicsData, docsData] = await Promise.all([
+        fetchTopics(),
+        fetchAllDocuments()
+      ]);
+      setTopics(topicsData);
+      setDbDocuments(docsData);
+      if (topicsData.length > 0 && !selectedTopicId) {
+        setSelectedTopicId(topicsData[0].id);
+      }
+      setErrorMessage('');
+    } catch (error: any) {
+      console.error("Failed to load data:", error);
+      setErrorMessage(`加载数据失败: ${error.message}`);
+    }
+  };
+
+  const getSelectedTopic = () => topics.find(t => t.id === selectedTopicId);
+
+  const handleSearch = async () => {
+    if (isSearching) return;
+
+    // 清空之前的消息
+    setErrorMessage('');
+    setDedupMessage('');
+
+    const query = customQuery.trim();
+    const topic = getSelectedTopic();
+
+    if (!query && !topic) {
+      setErrorMessage('请先选择一个主题或输入搜索词');
+      return;
+    }
+
+    setIsSearching(true);
+
+    try {
+      // 使用自定义搜索词或主题关键词
+      const searchQuery = query || `${topic?.name} ${topic?.keywords?.slice(0, 3).join(' ') || ''}`;
+
+      console.log('开始检索:', searchQuery);
+
+      const results = await fetchRealTimeTechNews(searchQuery);
+
+      console.log('检索结果:', results);
+
+      if (results.length === 0) {
+        setErrorMessage('未找到相关文档，请尝试其他关键词');
+        return;
+      }
+
+      // 去重
+      const deduped = await deduplicateWithApi(results);
+
+      // 保存到数据库（关联到选中主题）
+      await saveFetchedDocuments(deduped.map(doc => ({
+        title: doc.title,
+        source: doc.source,
+        type: doc.type,
+        date: doc.date,
+        url: doc.url
+      })), selectedTopicId || null);
+
+      setRecentFetched(deduped);
+      setDedupMessage(`✓ 成功采集 ${deduped.length} 篇文档${results.length > deduped.length ? ` (去重 ${results.length - deduped.length} 篇)` : ''}`);
+
+      // 刷新文档列表
+      await loadData();
+    } catch (error: any) {
+      console.error("Search failed:", error);
+      setErrorMessage(`采集失败: ${error.message || error}。请检查：1) 是否已在设置页面配置 AI 服务；2) API Key 是否正确`);
     } finally {
-      setIsLoadingDbDocs(false);
+      setIsSearching(false);
     }
   };
 
-  const handleDeleteDocument = async (id: string) => {
-    if (!confirm('确定要删除此文档吗？')) return;
-    try {
-      await deleteDocument(id);
-      await loadDbDocuments();
-    } catch (error) {
-      console.error("Failed to delete document:", error);
-    }
-  };
-
-  /**
-   * 调用去重 API
-   */
-  const deduplicateDocuments = async (documents: FetchedDocument[]): Promise<FetchedDocument[]> => {
+  const deduplicateWithApi = async (documents: FetchedDocument[]): Promise<FetchedDocument[]> => {
     try {
       const response = await fetch('http://localhost:3000/api/documents/dedup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ documents, similarityThreshold: 0.85 })
       });
-
-      if (!response.ok) {
-        console.error('去重请求失败:', response.statusText);
-        return documents;
+      if (response.ok) {
+        const result: DedupResult = await response.json();
+        return result.unique;
       }
-
-      const result: DedupResult = await response.json();
-      setDedupResult(result);
-
-      // 显示去重结果提示
-      if (result.stats.removed > 0) {
-        setShowDedupToast(true);
-        setTimeout(() => setShowDedupToast(false), 5000);
-      }
-
-      return result.unique;
     } catch (error) {
-      console.error('去重失败:', error);
-      return documents;
+      console.error('Dedup failed:', error);
     }
+    return documents;
   };
 
-  const handleManualSync = async () => {
-    if (isManualSyncing) return;
-    setIsManualSyncing(true);
-
-    // Set all sources to syncing state
-    setSources(prev => prev.map(s => ({ ...s, status: 'syncing' })));
-
+  const handleDeleteDocument = async (id: string) => {
+    if (!confirm('确定要删除此文档吗？')) return;
     try {
-      // 真正的 Agentic 检索：调用 Gemini API 联网搜索最新技术情报
-      const [llmResults, batteryResults] = await Promise.all([
-        fetchRealTimeTechNews("端侧大模型 (On-device LLM)"),
-        fetchRealTimeTechNews("固态电池 (Solid-state battery)")
-      ]);
-
-      const combinedResults = [...llmResults, ...batteryResults];
-
-      // 按日期降序排序
-      combinedResults.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-      if (combinedResults.length > 0) {
-        // 执行去重
-        const uniqueDocs = await deduplicateDocuments(combinedResults);
-
-        setRecentDocs(uniqueDocs);
-
-        // Save to database (只保存去重后的文档)
-        try {
-          await saveFetchedDocuments(uniqueDocs);
-          // Reload documents from database
-          await loadDbDocuments();
-        } catch (error) {
-          console.error("Failed to save documents to database:", error);
-        }
-      }
-
-      // Update source counts and timestamps based on real fetched data
-      setSources(prev => prev.map(s => {
-        let addedCount = 0;
-        if (s.name === 'arXiv' || s.name === 'OpenAlex') {
-          addedCount = combinedResults.filter(doc => doc.type === '论文').length;
-        } else if (s.name === 'GDELT') {
-          addedCount = combinedResults.filter(doc => doc.type === '新闻').length;
-        }
-
-        return {
-          ...s,
-          status: 'active',
-          count: s.count + addedCount,
-          lastSync: new Date()
-        };
-      }));
+      await deleteDocument(id);
+      await loadData();
     } catch (error) {
-      console.error("同步失败:", error);
-      // Revert status on error
-      setSources(prev => prev.map(s => ({ ...s, status: 'active' })));
-    } finally {
-      setIsManualSyncing(false);
+      console.error("Failed to delete document:", error);
     }
   };
+
+  const filteredDocuments = selectedTopicId
+    ? dbDocuments.filter(d => d.topic_id === selectedTopicId)
+    : dbDocuments;
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">数据源与采集</h2>
-          <p className="mt-1 text-sm text-gray-500">管理外部数据源接入、查看采集状态，或手动上传内部补充材料。</p>
-        </div>
-        <div className="flex gap-3">
-          <button
-            onClick={handleManualSync}
-            disabled={isManualSyncing}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RefreshCw className={`w-4 h-4 ${isManualSyncing ? 'animate-spin' : ''}`} />
-            {isManualSyncing ? '联网检索中...' : '手动触发同步'}
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm">
-            <Upload className="w-4 h-4" />
-            上传内部文档
-          </button>
-        </div>
+      {/* Header */}
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">数据采集</h2>
+        <p className="mt-1 text-sm text-gray-500">基于 AI 联网检索采集最新技术文档</p>
       </div>
 
-      {/* 去重结果提示 */}
-      {showDedupToast && dedupResult && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
-          <FilterX className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+      {/* AI Configuration Warning */}
+      {aiConfigured === false && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
           <div className="flex-1">
-            <h4 className="font-medium text-blue-900">内容去重完成</h4>
-            <p className="text-sm text-blue-700 mt-1">
-              已从 <span className="font-semibold">{dedupResult.stats.original}</span> 篇文档中去除
-              <span className="font-semibold"> {dedupResult.stats.removed}</span> 篇重复内容
-              （URL重复 {dedupResult.stats.byUrl} 篇，标题相似 {dedupResult.stats.byTitleSimilarity} 篇）
+            <h4 className="font-medium text-amber-900">需要配置 AI 服务</h4>
+            <p className="text-sm text-amber-800 mt-1">
+              使用数据采集功能前，请先在「设置」页面配置 AI API Key（支持 OpenAI 或 Google Gemini）。
             </p>
+            <a
+              href="/settings"
+              className="inline-flex items-center gap-1 mt-2 text-sm font-medium text-amber-900 hover:text-amber-700"
+            >
+              <Settings className="w-4 h-4" />
+              前往设置
+            </a>
           </div>
-          <button
-            onClick={() => setShowDedupToast(false)}
-            className="text-blue-400 hover:text-blue-600"
-          >
-            &times;
-          </button>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {sources.map((source) => (
-          <div key={source.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 transition-all duration-300">
-            <div className="flex justify-between items-start">
-              <div className="p-2 bg-gray-50 rounded-lg">
-                <source.icon className="w-5 h-5 text-gray-600" />
-              </div>
-              <span className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md transition-colors ${
-                source.status === 'syncing' ? 'text-blue-700 bg-blue-50' : 'text-green-700 bg-green-50'
-              }`}>
-                {source.status === 'syncing' ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
+      {/* Search Panel */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex gap-4 mb-4">
+          {/* Topic Selector */}
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">选择主题</label>
+            <select
+              value={selectedTopicId}
+              onChange={(e) => setSelectedTopicId(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="">全部文档</option>
+              {topics.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Custom Query Input */}
+          <div className="flex-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">自定义搜索词（可选）</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customQuery}
+                onChange={(e) => setCustomQuery(e.target.value)}
+                placeholder="输入关键词，留空则使用主题关键词"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              />
+              <button
+                onClick={handleSearch}
+                disabled={isSearching || aiConfigured === false}
+                className="flex items-center gap-2 px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                title={aiConfigured === false ? '请先配置 AI 服务' : ''}
+              >
+                {isSearching ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    检索中...
+                  </>
                 ) : (
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                  <>
+                    <Search className="w-4 h-4" />
+                    开始检索
+                  </>
                 )}
-                {source.status === 'syncing' ? '同步中' : '正常'}
-              </span>
-            </div>
-            <div className="mt-4">
-              <h3 className="font-medium text-gray-900">{source.name}</h3>
-              <p className="text-xs text-gray-500 mt-1">{source.type}</p>
-            </div>
-            <div className="mt-4 pt-4 border-t border-gray-100 flex justify-between items-center text-sm">
-              <span className="text-gray-500">已采集: <span className="font-medium text-gray-900 transition-all duration-500">{source.count.toLocaleString()}</span></span>
-              <span className="text-gray-400 text-xs">{getRelativeTime(source.lastSync, now)}</span>
+              </button>
             </div>
           </div>
-        ))}
+        </div>
+
+        {/* Topic Info */}
+        {getSelectedTopic() && (
+          <div className="bg-indigo-50 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <Sparkles className="w-5 h-5 text-indigo-600 mt-0.5" />
+              <div className="flex-1">
+                <h4 className="font-medium text-indigo-900">{getSelectedTopic().name}</h4>
+                <p className="text-sm text-indigo-700 mt-1">{getSelectedTopic().description}</p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {getSelectedTopic().keywords?.map((kw: string, i: number) => (
+                    <span key={i} className="px-2 py-0.5 bg-white rounded text-xs text-indigo-700">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Status Messages */}
+        {errorMessage && (
+          <div className="mt-4 p-4 rounded-lg text-sm bg-red-50 text-red-800 border border-red-200 flex items-start gap-2">
+            <span className="text-red-500 font-bold">!</span>
+            <div>
+              <div className="font-medium">采集失败</div>
+              <div className="mt-1">{errorMessage}</div>
+            </div>
+          </div>
+        )}
+        {dedupMessage && !errorMessage && (
+          <div className="mt-4 p-3 rounded-lg text-sm bg-green-50 text-green-800 border border-green-200">
+            {dedupMessage}
+          </div>
+        )}
       </div>
 
+      {/* Documents Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
-          <h3 className="font-medium text-gray-900">已采集文档 (数据库持久化)</h3>
-          <span className="text-xs text-gray-500">共 {dbDocuments.length} 条</span>
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+          <h3 className="font-medium text-gray-900">
+            已采集文档
+            {selectedTopicId && ` (${getSelectedTopic()?.name})`}
+          </h3>
+          <span className="text-sm text-gray-500">共 {filteredDocuments.length} 篇</span>
         </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
               <tr>
-                <th className="px-6 py-3">文档标题</th>
+                <th className="px-6 py-3">标题</th>
                 <th className="px-6 py-3">来源</th>
                 <th className="px-6 py-3">发布日期</th>
                 <th className="px-6 py-3">采集时间</th>
@@ -279,28 +291,23 @@ export default function DataSources() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {isLoadingDbDocs ? (
+              {filteredDocuments.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                    加载中...
-                  </td>
-                </tr>
-              ) : dbDocuments.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                    暂无数据，请点击"手动触发同步"进行全网检索。
+                  <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                    <Database className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                    <p>暂无文档，点击上方"开始检索"进行采集</p>
                   </td>
                 </tr>
               ) : (
-                dbDocuments.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-gray-50 transition-colors">
+                filteredDocuments.map((doc) => (
+                  <tr key={doc.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 font-medium text-gray-900 max-w-md truncate" title={doc.title}>
                       {doc.title}
                     </td>
                     <td className="px-6 py-4 text-gray-600">{doc.source || '-'}</td>
                     <td className="px-6 py-4 text-gray-500">{doc.published_date || '-'}</td>
                     <td className="px-6 py-4 text-gray-500">
-                      {doc.collected_date ? new Date(doc.collected_date).toLocaleDateString('zh-CN') : '-'}
+                      {doc.collected_date ? new Date(doc.collected_date).toLocaleString('zh-CN') : '-'}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center gap-2 justify-end">
@@ -309,15 +316,15 @@ export default function DataSources() {
                             href={doc.source_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-indigo-600 hover:text-indigo-800 font-medium text-xs flex items-center gap-1"
+                            className="text-indigo-600 hover:text-indigo-800 text-xs flex items-center gap-1"
                           >
                             查看 <ExternalLink className="w-3 h-3" />
                           </a>
                         )}
                         <button
                           onClick={() => handleDeleteDocument(doc.id)}
-                          className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
-                          title="删除文档"
+                          className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50"
+                          title="删除"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -330,42 +337,6 @@ export default function DataSources() {
           </table>
         </div>
       </div>
-
-      {/* Latest fetched documents preview (non-persistent) */}
-      {recentDocs.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
-            <h3 className="font-medium text-gray-900">最新采集预览</h3>
-            <span className="text-xs text-gray-500">已保存到数据库</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-3">文档标题</th>
-                  <th className="px-6 py-3">类型</th>
-                  <th className="px-6 py-3">来源</th>
-                  <th className="px-6 py-3">发布日期</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {recentDocs.map((doc, i) => (
-                  <tr key={i} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 font-medium text-gray-900 max-w-md truncate" title={doc.title}>
-                      {doc.title}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">{doc.type}</span>
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">{doc.source}</td>
-                    <td className="px-6 py-4 text-gray-500">{doc.date}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

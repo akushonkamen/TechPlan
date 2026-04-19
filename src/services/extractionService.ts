@@ -1,8 +1,9 @@
-import { GoogleGenAI, Type } from '@google/genai';
+/**
+ * 知识抽取服务
+ * 支持多种 AI 提供商（OpenAI、Gemini、自定义）
+ */
 
-// 初始化 Gemini API 客户端
-const apiKey = process.env.GEMINI_API_KEY;
-const ai = new GoogleGenAI({ apiKey: apiKey || '' });
+import { callAI, extractWithSchema, getAIConfig, resetAIConfig } from './aiService.js';
 
 // ==================== 类型定义 ====================
 
@@ -42,16 +43,6 @@ export interface Event {
   confidence: number;
 }
 
-export interface ExtractedEvent {
-  eventType: string;
-  title: string;
-  description: string;
-  time?: string;
-  location?: string;
-  participants: string[];
-  confidence: number;
-}
-
 export interface ExtractionResult {
   entities: Entity[];
   relations: Relation[];
@@ -60,6 +51,7 @@ export interface ExtractionResult {
   metadata: {
     textLength: number;
     extractedAt: string;
+    provider: string;
     model: string;
   };
 }
@@ -73,9 +65,10 @@ export async function extractEntities(text: string, options?: {
   maxEntities?: number;
   entityTypes?: string[];
 }): Promise<Entity[]> {
-  if (!apiKey) {
-    console.warn("未检测到 GEMINI_API_KEY，返回空实体列表。");
-    return [];
+  const config = await getAIConfig();
+
+  if (!config.apiKey) {
+    throw new Error("未配置 API Key，请先在「设置」页面配置 AI 服务。");
   }
 
   if (!text || text.trim().length < 10) {
@@ -86,9 +79,33 @@ export async function extractEntities(text: string, options?: {
   const entityTypes = options?.entityTypes || ['person', 'organization', 'technology', 'product', 'location', 'event'];
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `从以下文本中抽取关键实体。请识别并分类人物、机构、技术、产品、地点和事件。
+    const schema = {
+      type: 'object',
+      properties: {
+        entities: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: '实体的确切文本，尽可能使用原文' },
+              type: {
+                type: 'string',
+                description: '实体类型',
+                enum: ['person', 'organization', 'technology', 'product', 'location', 'event', 'other']
+              },
+              confidence: { type: 'number', description: '置信度 0-1' },
+              description: { type: 'string', description: '实体的简短描述' }
+            },
+            required: ['text', 'type', 'confidence', 'description'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['entities'],
+      additionalProperties: false
+    };
+
+    const prompt = `从以下文本中抽取关键实体。请识别并分类人物、机构、技术、产品、地点和事件。
 
 文本：
 """${text.substring(0, 15000)}"""
@@ -99,41 +116,12 @@ export async function extractEntities(text: string, options?: {
 - confidence: 置信度（0-1之间的浮点数，基于文本中实体提及的明确程度）
 - description: 简短描述（可选）
 
-最多返回 ${maxEntities} 个最重要的实体。`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            entities: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  text: { type: Type.STRING, description: "实体的确切文本，尽可能使用原文" },
-                  type: {
-                    type: Type.STRING,
-                    description: "实体类型: person(人物), organization(机构), technology(技术), product(产品), location(地点), event(事件), other(其他)",
-                    enum: ['person', 'organization', 'technology', 'product', 'location', 'event', 'other']
-                  },
-                  confidence: {
-                    type: Type.NUMBER,
-                    description: "置信度 0-1，基于文本中实体提及的明确程度和频率"
-                  },
-                  description: { type: Type.STRING, description: "实体的简短描述或上下文" }
-                },
-                required: ["text", "type", "confidence"]
-              }
-            }
-          },
-          required: ["entities"]
-        }
-      }
-    });
+最多返回 ${maxEntities} 个最重要的实体。`;
 
-    if (response.text) {
-      const data = JSON.parse(response.text);
-      return (data.entities || []).map((e: any, idx: number) => ({
+    const result = await extractWithSchema(prompt, schema);
+
+    if (result && result.entities) {
+      return (result.entities as any[]).map((e: any, idx: number) => ({
         id: `entity_${Date.now()}_${idx}`,
         text: e.text,
         type: e.type,
@@ -141,6 +129,7 @@ export async function extractEntities(text: string, options?: {
         metadata: e.description ? { description: e.description } : undefined
       }));
     }
+
     return [];
   } catch (error) {
     console.error("实体抽取错误:", error);
@@ -154,9 +143,10 @@ export async function extractEntities(text: string, options?: {
  * 从文本中抽取实体间的关系
  */
 export async function extractRelations(text: string, entities?: Entity[]): Promise<Relation[]> {
-  if (!apiKey) {
-    console.warn("未检测到 GEMINI_API_KEY，返回空关系列表。");
-    return [];
+  const config = await getAIConfig();
+
+  if (!config.apiKey) {
+    throw new Error("未配置 API Key，请先在「设置」页面配置 AI 服务。");
   }
 
   if (!text || text.trim().length < 10) {
@@ -169,9 +159,32 @@ export async function extractRelations(text: string, entities?: Entity[]): Promi
     : '';
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `从以下文本中抽取实体之间的关系。${entityContext}
+    const schema = {
+      type: 'object',
+      properties: {
+        relations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              source: { type: 'string', description: '源实体的文本' },
+              target: { type: 'string', description: '目标实体的文本' },
+              relation: {
+                type: 'string',
+                description: '关系类型，使用简短的动词或动词短语，如 invests_in, partners_with, acquires, launches'
+              },
+              confidence: { type: 'number', description: '置信度 0-1' }
+            },
+            required: ['source', 'target', 'relation', 'confidence'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['relations'],
+      additionalProperties: false
+    };
+
+    const prompt = `从以下文本中抽取实体之间的关系。${entityContext}
 
 文本：
 """${text.substring(0, 15000)}"""
@@ -189,40 +202,12 @@ export async function extractRelations(text: string, entities?: Entity[]): Promi
 - source: 源实体文本
 - target: 目标实体文本
 - relation: 关系类型（使用动词或简短短语）
-- confidence: 置信度（0-1）`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            relations: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  source: { type: Type.STRING, description: "源实体的文本" },
-                  target: { type: Type.STRING, description: "目标实体的文本" },
-                  relation: {
-                    type: Type.STRING,
-                    description: "关系类型，使用简短的动词或动词短语，如 'invests_in', 'partners_with', 'acquires', 'launches'"
-                  },
-                  confidence: {
-                    type: Type.NUMBER,
-                    description: "置信度 0-1，基于文本中关系的明确程度"
-                  }
-                },
-                required: ["source", "target", "relation", "confidence"]
-              }
-            }
-          },
-          required: ["relations"]
-        }
-      }
-    });
+- confidence: 置信度（0-1）`;
 
-    if (response.text) {
-      const data = JSON.parse(response.text);
-      return (data.relations || []).map((r: any, idx: number) => ({
+    const result = await extractWithSchema(prompt, schema);
+
+    if (result && result.relations) {
+      return (result.relations as any[]).map((r: any, idx: number) => ({
         id: `relation_${Date.now()}_${idx}`,
         source: r.source,
         target: r.target,
@@ -230,6 +215,7 @@ export async function extractRelations(text: string, entities?: Entity[]): Promi
         confidence: Math.min(1, Math.max(0, r.confidence || 0.5))
       }));
     }
+
     return [];
   } catch (error) {
     console.error("关系抽取错误:", error);
@@ -243,9 +229,10 @@ export async function extractRelations(text: string, entities?: Entity[]): Promi
  * 从文本中抽取主张、观点、预测等 Claims
  */
 export async function extractClaims(text: string): Promise<Claim[]> {
-  if (!apiKey) {
-    console.warn("未检测到 GEMINI_API_KEY，返回空 Claim 列表。");
-    return [];
+  const config = await getAIConfig();
+
+  if (!config.apiKey) {
+    throw new Error("未配置 API Key，请先在「设置」页面配置 AI 服务。");
   }
 
   if (!text || text.trim().length < 10) {
@@ -253,9 +240,38 @@ export async function extractClaims(text: string): Promise<Claim[]> {
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `从以下文本中抽取所有重要的主张、观点、预测和发现。
+    const schema = {
+      type: 'object',
+      properties: {
+        claims: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: '主张的文本内容' },
+              type: {
+                type: 'string',
+                description: 'Claim 类型',
+                enum: ['prediction', 'opinion', 'assertion', 'finding', 'announcement']
+              },
+              polarity: {
+                type: 'string',
+                description: '情感倾向',
+                enum: ['positive', 'negative', 'neutral']
+              },
+              confidence: { type: 'number', description: '置信度 0-1' },
+              context: { type: 'string', description: '上下文说明，如谁说的' }
+            },
+            required: ['text', 'type', 'polarity', 'confidence', 'context'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['claims'],
+      additionalProperties: false
+    };
+
+    const prompt = `从以下文本中抽取所有重要的主张、观点、预测和发现。
 
 文本：
 """${text.substring(0, 15000)}"""
@@ -272,43 +288,12 @@ export async function extractClaims(text: string): Promise<Claim[]> {
 - type: claim 类型
 - polarity: 情感倾向 (positive/negative/neutral)
 - confidence: 置信度（0-1，基于文本中表达的明确程度）
-- context: 简短的上下文说明（谁说的，在什么情况下）`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            claims: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  text: { type: Type.STRING, description: "主张的文本内容" },
-                  type: {
-                    type: Type.STRING,
-                    description: "Claim 类型",
-                    enum: ['prediction', 'opinion', 'assertion', 'finding', 'announcement']
-                  },
-                  polarity: {
-                    type: Type.STRING,
-                    description: "情感倾向",
-                    enum: ['positive', 'negative', 'neutral']
-                  },
-                  confidence: { type: Type.NUMBER, description: "置信度 0-1" },
-                  context: { type: Type.STRING, description: "上下文说明，如谁说的" }
-                },
-                required: ["text", "type", "polarity", "confidence"]
-              }
-            }
-          },
-          required: ["claims"]
-        }
-      }
-    });
+- context: 简短的上下文说明（谁说的，在什么情况下）`;
 
-    if (response.text) {
-      const data = JSON.parse(response.text);
-      return (data.claims || []).map((c: any, idx: number) => ({
+    const result = await extractWithSchema(prompt, schema);
+
+    if (result && result.claims) {
+      return (result.claims as any[]).map((c: any, idx: number) => ({
         id: `claim_${Date.now()}_${idx}`,
         text: c.text,
         type: c.type,
@@ -317,6 +302,7 @@ export async function extractClaims(text: string): Promise<Claim[]> {
         sourceContext: c.context
       }));
     }
+
     return [];
   } catch (error) {
     console.error("Claim 抽取错误:", error);
@@ -330,9 +316,10 @@ export async function extractClaims(text: string): Promise<Claim[]> {
  * 从文本中抽取事件（时间、地点、参与方）
  */
 export async function extractEvents(text: string): Promise<Event[]> {
-  if (!apiKey) {
-    console.warn("未检测到 GEMINI_API_KEY，返回空事件列表。");
-    return [];
+  const config = await getAIConfig();
+
+  if (!config.apiKey) {
+    throw new Error("未配置 API Key，请先在「设置」页面配置 AI 服务。");
   }
 
   if (!text || text.trim().length < 10) {
@@ -340,9 +327,36 @@ export async function extractEvents(text: string): Promise<Event[]> {
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `从以下文本中抽取所有重要的事件。
+    const schema = {
+      type: 'object',
+      properties: {
+        events: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              eventType: { type: 'string', description: '事件类型' },
+              title: { type: 'string', description: '事件的简短标题' },
+              description: { type: 'string', description: '事件的详细描述' },
+              time: { type: 'string', description: '事件时间' },
+              location: { type: 'string', description: '事件地点' },
+              participants: {
+                type: 'array',
+                items: { type: 'string' },
+                description: '参与该事件的实体列表'
+              },
+              confidence: { type: 'number', description: '置信度 0-1' }
+            },
+            required: ['eventType', 'title', 'description', 'time', 'location', 'participants', 'confidence'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['events'],
+      additionalProperties: false
+    };
+
+    const prompt = `从以下文本中抽取所有重要的事件。
 
 文本：
 """${text.substring(0, 15000)}"""
@@ -356,47 +370,18 @@ export async function extractEvents(text: string): Promise<Event[]> {
 - 会议/活动
 
 为每个事件提供：
-- eventType: 事件类型（简短描述）
+- eventType: 事件类型（如 product_launch, investment, partnership, research_breakthrough）
 - title: 事件标题
 - description: 事件详细描述
 - time: 事件时间（如果提到）
 - location: 事件地点（如果提到）
 - participants: 参与方列表（人物、机构等）
-- confidence: 置信度（0-1）`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            events: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  eventType: { type: Type.STRING, description: "事件类型，如 'product_launch', 'investment', 'partnership', 'research_breakthrough'" },
-                  title: { type: Type.STRING, description: "事件的简短标题" },
-                  description: { type: Type.STRING, description: "事件的详细描述" },
-                  time: { type: Type.STRING, description: "事件时间，尽可能使用具体日期" },
-                  location: { type: Type.STRING, description: "事件地点" },
-                  participants: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: "参与该事件的实体列表"
-                  },
-                  confidence: { type: Type.NUMBER, description: "置信度 0-1" }
-                },
-                required: ["eventType", "title", "description", "participants", "confidence"]
-              }
-            }
-          },
-          required: ["events"]
-        }
-      }
-    });
+- confidence: 置信度（0-1）`;
 
-    if (response.text) {
-      const data = JSON.parse(response.text);
-      return (data.events || []).map((e: any, idx: number) => ({
+    const result = await extractWithSchema(prompt, schema);
+
+    if (result && result.events) {
+      return (result.events as any[]).map((e: any, idx: number) => ({
         id: `event_${Date.now()}_${idx}`,
         type: e.eventType,
         title: e.title,
@@ -407,6 +392,7 @@ export async function extractEvents(text: string): Promise<Event[]> {
         confidence: Math.min(1, Math.max(0, e.confidence || 0.5))
       }));
     }
+
     return [];
   } catch (error) {
     console.error("事件抽取错误:", error);
@@ -430,6 +416,8 @@ export async function analyzeText(text: string, options?: {
   const includeClaims = options?.includeClaims !== false;
   const includeEvents = options?.includeEvents !== false;
 
+  const config = await getAIConfig();
+
   // 并行执行所有抽取
   const [entities, relations, claims, events] = await Promise.all([
     includeEntities ? extractEntities(text) : Promise.resolve([]),
@@ -452,7 +440,8 @@ export async function analyzeText(text: string, options?: {
     metadata: {
       textLength: text.length,
       extractedAt: new Date().toISOString(),
-      model: 'gemini-3-flash-preview'
+      provider: config.provider,
+      model: config.model || 'unknown',
     }
   };
 }

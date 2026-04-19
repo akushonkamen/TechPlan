@@ -1,3 +1,4 @@
+import type { FormEvent } from 'react';
 import { useState, useEffect } from 'react';
 import { Plus, Search, MoreVertical, Edit2, Trash2, Play, X, Loader2, ExternalLink } from 'lucide-react';
 import type { Topic } from '../types';
@@ -79,7 +80,7 @@ export default function Topics() {
     setIsModalOpen(true);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
@@ -175,9 +176,16 @@ export default function Topics() {
     try {
       const docs = await fetchRealTimeTechNews(topic.name);
       setResearchResults({ topicName: topic.name, docs });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Research failed:", error);
-      alert("检索失败，请检查网络或 API Key 配置。");
+      const errorMsg = error?.message || error?.toString() || "";
+      if (errorMsg.includes("API Key") || errorMsg.includes("未配置")) {
+        if (confirm("未配置 AI API Key，是否前往设置页面进行配置？")) {
+          window.location.href = "/settings";
+        }
+      } else {
+        alert("检索失败：" + errorMsg);
+      }
     } finally {
       setResearchingTopicId(null);
     }
