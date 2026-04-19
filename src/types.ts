@@ -10,6 +10,7 @@ export interface Topic {
   keywords: string[];
   organizations: string[];
   schedule: 'daily' | 'weekly' | 'disabled';
+  collectionTime: string; // HH:mm format, e.g. "06:00"
   dailyReportEnabled: boolean;
   weeklyReportEnabled: boolean;
   monthlyReportEnabled: boolean;

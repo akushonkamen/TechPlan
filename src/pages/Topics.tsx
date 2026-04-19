@@ -47,6 +47,7 @@ export default function Topics() {
     keywords: '',
     organizations: '',
     schedule: 'daily' as 'daily' | 'weekly' | 'disabled',
+    collectionTime: '06:00',
     dailyReportEnabled: false,
     weeklyReportEnabled: true,
     monthlyReportEnabled: false,
@@ -91,7 +92,7 @@ export default function Topics() {
   };
 
   const resetForm = () => {
-    setFormData({ name: '', description: '', priority: 'medium', keywords: '', organizations: '', schedule: 'daily', dailyReportEnabled: false, weeklyReportEnabled: true, monthlyReportEnabled: false, quarterlyReportEnabled: false });
+    setFormData({ name: '', description: '', priority: 'medium', keywords: '', organizations: '', schedule: 'daily', collectionTime: '06:00', dailyReportEnabled: false, weeklyReportEnabled: true, monthlyReportEnabled: false, quarterlyReportEnabled: false });
     setEditingTopicId(null);
   };
 
@@ -105,6 +106,7 @@ export default function Topics() {
       keywords: topic.keywords.join(', '),
       organizations: topic.organizations.join(', '),
       schedule: topic.schedule === 'daily' || topic.schedule === 'weekly' ? topic.schedule : 'daily',
+      collectionTime: topic.collectionTime || '06:00',
       dailyReportEnabled: topic.dailyReportEnabled,
       weeklyReportEnabled: topic.weeklyReportEnabled,
       monthlyReportEnabled: topic.monthlyReportEnabled,
@@ -130,6 +132,7 @@ export default function Topics() {
         keywords: formData.keywords.split(/[,，]/).map(k => k.trim()).filter(Boolean),
         organizations: formData.organizations.split(/[,，]/).map(o => o.trim()).filter(Boolean),
         schedule: formData.schedule,
+        collectionTime: formData.collectionTime,
         dailyReportEnabled: formData.dailyReportEnabled,
         weeklyReportEnabled: formData.weeklyReportEnabled,
         monthlyReportEnabled: formData.monthlyReportEnabled,
@@ -311,6 +314,9 @@ export default function Topics() {
                   <div className="flex flex-wrap gap-1 mb-3">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${topic.schedule === 'disabled' ? 'bg-[#888]/10 text-[#888]' : 'bg-[#2A5A6B]/10 text-[#2A5A6B]'}`}>
                       {topic.schedule === 'daily' ? '日采集' : topic.schedule === 'weekly' ? '周采集' : '已停用'}
+                      {topic.schedule !== 'disabled' && topic.collectionTime && (
+                        <span className="ml-1 opacity-70">{topic.collectionTime}</span>
+                      )}
                     </span>
                     {topic.dailyReportEnabled && <span className="px-2 py-0.5 bg-[#9C7B3C]/10 text-[#9C7B3C] rounded-full text-[10px] font-medium">日报</span>}
                     {topic.weeklyReportEnabled && <span className="px-2 py-0.5 bg-[#5B7553]/10 text-[#5B7553] rounded-full text-[10px] font-medium">周报</span>}

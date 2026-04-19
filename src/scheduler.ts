@@ -194,13 +194,24 @@ export class SchedulerService {
     }
   }
 
-  /** Collect data for all topics that have collection enabled. */
+  /** Collect data for all topics that have collection enabled and are due at current time. */
   private async collectForAllTopics() {
     if (!this.collectFn) return;
     const topics = await this.db.all(
-      `SELECT id, name, schedule FROM topics WHERE schedule IS NOT NULL AND schedule != 'disabled'`
+      `SELECT id, name, schedule, collection_time FROM topics WHERE schedule IS NOT NULL AND schedule != 'disabled'`
     );
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const intervalMin = this.config.checkIntervalMinutes;
+
     for (const topic of topics) {
+      // Check if current time is within the collection time window
+      const targetTime = (topic.collection_time || '06:00').split(':').map(Number);
+      const targetMinutes = (targetTime[0] || 6) * 60 + (targetTime[1] || 0);
+      const diff = Math.abs(currentMinutes - targetMinutes);
+      // Allow collection if within one scheduler interval of the target time
+      if (diff > intervalMin && (1440 - diff) > intervalMin) continue;
+
       const { start, end } = this.getCollectionRange(topic.schedule);
       try {
         console.log(`[Scheduler] Collecting data for "${topic.name}" (${start} - ${end})`);

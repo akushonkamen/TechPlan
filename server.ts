@@ -163,7 +163,8 @@ async function startServer() {
       daily_report_enabled INTEGER DEFAULT 0,
       weekly_report_enabled INTEGER DEFAULT 0,
       monthly_report_enabled INTEGER DEFAULT 0,
-      quarterly_report_enabled INTEGER DEFAULT 0
+      quarterly_report_enabled INTEGER DEFAULT 0,
+      collection_time TEXT DEFAULT '06:00'
     );
 
     CREATE TABLE IF NOT EXISTS documents (
@@ -533,6 +534,15 @@ async function startServer() {
     }
   }
 
+  // Migrate: add collection_time column to topics if missing
+  try {
+    await db.exec(`ALTER TABLE topics ADD COLUMN collection_time TEXT DEFAULT '06:00'`);
+  } catch (e: any) {
+    if (!e.message?.includes('duplicate column')) {
+      console.warn('[Migration] Warning adding topics.collection_time:', e.message);
+    }
+  }
+
   // Migrate: convert old schedule values to new report_enabled flags
   try {
     const oldTopics = await db.all(`SELECT id, schedule, daily_report_enabled, weekly_report_enabled, monthly_report_enabled, quarterly_report_enabled FROM topics`);
@@ -692,6 +702,7 @@ async function startServer() {
         weeklyReportEnabled: !!row.weekly_report_enabled,
         monthlyReportEnabled: !!row.monthly_report_enabled,
         quarterlyReportEnabled: !!row.quarterly_report_enabled,
+        collectionTime: row.collection_time || '06:00',
       }));
       res.json(topics);
     } catch (error) {
@@ -711,8 +722,8 @@ async function startServer() {
         createdAt: topic.createdAt || now,
       };
       await db.run(
-        `INSERT INTO topics (id, name, description, aliases, owner, priority, scope, createdAt, keywords, organizations, schedule, daily_report_enabled, weekly_report_enabled, monthly_report_enabled, quarterly_report_enabled)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO topics (id, name, description, aliases, owner, priority, scope, createdAt, keywords, organizations, schedule, daily_report_enabled, weekly_report_enabled, monthly_report_enabled, quarterly_report_enabled, collection_time)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           topicData.id,
           topicData.name,
@@ -729,6 +740,7 @@ async function startServer() {
           topicData.weeklyReportEnabled ? 1 : 0,
           topicData.monthlyReportEnabled ? 1 : 0,
           topicData.quarterlyReportEnabled ? 1 : 0,
+          topicData.collectionTime || '06:00',
         ]
       );
       res.status(201).json(topicData);
@@ -760,7 +772,8 @@ async function startServer() {
           priority = ?, scope = ?, createdAt = ?, keywords = ?,
           organizations = ?, schedule = ?,
           daily_report_enabled = ?, weekly_report_enabled = ?,
-          monthly_report_enabled = ?, quarterly_report_enabled = ?
+          monthly_report_enabled = ?, quarterly_report_enabled = ?,
+          collection_time = ?
         WHERE id = ?`,
         [
           topic.name,
@@ -777,6 +790,7 @@ async function startServer() {
           topic.weeklyReportEnabled ? 1 : 0,
           topic.monthlyReportEnabled ? 1 : 0,
           topic.quarterlyReportEnabled ? 1 : 0,
+          topic.collectionTime || '06:00',
           id
         ]
       );

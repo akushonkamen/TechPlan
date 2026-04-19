@@ -13,6 +13,7 @@ interface TopicFormProps {
     keywords: string;
     organizations: string;
     schedule: 'daily' | 'weekly' | 'disabled';
+    collectionTime: string;
     dailyReportEnabled: boolean;
     weeklyReportEnabled: boolean;
     monthlyReportEnabled: boolean;
@@ -84,7 +85,7 @@ export default function TopicForm({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className={LABEL}>优先级</label>
               <select
@@ -110,6 +111,17 @@ export default function TopicForm({
                 <option value="weekly">每周采集</option>
                 <option value="disabled">禁用自动采集</option>
               </select>
+            </div>
+            <div>
+              <label className={LABEL}>采集时间</label>
+              <input
+                type="time"
+                className={INPUT}
+                value={formData.collectionTime}
+                onChange={(e) => onFormDataChange({ ...formData, collectionTime: e.target.value })}
+                disabled={isSubmitting || formData.schedule === 'disabled'}
+              />
+              <p className="text-[10px] text-[#888] mt-1">在该时间点前后自动采集</p>
             </div>
           </div>
 
