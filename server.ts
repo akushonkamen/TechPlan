@@ -24,6 +24,29 @@ const PORT = 3000;
 async function startServer() {
   const app = express();
   app.use(express.json());
+  const adminToken = process.env.ADMIN_TOKEN;
+
+  const requireAdmin: express.RequestHandler = (req, res, next) => {
+    // Backward compatibility: if ADMIN_TOKEN is not configured, keep current behavior.
+    if (!adminToken) return next();
+
+    const authHeader = req.header("authorization");
+    const bearer = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : null;
+    const headerToken = req.header("x-admin-token");
+    const token = bearer || headerToken;
+
+    if (!token || token !== adminToken) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    next();
+  };
+
+  const SKILL_NAME_PATTERN = /^[a-z0-9-]+$/;
+  function validateSkillName(name: string): boolean {
+    return SKILL_NAME_PATTERN.test(name);
+  }
 
   // Initialize SQLite database
   const dbPath = path.resolve(process.cwd(), "database.sqlite");
@@ -1164,7 +1187,7 @@ async function startServer() {
    * GET /api/config
    * 获取当前配置
    */
-  app.get("/api/config", async (req, res) => {
+  app.get("/api/config", requireAdmin, async (req, res) => {
     try {
       let config = {
         aiProvider: "openai",
@@ -1224,51 +1247,48 @@ async function startServer() {
    * POST /api/config
    * 保存配置
    */
-  app.post("/api/config", async (req, res) => {
+  app.post("/api/config", requireAdmin, async (req, res) => {
     try {
-      const {
-        aiProvider,
-        openaiApiKey,
-        openaiBaseUrl,
-        openaiModel,
-        geminiApiKey,
-        geminiBaseUrl,
-        geminiModel,
-        customApiKey,
-        customBaseUrl,
-        customModel,
-        neo4jUri,
-        neo4jUser,
-        neo4jPassword,
-      } = req.body;
+      const payload = req.body ?? {};
+      let config: any = {};
+      if (fs.existsSync(configPath)) {
+        const raw = await fs.promises.readFile(configPath, "utf-8");
+        config = JSON.parse(raw);
+      }
 
-      const config: any = {};
+      const allowList = [
+        "aiProvider",
+        "openaiApiKey",
+        "openaiBaseUrl",
+        "openaiModel",
+        "geminiApiKey",
+        "geminiBaseUrl",
+        "geminiModel",
+        "customApiKey",
+        "customBaseUrl",
+        "customModel",
+        "neo4jUri",
+        "neo4jUser",
+        "neo4jPassword",
+      ];
 
-      if (aiProvider) config.aiProvider = aiProvider;
-      if (openaiApiKey) config.openaiApiKey = openaiApiKey;
-      if (openaiBaseUrl) config.openaiBaseUrl = openaiBaseUrl;
-      if (openaiModel) config.openaiModel = openaiModel;
-      if (geminiApiKey) config.geminiApiKey = geminiApiKey;
-      if (geminiBaseUrl) config.geminiBaseUrl = geminiBaseUrl;
-      if (geminiModel) config.geminiModel = geminiModel;
-      if (customApiKey) config.customApiKey = customApiKey;
-      if (customBaseUrl) config.customBaseUrl = customBaseUrl;
-      if (customModel) config.customModel = customModel;
-      if (neo4jUri) config.neo4jUri = neo4jUri;
-      if (neo4jUser) config.neo4jUser = neo4jUser;
-      if (neo4jPassword) config.neo4jPassword = neo4jPassword;
+      for (const key of allowList) {
+        if (Object.prototype.hasOwnProperty.call(payload, key)) {
+          config[key] = payload[key];
+        }
+      }
 
       // 保存到文件
       await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
 
       // 设置环境变量（用于当前进程）
-      if (openaiApiKey) process.env.OPENAI_API_KEY = openaiApiKey;
-      if (openaiBaseUrl) process.env.OPENAI_BASE_URL = openaiBaseUrl;
-      if (geminiApiKey) process.env.GEMINI_API_KEY = geminiApiKey;
-      if (geminiBaseUrl) process.env.GEMINI_BASE_URL = geminiBaseUrl;
-      if (neo4jUri) process.env.NEO4J_URI = neo4jUri;
-      if (neo4jUser) process.env.NEO4J_USER = neo4jUser;
-      if (neo4jPassword) process.env.NEO4J_PASSWORD = neo4jPassword;
+      if (Object.prototype.hasOwnProperty.call(payload, "openaiApiKey")) process.env.OPENAI_API_KEY = String(payload.openaiApiKey ?? "");
+      if (Object.prototype.hasOwnProperty.call(payload, "openaiBaseUrl")) process.env.OPENAI_BASE_URL = String(payload.openaiBaseUrl ?? "");
+      if (Object.prototype.hasOwnProperty.call(payload, "geminiApiKey")) process.env.GEMINI_API_KEY = String(payload.geminiApiKey ?? "");
+      if (Object.prototype.hasOwnProperty.call(payload, "geminiBaseUrl")) process.env.GEMINI_BASE_URL = String(payload.geminiBaseUrl ?? "");
+      if (Object.prototype.hasOwnProperty.call(payload, "neo4jUri")) process.env.NEO4J_URI = String(payload.neo4jUri ?? "");
+      if (Object.prototype.hasOwnProperty.call(payload, "neo4jUser")) process.env.NEO4J_USER = String(payload.neo4jUser ?? "");
+      if (Object.prototype.hasOwnProperty.call(payload, "neo4jPassword")) process.env.NEO4J_PASSWORD = String(payload.neo4jPassword ?? "");
 
       res.json({ success: true, message: "配置已保存" });
     } catch (error) {
@@ -1352,9 +1372,12 @@ async function startServer() {
   });
 
   // Create new skill version
-  app.post("/api/skills/:name/versions", async (req, res) => {
+  app.post("/api/skills/:name/versions", requireAdmin, async (req, res) => {
     try {
       const { name } = req.params;
+      if (!validateSkillName(name)) {
+        return res.status(400).json({ error: "Invalid skill name" });
+      }
       const { changelog } = req.body;
 
       const skill = skillRegistry.getDetail(name);
@@ -1397,9 +1420,12 @@ async function startServer() {
   });
 
   // Restore skill from version
-  app.post("/api/skills/:name/restore/:version", async (req, res) => {
+  app.post("/api/skills/:name/restore/:version", requireAdmin, async (req, res) => {
     try {
       const { name, version } = req.params;
+      if (!validateSkillName(name)) {
+        return res.status(400).json({ error: "Invalid skill name" });
+      }
 
       const versionRecord = await db.get(
         "SELECT * FROM skill_versions WHERE skill_name = ? AND version = ?",
@@ -1453,7 +1479,7 @@ async function startServer() {
   });
 
   // Update optimization config
-  app.put("/api/skills/:name/optimization/config", async (req, res) => {
+  app.put("/api/skills/:name/optimization/config", requireAdmin, async (req, res) => {
     try {
       const { name } = req.params;
       const { evaluation_criteria, max_iterations, convergence_threshold, focus_area, custom_params } = req.body;
@@ -1525,7 +1551,7 @@ async function startServer() {
   });
 
   // Trigger a skill execution
-  app.post("/api/skill/:name", async (req, res) => {
+  app.post("/api/skill/:name", requireAdmin, async (req, res) => {
     const { name } = req.params;
     const params = req.body ?? {};
 
