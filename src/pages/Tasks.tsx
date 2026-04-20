@@ -52,6 +52,12 @@ function skillLabel(name: string): string {
   return SKILL_LABELS[name] || name;
 }
 
+function formatJson(val: any): string {
+  try {
+    return JSON.stringify(typeof val === 'string' ? JSON.parse(val) : val, null, 2);
+  } catch { return String(val); }
+}
+
 function getLogColor(line: string): string {
   if (line.startsWith('思考')) return 'text-[#7A5C6B]';
   if (line.startsWith('调用')) return 'text-[#4A6670]';
@@ -359,7 +365,7 @@ export default function Tasks() {
                         <div>
                           <h5 className="text-xs font-medium text-[#888] mb-1">参数</h5>
                           <pre className="text-xs bg-[#F7F7F7] rounded-xl p-3 overflow-x-auto text-[#1d1d1f]">
-                            {(() => { try { return JSON.stringify(JSON.parse(exec.params), null, 2); } catch { return exec.params; } })()}
+                            {formatJson(exec.params)}
                           </pre>
                         </div>
                       )}
@@ -379,7 +385,7 @@ export default function Tasks() {
                         <div>
                           <h5 className="text-xs font-medium text-[#888] mb-1">执行结果</h5>
                           <pre className="text-xs bg-[#F7F7F7] rounded-xl p-3 overflow-x-auto text-[#1d1d1f] max-h-48 overflow-y-auto">
-                            {(() => { try { return JSON.stringify(JSON.parse(exec.result), null, 2); } catch { return exec.result; } })()}
+                            {formatJson(exec.result)}
                           </pre>
                         </div>
                       )}
