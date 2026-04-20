@@ -298,6 +298,9 @@ export const GraphVisualization = ({
     return () => window.removeEventListener('keydown', handler);
   }, [zoom, fitView, animateZoomChange]);
 
+  // Stable layout key — only changes when node set, view mode, or reset actually changes
+  const layoutKey = `${(viewMode || 'radar')}:${resetKey}:${initialNodes.map(n => n.id).sort().join(',')}`;
+
   // Initialize positions when nodes or layout mode changes
   useEffect(() => {
     const hasOldPositions = nodePositionsRef.current.size > 0;
@@ -348,7 +351,8 @@ export const GraphVisualization = ({
         setPan({ ...np });
       }
     }
-  }, [initialNodes, initialEdges, viewMode, terrainClusters, focusNodeIds, resetKey]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutKey, terrainClusters, focusNodeIds]);
 
   // Focus on specific nodes
   useEffect(() => {
@@ -1306,7 +1310,7 @@ export const GraphVisualization = ({
 
       {/* Legend — collapsible */}
       <div
-        className="absolute top-4 right-20 z-10 bg-white/80 backdrop-blur-sm border-[1.5px] border-[#1A1A1A] px-3 py-2"
+        className="absolute top-4 left-4 z-10 bg-white/80 backdrop-blur-sm border-[1.5px] border-[#1A1A1A] px-3 py-2"
         style={{ borderRadius: '0 8px 8px 8px' }}
       >
         <div
