@@ -195,6 +195,7 @@ export const DEFAULT_VISIBLE_RELATIONS: GraphRelationType[] = [
   'SUPPORTS',
   'CONTRADICTS',
   'MENTIONS',
+  'PARTICIPATED_IN',
   'COMPRESSES',
   'EXTENDS',
   'MODIFIES',
