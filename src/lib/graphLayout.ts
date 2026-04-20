@@ -16,14 +16,13 @@ interface RankedNode {
 const CENTER = { x: 0, y: 0 };
 
 const TYPE_ORDER: Record<string, number> = {
-  topic: 0,
-  technology: 1,
-  product: 2,
-  organization: 3,
-  entity: 4,
-  event: 5,
-  claim: 6,
-  document: 7,
+  technology: 0,
+  product: 1,
+  organization: 2,
+  entity: 3,
+  event: 4,
+  claim: 5,
+  document: 6,
 };
 
 function calculateNodeImportance(node: GraphNode, edges: GraphEdge[]): number {
@@ -88,8 +87,8 @@ function applyTerrainLayout(
   edges: GraphEdge[],
   options: LayoutOptions
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const topic = findCenterNode(nodes, options.centerNodeId);
-  if (topic) topic.position = { x: 0, y: -80 };
+  const center = findCenterNode(nodes, options.centerNodeId);
+  if (center) center.position = { x: 0, y: -80 };
 
   const clusterIds = getTerrainClusterOrder(nodes, options.terrainClusters);
   const slots = [
@@ -108,7 +107,7 @@ function applyTerrainLayout(
 
   const nodesByCluster = new Map<string, GraphNode[]>();
   nodes
-    .filter(node => node.id !== topic?.id)
+    .filter(node => node.id !== center?.id)
     .filter(node => !['event', 'claim', 'document'].includes(node.data.type))
     .forEach(node => {
       const clusterId = node.data.clusterId || 'uncategorized';
@@ -135,10 +134,10 @@ function applyRadarLayout(
   edges: GraphEdge[],
   options: LayoutOptions
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const topic = findCenterNode(nodes, options.centerNodeId);
-  if (topic) topic.position = CENTER;
+  const center = findCenterNode(nodes, options.centerNodeId);
+  if (center) center.position = CENTER;
 
-  const groups = groupNodes(nodes.filter(node => node.id !== topic?.id));
+  const groups = groupNodes(nodes.filter(node => node.id !== center?.id));
 
   placeRadialGroup(groups.technology, edges, 150, 390, 220, 92);
   placeRadialGroup(groups.product, edges, 35, 130, 330, 96);
@@ -199,14 +198,14 @@ function applyTimelineLayout(
   edges: GraphEdge[],
   options: LayoutOptions
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const topic = findCenterNode(nodes, options.centerNodeId);
-  if (topic) topic.position = { x: 0, y: -220 };
+  const center = findCenterNode(nodes, options.centerNodeId);
+  if (center) center.position = { x: 0, y: -220 };
 
   const events = rankNodesByImportance(nodes.filter(node => node.data.type === 'event'), edges).map(item => item.node);
   placeBand(events, edges, 80, 230);
 
   const nonEvents = rankNodesByImportance(
-    nodes.filter(node => node.id !== topic?.id && node.data.type !== 'event'),
+    nodes.filter(node => node.id !== center?.id && node.data.type !== 'event'),
     edges
   ).map(item => item.node);
   nonEvents.forEach((node, index) => {
@@ -242,12 +241,12 @@ function applyBundleLayout(
   options: LayoutOptions,
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   // Circular bundle: nodes on a circle, sorted by cluster
-  const topic = findCenterNode(nodes, options.centerNodeId);
-  if (topic) topic.position = CENTER;
+  const center = findCenterNode(nodes, options.centerNodeId);
+  if (center) center.position = CENTER;
 
-  const nonTopic = nodes.filter(n => n.id !== topic?.id);
+  const nonCenter = nodes.filter(n => n.id !== center?.id);
   const byCluster = new Map<string, GraphNode[]>();
-  nonTopic.forEach(node => {
+  nonCenter.forEach(node => {
     const cid = node.data.clusterId || '_uncategorized';
     if (!byCluster.has(cid)) byCluster.set(cid, []);
     byCluster.get(cid)!.push(node);
@@ -394,7 +393,7 @@ function placeBand(nodes: GraphNode[], edges: GraphEdge[], y: number, spacing: n
 
 function findCenterNode(nodes: GraphNode[], centerNodeId?: string): GraphNode | undefined {
   return nodes.find(node => node.id === centerNodeId)
-    ?? nodes.find(node => node.data.type === 'topic')
+    ?? nodes.find(node => node.data.importance === Math.max(...nodes.map(n => n.data.importance ?? 0)))
     ?? nodes[0];
 }
 

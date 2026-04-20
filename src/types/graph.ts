@@ -1,5 +1,4 @@
 const GRAPH_NODE_TYPES = [
-  'topic',
   'technology',
   'product',
   'organization',
@@ -73,12 +72,10 @@ export interface GraphSensemakingResult {
 }
 
 type GraphEdgeVisualType =
-  | 'has_entity'
-  | 'has_event'
-  | 'has_claim'
   | 'participated_in'
   | 'supports'
   | 'contradicts'
+  | 'mentions'
   | 'related_to';
 
 interface GraphNodeData {
@@ -98,6 +95,9 @@ interface GraphNodeData {
   clusterId?: string;
   clusterLabel?: string;
   clusterRole?: GraphClusterRole;
+  latestDocUrl?: string;
+  latestPubDate?: string;
+  docCount?: number;
 }
 
 interface GraphEdgeData {
@@ -148,7 +148,6 @@ const RELATION_LABELS: Record<GraphRelationType, string> = {
 };
 
 const NODE_TYPE_ALIASES: Record<string, GraphNodeType> = {
-  topic: 'topic',
   entity: 'entity',
   event: 'event',
   claim: 'claim',
@@ -223,11 +222,9 @@ export function getGraphRelationLabel(relation?: string | null): string {
 
 export function getEdgeVisualType(relation?: string | null): GraphEdgeVisualType {
   const normalized = normalizeGraphRelationType(relation);
-  if (normalized === 'HAS_ENTITY') return 'has_entity';
-  if (normalized === 'HAS_EVENT') return 'has_event';
-  if (normalized === 'HAS_CLAIM') return 'has_claim';
   if (normalized === 'PARTICIPATED_IN') return 'participated_in';
   if (normalized === 'SUPPORTS') return 'supports';
   if (normalized === 'CONTRADICTS') return 'contradicts';
+  if (normalized === 'MENTIONS') return 'mentions';
   return 'related_to';
 }

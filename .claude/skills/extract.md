@@ -122,14 +122,21 @@ sqlite3 -json database.sqlite "SELECT id, title, content FROM documents WHERE to
 - `confidence`: 置信度
 - `source_context`: 原文上下文
 
+**重要**：主张必须与具体实体关联。分析 claim 文本中提到的实体，确保这些实体已在实体抽取步骤中被抽取。
+
 #### 事件抽取
 识别重要事件：
 - `type`: breakthrough / partnership / product_launch / regulation / funding
 - `title`: 事件标题
 - `description`: 事件描述
 - `event_time`: 时间
-- `participants`: 参与者（JSON数组）
+- `participants`: 参与者（JSON数组，**必须使用与已抽取实体完全一致的名称**）
 - `confidence`: 置信度
+
+**关键要求**：
+- `participants` 中的名称必须与实体抽取步骤中产生的 `entities[].text` 完全一致
+- 如果参与者是组织/人物/技术，确保先在实体抽取中包含它们，再在 participants 中引用
+- 每个事件至少关联 1 个已抽取的实体作为 participant
 
 ### 3. 存入 SQLite
 

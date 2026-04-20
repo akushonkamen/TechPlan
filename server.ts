@@ -1629,29 +1629,31 @@ async function startServer() {
         // Background sync for next query
         fetch(`http://localhost:${PORT}/api/graph/sync/${topicId}`, { method: 'POST' }).catch(() => {});
 
-        // SQLite fallback — original logic
+        // SQLite fallback — no topic node; entities, events, claims linked directly
         const nodes: Array<{ id: string; label: string; type: string; properties: Record<string, any> }> = [];
         const links: Array<{ id: string; source: string; target: string; label: string; properties: Record<string, any> }> = [];
-
-        nodes.push({ id: topicId, label: topic.name, type: 'topic', properties: { description: topic.description } });
 
         const entities = await db.all(`
           SELECT e.text, e.type, COUNT(DISTINCT e.document_id) as doc_count,
                  MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen,
-                 0.6 * MAX(e.confidence) + 0.4 * MIN(MAX(e.confidence), MIN(1.0, COUNT(DISTINCT e.document_id) * 0.25)) as agg_confidence
+                 0.6 * MAX(e.confidence) + 0.4 * MIN(MAX(e.confidence), MIN(1.0, COUNT(DISTINCT e.document_id) * 0.25)) as agg_confidence,
+                 (SELECT d2.source_url FROM entities e2 JOIN documents d2 ON e2.document_id = d2.id WHERE e2.text = e.text AND d2.topic_id = ? AND d2.source_url IS NOT NULL AND d2.source_url != '' ORDER BY d2.published_date DESC LIMIT 1) as latest_doc_url,
+                 (SELECT d3.published_date FROM entities e3 JOIN documents d3 ON e3.document_id = d3.id WHERE e3.text = e.text AND d3.topic_id = ? AND d3.published_date IS NOT NULL ORDER BY d3.published_date DESC LIMIT 1) as latest_pub_date
           FROM entities e JOIN documents d ON e.document_id = d.id
           WHERE d.topic_id = ?
           GROUP BY e.text ORDER BY doc_count DESC LIMIT 80
-        `, [topicId]);
+        `, [topicId, topicId, topicId]);
 
         const entityTexts = new Set(entities.map(e => e.text));
         for (const ent of entities) {
           const nid = entityNodeId(ent.text);
-          nodes.push({ id: nid, label: ent.text, type: (ent.type || 'entity').toLowerCase(), properties: { docCount: ent.doc_count, confidence: ent.agg_confidence ?? ent.confidence, firstSeen: ent.first_seen } });
-          links.push({ id: `t-${nid}`, source: topicId, target: nid, label: 'HAS_ENTITY', properties: {} });
+          const props: Record<string, any> = { docCount: ent.doc_count, confidence: ent.agg_confidence ?? ent.confidence, firstSeen: ent.first_seen };
+          if (ent.latest_doc_url) props.latestDocUrl = ent.latest_doc_url;
+          if (ent.latest_pub_date) props.latestPubDate = ent.latest_pub_date;
+          nodes.push({ id: nid, label: ent.text, type: (ent.type || 'entity').toLowerCase(), properties: props });
         }
 
-        // Only include inter-entity relations when hop >= 1 (include neighbors)
+        // Inter-entity relations
         if (hop >= 1) {
           const rawRels = await db.all(`
             SELECT r.source_text, r.target_text, r.relation, MAX(r.confidence) as confidence,
@@ -1676,18 +1678,37 @@ async function startServer() {
           }
         }
 
+        // Events — link to entities via PARTICIPATED_IN (parse participants JSON)
         const events = await db.all(`SELECT ev.id, ev.title, ev.type, ev.event_time, ev.participants, ev.confidence FROM events ev JOIN documents d ON ev.document_id = d.id WHERE d.topic_id = ? ORDER BY ev.confidence DESC, ev.event_time DESC LIMIT 15`, [topicId]);
         for (const ev of events) {
           const evId = `ev_${ev.id}`;
           nodes.push({ id: evId, label: ev.title || ev.type, type: 'event', properties: { eventType: ev.type, eventTime: ev.event_time, confidence: ev.confidence } });
-          links.push({ id: `ev-${evId}`, source: topicId, target: evId, label: 'HAS_EVENT', properties: {} });
+          // Parse participants and link to matching entities
+          try {
+            const parts = JSON.parse(ev.participants || '[]');
+            for (const p of Array.isArray(parts) ? parts : []) {
+              const name = typeof p === 'string' ? p : (p.name || p.text);
+              if (name && entityTexts.has(name)) {
+                links.push({ id: `ep-${evId}-${entityNodeId(name)}`, source: entityNodeId(name), target: evId, label: 'PARTICIPATED_IN', properties: {} });
+              }
+            }
+          } catch {}
         }
 
+        // Claims — link to entities by matching claim text against entity names
         const claims = await db.all(`SELECT c.id, c.text, c.polarity, c.confidence FROM claims c JOIN documents d ON c.document_id = d.id WHERE d.topic_id = ? ORDER BY c.confidence DESC LIMIT 10`, [topicId]);
         for (const cl of claims) {
           const clId = `cl_${cl.id}`;
           nodes.push({ id: clId, label: cl.text?.length > 60 ? cl.text.slice(0, 60) + '…' : cl.text, type: 'claim', properties: { polarity: cl.polarity, confidence: cl.confidence, fullText: cl.text } });
-          links.push({ id: `cl-${clId}`, source: topicId, target: clId, label: 'HAS_CLAIM', properties: {} });
+          // Match entity names in claim text
+          if (cl.text) {
+            const upperText = cl.text.toUpperCase();
+            for (const entName of entityTexts) {
+              if (upperText.includes(entName.toUpperCase()) && entName.length > 1) {
+                links.push({ id: `cm-${clId}-${entityNodeId(entName)}`, source: entityNodeId(entName), target: clId, label: 'MENTIONS', properties: {} });
+              }
+            }
+          }
         }
 
         res.json({ nodes, links, metadata: { backend: 'sqlite', topicId, hop, nodeCount: nodes.length, linkCount: links.length } });
@@ -1695,15 +1716,11 @@ async function startServer() {
       }
 
       // ── Kuzu graph query ──
-      // Note: hop variable is already declared above for SQLite fallback
       const centerEntity = req.query.center as string | undefined;
       const nodes: Array<{ id: string; label: string; type: string; properties: Record<string, any> }> = [];
       const links: Array<{ id: string; source: string; target: string; label: string; properties: Record<string, any> }> = [];
 
-      // Topic node
-      nodes.push({ id: topicId, label: topic.name, type: 'topic', properties: { description: topic.description } });
-
-      // Entities with HAS_ENTITY
+      // Entities (discovered via Topic-HAS_ENTITY, but topic node not included in output)
       const entityRows = await kuzuQuery(
         `MATCH (t:Topic {id: $id})-[:HAS_ENTITY]->(e:Entity) RETURN e.name, e.type, e.confidence, e.docCount, e.firstSeen ORDER BY e.docCount DESC LIMIT 80`,
         { id: topicId }
@@ -1742,7 +1759,30 @@ async function startServer() {
             importance: Math.round((degree / maxDegree) * 100) / 100, degree,
           },
         });
-        links.push({ id: `t-${nid}`, source: topicId, target: nid, label: 'HAS_ENTITY', properties: {} });
+      }
+
+      // Enrich Kuzu entities with latestDocUrl/latestPubDate from SQLite
+      if (entityNames.size > 0) {
+        const nameList = Array.from(entityNames);
+        const placeholders = nameList.map(() => '?').join(',');
+        const enrichmentRows = await db.all(
+          `SELECT e2.text, MAX(d2.source_url) as latest_doc_url, MAX(d3.published_date) as latest_pub_date
+           FROM entities e2
+           JOIN documents d2 ON e2.document_id = d2.id
+           JOIN documents d3 ON e2.document_id = d3.id
+           WHERE e2.text IN (${placeholders}) AND d2.topic_id = ?
+           GROUP BY e2.text`,
+          [...nameList, topicId]
+        );
+        const enrichMap = new Map(enrichmentRows.map((r: any) => [r.text, r]));
+        for (const node of nodes) {
+          const text = node.label;
+          const enrich = enrichMap.get(text);
+          if (enrich) {
+            if (enrich.latest_doc_url) node.properties.latestDocUrl = enrich.latest_doc_url;
+            if (enrich.latest_pub_date) node.properties.latestPubDate = enrich.latest_pub_date;
+          }
+        }
       }
 
       // Inter-entity relations — only when hop >= 1 (include neighbors)
@@ -1772,7 +1812,7 @@ async function startServer() {
         }
       }
 
-      // Events
+      // Events — link to entities via PARTICIPATED_IN (no topic HAS_EVENT edge)
       const eventRows = await kuzuQuery(
         `MATCH (t:Topic {id: $id})-[:HAS_EVENT]->(e:Event) RETURN e.id, e.title, e.eventType, e.eventTime, e.confidence, e.participants LIMIT 15`,
         { id: topicId }
@@ -1783,8 +1823,7 @@ async function startServer() {
           id: evId, label: row['e.title'] || row['e.eventType'], type: 'event',
           properties: { eventType: row['e.eventType'], eventTime: row['e.eventTime'], confidence: row['e.confidence'] },
         });
-        links.push({ id: `ev-${evId}`, source: topicId, target: evId, label: 'HAS_EVENT', properties: {} });
-        // Link participants
+        // Link participants to entities
         try {
           const parts = JSON.parse(row['e.participants'] || '[]');
           for (const p of Array.isArray(parts) ? parts : []) {
@@ -1796,7 +1835,7 @@ async function startServer() {
         } catch {}
       }
 
-      // Claims
+      // Claims — link to entities by matching text (no topic HAS_CLAIM edge)
       const claimRows = await kuzuQuery(
         `MATCH (t:Topic {id: $id})-[:HAS_CLAIM]->(c:Claim) RETURN c.id, c.text, c.polarity, c.confidence LIMIT 10`,
         { id: topicId }
@@ -1808,7 +1847,15 @@ async function startServer() {
           id: clId, label: text.length > 60 ? text.slice(0, 60) + '…' : text, type: 'claim',
           properties: { polarity: row['c.polarity'], confidence: row['c.confidence'], fullText: text },
         });
-        links.push({ id: `cl-${clId}`, source: topicId, target: clId, label: 'HAS_CLAIM', properties: {} });
+        // Match entity names in claim text
+        if (text) {
+          const upperText = text.toUpperCase();
+          for (const entName of entityNames) {
+            if (upperText.includes(entName.toUpperCase()) && entName.length > 1) {
+              links.push({ id: `cm-${clId}-${entityNodeId(entName)}`, source: entityNodeId(entName), target: clId, label: 'MENTIONS', properties: {} });
+            }
+          }
+        }
       }
 
       res.json({ nodes, links, metadata: { backend: 'kuzu', topicId, hop, nodeCount: nodes.length, linkCount: links.length } });
@@ -1943,6 +1990,45 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to get entity neighborhood:", error);
       res.status(500).json({ error: "Failed to get entity neighborhood" });
+    }
+  });
+
+  /**
+   * GET /api/graph/entity/:entityName/docs
+   * 获取实体关联的文档列表
+   */
+  app.get("/api/graph/entity/:entityName/docs", async (req, res) => {
+    try {
+      const entityName = decodeURIComponent(req.params.entityName);
+      const topicId = req.query.topicId as string | undefined;
+
+      let query = `
+        SELECT DISTINCT d.id, d.title, d.source_url, d.published_date, d.created_at, d.topic_id
+        FROM documents d
+        JOIN entities e ON e.document_id = d.id
+        WHERE e.text = ?
+      `;
+      const params: any[] = [entityName];
+
+      if (topicId) {
+        query += ` AND d.topic_id = ?`;
+        params.push(topicId);
+      }
+
+      query += ` ORDER BY d.published_date DESC NULLS LAST LIMIT 20`;
+
+      const docs = await db.all(query, params);
+      res.json(docs.map((d: any) => ({
+        id: d.id,
+        title: d.title,
+        sourceUrl: d.source_url,
+        publishedDate: d.published_date,
+        collectedAt: d.created_at,
+        topicId: d.topic_id,
+      })));
+    } catch (error) {
+      console.error("Failed to get entity docs:", error);
+      res.status(500).json({ error: "Failed to get entity documents" });
     }
   });
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Search, ArrowRight, Clock, Network, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, RefreshCw, BarChart3 } from 'lucide-react';
+import { Search, ArrowRight, Clock, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, RefreshCw, BarChart3 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import GraphVisualization from '../components/GraphVisualization';
 import { rankNodesByImportance } from '../lib/graphLayout';
@@ -81,7 +81,6 @@ interface RecentDevelopment {
 
 // Bauhaus palette
 const NODE_FILTERS: Array<{ value: GraphNodeType; label: string; color: string; shape: 'circle' | 'teardrop' | 'square' | 'diamond' }> = [
-  { value: 'topic', label: 'TOPIC', color: '#1A1A1A', shape: 'circle' },
   { value: 'technology', label: 'TECH', color: '#D94F26', shape: 'circle' },
   { value: 'product', label: 'PRODUCT', color: '#5085A5', shape: 'teardrop' },
   { value: 'organization', label: 'ORG', color: '#F29F05', shape: 'square' },
@@ -105,10 +104,9 @@ export default function KnowledgeGraph() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'highlight' | 'filter'>('highlight');
-  const [nodeFilters, setNodeFilters] = useState<Set<GraphNodeType>>(new Set(['topic', 'technology', 'product', 'organization', 'entity', 'event']));
-  const [showTopicLinks, setShowTopicLinks] = useState(false);
-  const [relFilters, setRelFilters] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_RELATIONS));
+  const [nodeFilters, setNodeFilters] = useState<Set<GraphNodeType>>(new Set(['technology', 'product', 'organization', 'entity', 'event']));
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const [relFilters, setRelFilters] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_RELATIONS));
   const [viewMode, setViewMode] = useState<GraphLayoutMode>('terrain');
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [sensemaking, setSensemaking] = useState<GraphSensemakingResult | null>(null);
@@ -229,10 +227,13 @@ export default function KnowledgeGraph() {
               fullLabel,
               canonicalName: n.properties?.canonicalName || n.properties?.name || fullLabel,
               description: n.properties?.description || n.properties?.title || fullLabel,
-              url: n.properties?.url, topicId,
+              url: n.properties?.url || n.properties?.latestDocUrl, topicId,
               metadata: n.properties,
               highlighted: highlightEntities.length > 0 ? isHighlighted : undefined,
               importance: n.properties?.importance,
+              latestDocUrl: n.properties?.latestDocUrl,
+              latestPubDate: n.properties?.latestPubDate,
+              docCount: n.properties?.docCount,
             },
           };
         });
@@ -349,6 +350,9 @@ export default function KnowledgeGraph() {
                 metadata: n.properties,
                 importance: n.properties?.importance,
                 highlighted: false,
+                latestDocUrl: n.properties?.latestDocUrl,
+                latestPubDate: n.properties?.latestPubDate,
+                docCount: n.properties?.docCount,
               },
             };
           });
@@ -462,7 +466,6 @@ export default function KnowledgeGraph() {
   const coreNodeIds = useMemo(() => {
     const visible = new Set<string>();
     const sourceNodes = nodesWithSensemaking;
-    sourceNodes.filter(node => node.data.type === 'topic').forEach(node => visible.add(node.id));
     expandedNodes.forEach(id => visible.add(id));
 
     if (viewMode === 'terrain' && terrainClusters.length > 0) {
@@ -507,7 +510,7 @@ export default function KnowledgeGraph() {
           ...node.data,
           searchMatched,
           dimmed: Boolean(
-            (search && searchMode === 'highlight' && !searchMatched && node.data.type !== 'topic') ||
+            (search && searchMode === 'highlight' && !searchMatched) ||
             (viewMode === 'terrain' && selectedClusterId && node.data.clusterId && node.data.clusterId !== selectedClusterId)
           ),
           recent: node.data.recent || recent,
@@ -519,9 +522,6 @@ export default function KnowledgeGraph() {
   const candidateEdges = edges
     .filter(edge => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target))
     .filter(edge => {
-      if (edge.data?.type === 'has_entity') return showTopicLinks;
-      const structural = edge.data?.type === 'has_event' || edge.data?.type === 'has_claim';
-      if (structural) return true;
       return edge.data?.relationType ? relFilters.has(edge.data.relationType) : true;
     })
     .filter(edge => {
@@ -530,7 +530,7 @@ export default function KnowledgeGraph() {
       const targetNode = nodesById.get(edge.target);
       const sourceCluster = sourceNode?.data.clusterId;
       const targetCluster = targetNode?.data.clusterId;
-      if (!sourceCluster || !targetCluster) return edge.data?.type === 'has_event';
+      if (!sourceCluster || !targetCluster) return true;
       if (selectedClusterId) return sourceCluster === selectedClusterId || targetCluster === selectedClusterId;
       const relation = edge.data?.relationType;
       const sameCluster = sourceCluster === targetCluster;
@@ -546,15 +546,10 @@ export default function KnowledgeGraph() {
         : (highConfidence && (bridge || anchorPair)) || (mediumConfidence && anchorPair);
     });
 
-  const structuralEdges = candidateEdges.filter(edge =>
-    edge.data?.type === 'has_entity' || edge.data?.type === 'has_event' || edge.data?.type === 'has_claim'
-  );
   const semanticEdges = candidateEdges
-    .filter(edge => !structuralEdges.includes(edge))
     .sort((a, b) => (b.data?.confidence ?? 0.5) - (a.data?.confidence ?? 0.5));
 
   const filteredEdges = [
-    ...structuralEdges,
     ...(shouldUseCoreCap ? semanticEdges.slice(0, 40) : semanticEdges),
   ].map(edge => {
     const sourceNode = nodesById.get(edge.source);
@@ -652,18 +647,6 @@ export default function KnowledgeGraph() {
             ))}
             </div>
           </div>
-          <button
-            onClick={() => setShowTopicLinks(!showTopicLinks)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[1.5px] border-[1.5px] transition-all ${
-              showTopicLinks
-                ? 'bg-[#1A1A1A] text-[#F7F7F7] border-[#1A1A1A]'
-                : 'bg-transparent border-[#1A1A1A]/20 text-[#888] hover:border-[#1A1A1A]/50'
-            }`}
-            style={{ borderRadius: '0 12px 12px 12px' }}
-          >
-            <Network className="w-3 h-3" />
-            {showTopicLinks ? 'LINKS ON' : 'LINKS OFF'}
-          </button>
           <button
             onClick={() => setShowRecent(!showRecent)}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[1.5px] border-[1.5px] transition-all ${
@@ -876,6 +859,7 @@ export default function KnowledgeGraph() {
                 onViewModeChange={setViewMode}
                 onNodeDoubleClick={handleNodeDoubleClick}
                 focusNodeIds={highlightEntities.length > 0 ? nodes.filter(n => n.data.highlighted).map(n => n.id) : undefined}
+                topicId={selectedTopic}
                 searchQuery={searchQuery}
               />
             )}
@@ -969,14 +953,14 @@ export default function KnowledgeGraph() {
                     <select value={pathSource} onChange={e => setPathSource(e.target.value)}
                       className="w-full bg-transparent border-b-[1.5px] border-[#1A1A1A]/30 py-1.5 text-xs focus:outline-none focus:border-[#1A1A1A]">
                       <option value="">Source entity...</option>
-                      {nodesWithSensemaking.filter(n => n.data.type !== 'topic').map(n => (
+                      {nodesWithSensemaking.map(n => (
                         <option key={n.id} value={n.id}>{n.data.label}</option>
                       ))}
                     </select>
                     <select value={pathTarget} onChange={e => setPathTarget(e.target.value)}
                       className="w-full bg-transparent border-b-[1.5px] border-[#1A1A1A]/30 py-1.5 text-xs focus:outline-none focus:border-[#1A1A1A]">
                       <option value="">Target entity...</option>
-                      {nodesWithSensemaking.filter(n => n.data.type !== 'topic').map(n => (
+                      {nodesWithSensemaking.map(n => (
                         <option key={n.id} value={n.id}>{n.data.label}</option>
                       ))}
                     </select>

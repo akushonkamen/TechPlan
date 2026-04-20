@@ -3,6 +3,71 @@ import type { GraphEdge, GraphNode, GraphSensemakingCluster } from '../types/gra
 import type { GraphLayoutMode } from '../lib/graphLayout';
 import { applyGraphLayout, rankNodesByImportance } from '../lib/graphLayout';
 
+const POS_KEY_PREFIX = 'graph-pos';
+
+function savePositions(topicId: string | undefined, mode: string, positions: Map<string, { x: number; y: number }>) {
+  if (!topicId) return;
+  const obj: Record<string, { x: number; y: number }> = {};
+  positions.forEach((v, k) => { obj[k] = v; });
+  try { localStorage.setItem(`${POS_KEY_PREFIX}:${topicId}:${mode}`, JSON.stringify(obj)); } catch {}
+}
+
+function loadPositions(topicId: string | undefined, mode: string): Map<string, { x: number; y: number }> | null {
+  if (!topicId) return null;
+  try {
+    const raw = localStorage.getItem(`${POS_KEY_PREFIX}:${topicId}:${mode}`);
+    if (!raw) return null;
+    return new Map(Object.entries(JSON.parse(raw)));
+  } catch { return null; }
+}
+
+function clearPositions(topicId: string | undefined, mode: string) {
+  if (!topicId) return;
+  try { localStorage.removeItem(`${POS_KEY_PREFIX}:${topicId}:${mode}`); } catch {}
+}
+
+/** Fetches and displays documents related to an entity */
+function EntityDocsList({ entityName }: { entityName: string }) {
+  const [docs, setDocs] = useState<Array<{ id: string; title: string; sourceUrl?: string; publishedDate?: string }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (loaded) return;
+    setLoading(true);
+    fetch(`/api/graph/entity/${encodeURIComponent(entityName)}/docs`)
+      .then(r => r.ok ? r.json() : [])
+      .then(d => { setDocs(d); setLoaded(true); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [entityName]);
+
+  if (loading) return <div className="text-[9px] text-[#888] py-1">Loading...</div>;
+  if (docs.length === 0) return <div className="text-[9px] text-[#888] py-1">No docs found</div>;
+
+  return (
+    <div className="space-y-1">
+      {docs.slice(0, 5).map(doc => (
+        <div key={doc.id} className="flex items-start gap-1.5 py-1 border-b border-[#1A1A1A]/5 last:border-0">
+          {doc.sourceUrl ? (
+            <a href={doc.sourceUrl} target="_blank" rel="noopener noreferrer"
+              className="text-[10px] text-[#1A1A1A] hover:text-[#0071e3] hover:underline leading-tight truncate flex-1">
+              {doc.title || 'Untitled'}
+            </a>
+          ) : (
+            <span className="text-[10px] text-[#1A1A1A]/70 leading-tight truncate flex-1">{doc.title || 'Untitled'}</span>
+          )}
+          {doc.publishedDate && (
+            <span className="text-[8px] text-[#888] font-mono shrink-0">
+              {new Date(doc.publishedDate).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface GraphVisualizationProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -13,6 +78,7 @@ interface GraphVisualizationProps {
   onNodeDoubleClick?: (node: GraphNode) => void;
   focusNodeIds?: string[];
   searchQuery?: string;
+  topicId?: string;
 }
 
 // Bauhaus palette — node accent colors
@@ -141,6 +207,7 @@ export const GraphVisualization = ({
   onNodeDoubleClick,
   focusNodeIds,
   searchQuery,
+  topicId,
 }: GraphVisualizationProps) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const isPanning = useRef(false);
@@ -160,6 +227,7 @@ export const GraphVisualization = ({
   const [showLabels, setShowLabels] = useState(true);
   const [curvedEdges, setCurvedEdges] = useState(true);
   const [showPanel, setShowPanel] = useState(false);
+  const [resetKey, setResetKey] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [legendCollapsed, setLegendCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
@@ -239,9 +307,18 @@ export const GraphVisualization = ({
     });
     const positions = new Map<string, { x: number; y: number }>();
     layouted.nodes.forEach(n => positions.set(n.id, n.position));
+
+    // Restore saved positions from localStorage
+    const saved = loadPositions(topicId, viewMode || 'radar');
+    if (saved && saved.size > 0) {
+      saved.forEach((pos, id) => {
+        if (positions.has(id)) positions.set(id, pos);
+      });
+    }
+
     nodePositionsRef.current = positions;
-    // Animate transition when layout changes (not initial load)
-    if (hasOldPositions) {
+    // Animate transition when layout changes (not initial load, and not restoring saved positions)
+    if (hasOldPositions && !saved) {
       setLayoutAnimating(true);
       const timer = setTimeout(() => setLayoutAnimating(false), 350);
       setNodePositions(new Map(positions));
@@ -271,7 +348,7 @@ export const GraphVisualization = ({
         setPan({ ...np });
       }
     }
-  }, [initialNodes, initialEdges, viewMode, terrainClusters, focusNodeIds]);
+  }, [initialNodes, initialEdges, viewMode, terrainClusters, focusNodeIds, resetKey]);
 
   // Focus on specific nodes
   useEffect(() => {
@@ -348,6 +425,10 @@ export const GraphVisualization = ({
       setDragging(null);
       isPanning.current = false;
       setIsPanningActive(false);
+      // Persist positions after drag
+      if (dragId) {
+        savePositions(topicId, viewMode || 'radar', nodePositionsRef.current);
+      }
     };
 
     const onDragStart = (e: DragEvent) => e.preventDefault();
@@ -932,6 +1013,14 @@ export const GraphVisualization = ({
       {/* Export buttons */}
       <div className="absolute top-4 right-4 z-10 flex gap-1">
         <button
+          onClick={() => { clearPositions(topicId, viewMode || 'radar'); setResetKey(k => k + 1); }}
+          className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider bg-[#F7F7F7] border-[1.5px] border-[#1A1A1A] text-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-[#F7F7F7] transition-colors cursor-pointer"
+          style={{ borderRadius: '0 8px 8px 8px' }}
+          title="Reset layout to default positions"
+        >
+          Reset
+        </button>
+        <button
           onClick={handleExportSVG}
           className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider bg-[#F7F7F7] border-[1.5px] border-[#1A1A1A] text-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-[#F7F7F7] transition-colors cursor-pointer"
           style={{ borderRadius: '0 8px 8px 8px' }}
@@ -998,8 +1087,17 @@ export const GraphVisualization = ({
               />
               <h3 className="font-extrabold text-[#1A1A1A] text-sm truncate">{selectedNode.data.label}</h3>
             </div>
-            <div className="font-mono text-[9px] text-[#888] uppercase tracking-wider mb-3">
-              {TYPE_LABEL[selectedNode.data.type] || selectedNode.data.type}
+            <div className="flex items-center gap-2 mb-3">
+              <span className="font-mono text-[9px] text-[#888] uppercase tracking-wider">
+                {TYPE_LABEL[selectedNode.data.type] || selectedNode.data.type}
+              </span>
+              {selectedNode.data.latestPubDate && (() => {
+                const diffMs = Date.now() - new Date(selectedNode.data.latestPubDate).getTime();
+                const days = Math.floor(diffMs / 86400000);
+                const label = days < 1 ? '今天' : days < 7 ? `${days}天前` : days < 30 ? `${Math.floor(days / 7)}周前` : days < 365 ? `${Math.floor(days / 30)}月前` : `${Math.floor(days / 365)}年前`;
+                const color = days < 7 ? '#34c759' : days < 30 ? '#ff9f0a' : '#888';
+                return <span className="font-mono text-[8px] px-1.5 py-0.5 rounded-sm" style={{ background: `${color}18`, color }}>{label}</span>;
+              })()}
             </div>
 
             {/* Stats section */}
@@ -1070,7 +1168,7 @@ export const GraphVisualization = ({
             )}
 
             {/* Description */}
-            {selectedNode.data.description && (
+            {selectedNode.data.description && selectedNode.data.description !== selectedNode.data.fullLabel && (
               <div className="border-b border-[#1A1A1A]/10">
                 <button onClick={() => toggleSection('desc')} className="w-full flex justify-between items-center py-2 cursor-pointer">
                   <span className="text-[9px] font-bold uppercase tracking-[1.5px] text-[#888]">Description</span>
@@ -1079,6 +1177,27 @@ export const GraphVisualization = ({
                 {!isCollapsed('desc') && (
                   <div className="bg-[#1A1A1A]/[0.04] p-3 mb-2">
                     <p className="text-[11px] leading-relaxed text-[#1A1A1A]/70">{selectedNode.data.description}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Related Docs */}
+            {selectedNode.data.docCount != null && selectedNode.data.docCount > 0 && (
+              <div className="border-b border-[#1A1A1A]/10">
+                <button onClick={() => toggleSection('docs')} className="w-full flex justify-between items-center py-2 cursor-pointer">
+                  <span className="text-[9px] font-bold uppercase tracking-[1.5px] text-[#888]">Docs ({selectedNode.data.docCount})</span>
+                  <span className="text-[9px] text-[#888]" style={{ transform: isCollapsed('docs') ? 'rotate(-90deg)' : '', transition: 'transform 0.15s' }}>▼</span>
+                </button>
+                {!isCollapsed('docs') && (
+                  <div className="pb-2">
+                    {selectedNode.data.latestDocUrl && (
+                      <a href={selectedNode.data.latestDocUrl} target="_blank" rel="noopener noreferrer"
+                        className="block py-1.5 text-[10px] text-[#0071e3] hover:underline truncate">
+                        Latest source ↗
+                      </a>
+                    )}
+                    <EntityDocsList entityName={selectedNode.data.canonicalName || selectedNode.data.fullLabel || selectedNode.data.label} />
                   </div>
                 )}
               </div>
@@ -1124,13 +1243,13 @@ export const GraphVisualization = ({
               );
             })()}
 
-            {selectedNode.data.url && (
+            {selectedNode.data.latestDocUrl && (
               <button
-                onClick={() => window.open(selectedNode.data.url, '_blank')}
+                onClick={() => window.open(selectedNode.data.latestDocUrl, '_blank')}
                 className="w-full mt-3 py-2 bg-[#1A1A1A] text-[#F7F7F7] border-none text-[10px] font-bold uppercase tracking-wider cursor-pointer"
                 style={{ borderRadius: '0 8px 8px 8px' }}
               >
-                Open Link →
+                Latest Doc →
               </button>
             )}
           </div>
