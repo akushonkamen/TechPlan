@@ -226,7 +226,10 @@ export default function KnowledgeGraph() {
               label, type: mapNodeType(n.type),
               fullLabel,
               canonicalName: n.properties?.canonicalName || n.properties?.name || fullLabel,
-              description: n.properties?.description || n.properties?.title || fullLabel,
+              description: n.properties?.description || n.properties?.title || n.properties?.fullText ||
+                (n.type === 'event' ? [n.properties?.eventType, n.properties?.eventTime].filter(Boolean).join(' · ') : undefined) ||
+                (n.properties?.docCount ? `${mapNodeType(n.type)} · ${n.properties.docCount} docs` : undefined) ||
+                fullLabel,
               url: n.properties?.url || n.properties?.latestDocUrl, topicId,
               metadata: n.properties,
               highlighted: highlightEntities.length > 0 ? isHighlighted : undefined,
@@ -539,6 +542,9 @@ export default function KnowledgeGraph() {
     })
     .filter(edge => {
       if (viewMode !== 'terrain') return true;
+      // PARTICIPATED_IN and MENTIONS always pass terrain filter
+      const rt = edge.data?.relationType;
+      if (rt === 'PARTICIPATED_IN' || rt === 'MENTIONS') return true;
       const sourceNode = nodesById.get(edge.source);
       const targetNode = nodesById.get(edge.target);
       const sourceCluster = sourceNode?.data.clusterId;
