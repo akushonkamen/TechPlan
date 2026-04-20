@@ -175,6 +175,8 @@ export class SkillExecutor {
         return '';
       };
 
+      let systemInitialized = false;
+
       // Helper: extract tool input detail for display
       const toolInputDetail = (input: Record<string, any>): string => {
         return input.query || input.command || input.url || input.description || input.prompt || '';
@@ -193,7 +195,10 @@ export class SkillExecutor {
             const parsed = JSON.parse(line);
 
             if (parsed.type === 'system') {
-              appendProgress('系统初始化完成');
+              if (!systemInitialized) {
+                systemInitialized = true;
+                appendProgress('系统初始化完成');
+              }
             } else if (parsed.type === 'assistant' && parsed.message?.content) {
               for (const block of parsed.message.content) {
                 if (block.type === 'thinking' && block.thinking) {
