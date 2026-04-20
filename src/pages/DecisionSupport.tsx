@@ -236,7 +236,7 @@ export default function DecisionSupport() {
             type="text"
             value={competitorOrg}
             onChange={e => setCompetitorOrg(e.target.value)}
-            placeholder="输入组织名称，如 OpenAI, Google DeepMind..."
+            placeholder="输入组织名称，如 OpenAI, DeepMind..."
             className={`min-w-0 flex-1 ${INPUT}`}
             onKeyDown={e => e.key === 'Enter' && handleCompetitorTrack()}
           />

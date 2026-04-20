@@ -73,7 +73,7 @@ const FALLBACK_CLUSTERS = [
     id: 'organizations-investment',
     label: '组织与投资',
     summary: '公司、实验室、投资和合作关系。',
-    keywords: ['labs', 'google', 'nvidia', 'organization', 'company', 'funding', 'invest'],
+    keywords: ['labs', 'nvidia', 'organization', 'company', 'funding', 'invest'],
     relations: ['INVESTS_IN', 'PARTNERS_WITH', 'PUBLISHED_BY'],
   },
   {

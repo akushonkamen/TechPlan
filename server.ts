@@ -633,7 +633,7 @@ async function startServer() {
         scope: '全球',
         createdAt: '2025-10-01',
         keywords: ['端侧推理', '模型压缩', 'NPU inference'],
-        organizations: ['Apple', 'Qualcomm', 'Google', 'Meta', '华为'],
+        organizations: ['Apple', 'Qualcomm', 'Meta', '华为'],
         schedule: 'daily'
       },
       {
@@ -3355,9 +3355,6 @@ async function startServer() {
         openaiApiKey: "",
         openaiBaseUrl: "https://api.openai.com/v1",
         openaiModel: "gpt-4o",
-        geminiApiKey: "",
-        geminiBaseUrl: "",
-        geminiModel: "gemini-2.5-flash-preview",
         customApiKey: "",
         customBaseUrl: "",
         customModel: "",
@@ -3372,9 +3369,6 @@ async function startServer() {
       // 从环境变量读取（优先级更高）
       if (process.env.OPENAI_API_KEY) config.openaiApiKey = process.env.OPENAI_API_KEY;
       if (process.env.OPENAI_BASE_URL) config.openaiBaseUrl = process.env.OPENAI_BASE_URL;
-      if (process.env.GEMINI_API_KEY) config.geminiApiKey = process.env.GEMINI_API_KEY;
-      if (process.env.GEMINI_BASE_URL) config.geminiBaseUrl = process.env.GEMINI_BASE_URL;
-
       // Mask sensitive fields before sending to client
       const mask = (val: string | undefined) => {
         if (!val || val.length <= 4) return val ? '****' : '';
@@ -3385,9 +3379,6 @@ async function startServer() {
         openaiBaseUrl: config.openaiBaseUrl,
         openaiModel: config.openaiModel,
         openaiApiKey: mask(config.openaiApiKey),
-        geminiBaseUrl: config.geminiBaseUrl,
-        geminiModel: config.geminiModel,
-        geminiApiKey: mask(config.geminiApiKey),
         customBaseUrl: config.customBaseUrl,
         customModel: config.customModel,
         customApiKey: mask(config.customApiKey),
@@ -3416,9 +3407,6 @@ async function startServer() {
         "openaiApiKey",
         "openaiBaseUrl",
         "openaiModel",
-        "geminiApiKey",
-        "geminiBaseUrl",
-        "geminiModel",
         "customApiKey",
         "customBaseUrl",
         "customModel",
@@ -3436,9 +3424,6 @@ async function startServer() {
       // 设置环境变量（用于当前进程）
       if (Object.prototype.hasOwnProperty.call(payload, "openaiApiKey")) process.env.OPENAI_API_KEY = String(payload.openaiApiKey ?? "");
       if (Object.prototype.hasOwnProperty.call(payload, "openaiBaseUrl")) process.env.OPENAI_BASE_URL = String(payload.openaiBaseUrl ?? "");
-      if (Object.prototype.hasOwnProperty.call(payload, "geminiApiKey")) process.env.GEMINI_API_KEY = String(payload.geminiApiKey ?? "");
-      if (Object.prototype.hasOwnProperty.call(payload, "geminiBaseUrl")) process.env.GEMINI_BASE_URL = String(payload.geminiBaseUrl ?? "");
-
       res.json({ success: true, message: "配置已保存" });
     } catch (error) {
       console.error("Failed to save config:", error);
@@ -3475,27 +3460,6 @@ async function startServer() {
               model: model || (provider === "openai" ? "gpt-4o" : "gpt-4o"),
               messages: [{ role: "user", content: "test" }],
               max_tokens: 1,
-            }),
-            signal: controller.signal,
-          });
-
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            return res.status(400).json({ success: false, error: `HTTP ${response.status}: ${errorText}` });
-          }
-
-          return res.json({ success: true });
-        } else if (provider === "gemini") {
-          const url = baseUrl || `https://generativelanguage.googleapis.com/v1beta/models/${model || "gemini-2.5-flash-preview"}:generateContent`;
-          const response = await fetch(`${url}?key=${apiKey}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: "test" }] }],
             }),
             signal: controller.signal,
           });

@@ -14,13 +14,10 @@ import { INPUT, LABEL, BTN_PRIMARY, CARD, SEGMENT_TRACK, SEGMENT_ACTIVE, SEGMENT
 const STORAGE_KEY = 'techplan_config';
 
 interface Config {
-  aiProvider: 'openai' | 'gemini' | 'custom';
+  aiProvider: 'openai' | 'custom';
   openaiApiKey: string;
   openaiBaseUrl?: string;
   openaiModel?: string;
-  geminiApiKey: string;
-  geminiBaseUrl?: string;
-  geminiModel?: string;
   customApiKey: string;
   customBaseUrl: string;
   customModel: string;
@@ -33,11 +30,6 @@ const MODEL_PRESETS = {
     { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
     { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
   ],
-  gemini: [
-    { value: 'gemini-2.5-flash-preview', label: 'Gemini 2.5 Flash' },
-    { value: 'gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash Experimental' },
-    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-  ],
 };
 
 type TabKey = 'ai' | 'graph' | 'skills' | 'optimize' | 'history' | 'scheduler';
@@ -49,9 +41,6 @@ export default function Settings() {
     openaiApiKey: '',
     openaiBaseUrl: 'https://api.openai.com/v1',
     openaiModel: 'gpt-4o',
-    geminiApiKey: '',
-    geminiBaseUrl: '',
-    geminiModel: 'gemini-2.5-flash-preview',
     customApiKey: '',
     customBaseUrl: '',
     customModel: '',
@@ -167,7 +156,6 @@ export default function Settings() {
   const getCurrentApiKey = () => {
     switch (config.aiProvider) {
       case 'openai': return config.openaiApiKey;
-      case 'gemini': return config.geminiApiKey;
       case 'custom': return config.customApiKey;
       default: return '';
     }
@@ -176,7 +164,6 @@ export default function Settings() {
   const getCurrentBaseUrl = () => {
     switch (config.aiProvider) {
       case 'openai': return config.openaiBaseUrl;
-      case 'gemini': return config.geminiBaseUrl;
       case 'custom': return config.customBaseUrl;
       default: return '';
     }
@@ -185,7 +172,6 @@ export default function Settings() {
   const getCurrentModel = () => {
     switch (config.aiProvider) {
       case 'openai': return config.openaiModel;
-      case 'gemini': return config.geminiModel;
       case 'custom': return config.customModel;
       default: return '';
     }
@@ -308,7 +294,6 @@ export default function Settings() {
               <div className="flex flex-wrap gap-2">
                 {[
                   { value: 'openai' as const, label: 'OpenAI' },
-                  { value: 'gemini' as const, label: 'Google Gemini' },
                   { value: 'custom' as const, label: '自定义' },
                 ].map(p => (
                   <button
@@ -351,30 +336,6 @@ export default function Settings() {
                   <label className={LABEL}>模型</label>
                   <select value={config.openaiModel} onChange={e => setConfig({ ...config, openaiModel: e.target.value })} className={INPUT}>
                     {MODEL_PRESETS.openai.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                  </select>
-                </div>
-              </div>
-            )}
-
-            {config.aiProvider === 'gemini' && (
-              <div className="space-y-4">
-                <div>
-                  <label className={LABEL}>API Key</label>
-                  <div className="relative">
-                    <input type={showApiKey ? 'text' : 'password'} value={config.geminiApiKey} onChange={e => setConfig({ ...config, geminiApiKey: e.target.value })} placeholder="AIza..." className={`${INPUT} pr-10 font-mono`} />
-                    <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#888] hover:text-[#1d1d1f]">
-                      {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className={LABEL}>Base URL（可选）</label>
-                  <input type="url" value={config.geminiBaseUrl} onChange={e => setConfig({ ...config, geminiBaseUrl: e.target.value })} placeholder="默认使用 Google 端点" className={`${INPUT} font-mono`} />
-                </div>
-                <div>
-                  <label className={LABEL}>模型</label>
-                  <select value={config.geminiModel} onChange={e => setConfig({ ...config, geminiModel: e.target.value })} className={INPUT}>
-                    {MODEL_PRESETS.gemini.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
               </div>

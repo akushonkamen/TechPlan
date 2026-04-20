@@ -3,7 +3,6 @@
   "openaiApiKey": "",
   "openaiBaseUrl": "https://api.openai.com/v1",
   "openaiModel": "gpt-4o-mini",
-  "geminiModel": "gemini-2.5-flash-preview",
   "neo4jUri": "bolt://localhost:7687",
   "neo4jUser": "neo4j",
   "schedulerEnabled": false,

@@ -6,7 +6,7 @@
 ## 高风险
 
 1. **配置接口可直接泄露密钥（无鉴权）**
-   - `GET /api/config` 直接返回 `openaiApiKey/geminiApiKey/customApiKey/neo4jPassword`。
+   - `GET /api/config` 直接返回 `openaiApiKey/customApiKey/neo4jPassword`。
    - 风险：任意可访问服务的用户可读取生产密钥。
    - 代码位置：`server.ts` 1167-1216。
    - 建议：加鉴权 + 最小化返回（只返回是否已配置）。
