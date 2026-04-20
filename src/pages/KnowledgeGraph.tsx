@@ -484,11 +484,24 @@ export default function KnowledgeGraph() {
     }
 
     const eventNodes = sourceNodes.filter(node => node.data.type === 'event');
-    rankNodesByImportance(eventNodes, edges).slice(0, 5).forEach(item => visible.add(item.node.id));
+    const topEvents = rankNodesByImportance(eventNodes, edges).slice(0, 5);
+    topEvents.forEach(item => visible.add(item.node.id));
+
+    // Include entities connected to visible events via PARTICIPATED_IN
+    const topEventIds = new Set(topEvents.map(item => item.node.id));
+    edges
+      .filter(e => e.data?.relationType === 'PARTICIPATED_IN' && topEventIds.has(e.target))
+      .forEach(e => visible.add(e.source));
 
     if (nodeFilters.has('claim')) {
       const claimNodes = sourceNodes.filter(node => node.data.type === 'claim');
-      rankNodesByImportance(claimNodes, edges).slice(0, 8).forEach(item => visible.add(item.node.id));
+      const topClaims = rankNodesByImportance(claimNodes, edges).slice(0, 8);
+      topClaims.forEach(item => visible.add(item.node.id));
+      // Include entities connected to visible claims via MENTIONS
+      const topClaimIds = new Set(topClaims.map(item => item.node.id));
+      edges
+        .filter(e => e.data?.relationType === 'MENTIONS' && topClaimIds.has(e.target))
+        .forEach(e => visible.add(e.source));
     }
 
     sourceNodes.filter(node => node.data.highlighted || recentNodeIds.has(node.id)).forEach(node => visible.add(node.id));
@@ -549,8 +562,15 @@ export default function KnowledgeGraph() {
   const semanticEdges = candidateEdges
     .sort((a, b) => (b.data?.confidence ?? 0.5) - (a.data?.confidence ?? 0.5));
 
+  // Separate event/claim edges (PARTICIPATED_IN, MENTIONS) from entity-entity edges
+  const isStructuralEdge = (e: typeof candidateEdges[0]) =>
+    e.data?.relationType === 'PARTICIPATED_IN' || e.data?.relationType === 'MENTIONS';
+  const entityEdges = semanticEdges.filter(e => !isStructuralEdge(e));
+  const eventClaimEdges = semanticEdges.filter(isStructuralEdge);
+
   const filteredEdges = [
-    ...(shouldUseCoreCap ? semanticEdges.slice(0, 40) : semanticEdges),
+    ...(shouldUseCoreCap ? entityEdges.slice(0, 40) : entityEdges),
+    ...eventClaimEdges,
   ].map(edge => {
     const sourceNode = nodesById.get(edge.source);
     const targetNode = nodesById.get(edge.target);
