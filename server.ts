@@ -1746,8 +1746,19 @@ async function startServer() {
       }
       const maxDegree = Math.max(...Array.from(degreeMap.values()), 1);
 
+      // Deduplicate entities by lowercase name (prefer original casing)
+      const seenLower = new Map<string, { row: any; name: string }>();
       for (const row of entityRows) {
         const name = row['e.name'];
+        const lower = name.toLowerCase();
+        const existing = seenLower.get(lower);
+        // Prefer original casing (has uppercase letters) over lowercase
+        if (!existing || (name !== lower && existing.name === lower)) {
+          seenLower.set(lower, { row, name });
+        }
+      }
+
+      for (const [, { row, name }] of seenLower) {
         const nid = entityNodeId(name);
         entityNames.add(name);
         const degree = degreeMap.get(name) || 0;
@@ -2006,7 +2017,7 @@ async function startServer() {
         SELECT DISTINCT d.id, d.title, d.source_url, d.published_date, d.created_at, d.topic_id
         FROM documents d
         JOIN entities e ON e.document_id = d.id
-        WHERE e.text = ?
+        WHERE LOWER(e.text) = LOWER(?)
       `;
       const params: any[] = [entityName];
 
@@ -2464,9 +2475,40 @@ async function startServer() {
       );
       nodesCreated++;
 
-      // 2. Get deduplicated entities (normalized by LOWER(TRIM))
+      // 1b. Clean up old graph data for this topic (remove stale entities with wrong casing)
+      try {
+        // Get existing entity names for this topic
+        const existingEntNames = await kuzuQuery(
+          `MATCH (t:Topic {id: $id})-[:HAS_ENTITY]->(e:Entity) RETURN e.name as name`,
+          { id: topicId }
+        );
+        for (const row of existingEntNames) {
+          try {
+            await kuzuQuery(`MATCH (e:Entity {name: $name}) DETACH DELETE e`, { name: row.name });
+          } catch {}
+        }
+        // Clean old events/claims
+        const existingEvents = await kuzuQuery(
+          `MATCH (t:Topic {id: $id})-[:HAS_EVENT]->(e:Event) RETURN e.id as eid`,
+          { id: topicId }
+        );
+        for (const row of existingEvents) {
+          try { await kuzuQuery(`MATCH (e:Event {id: $eid}) DETACH DELETE e`, { eid: row.eid }); } catch {}
+        }
+        const existingClaims = await kuzuQuery(
+          `MATCH (t:Topic {id: $id})-[:HAS_CLAIM]->(c:Claim) RETURN c.id as cid`,
+          { id: topicId }
+        );
+        for (const row of existingClaims) {
+          try { await kuzuQuery(`MATCH (c:Claim {id: $cid}) DETACH DELETE c`, { cid: row.cid }); } catch {}
+        }
+      } catch (cleanupErr: any) {
+        console.error('[Kuzu] Cleanup warning:', cleanupErr?.message);
+      }
+
+      // 2. Get deduplicated entities (group by lowercase for dedup, preserve original casing)
       const entities = await db.all(`
-        SELECT LOWER(TRIM(e.text)) as text, e.type, COUNT(DISTINCT e.document_id) as doc_count,
+        SELECT MAX(TRIM(e.text)) as text, e.type, COUNT(DISTINCT e.document_id) as doc_count,
                MAX(e.confidence) as confidence, MIN(e.created_at) as first_seen,
                0.6 * MAX(e.confidence) + 0.4 * MIN(MAX(e.confidence), MIN(1.0, COUNT(DISTINCT e.document_id) * 0.25)) as agg_confidence
         FROM entities e JOIN documents d ON e.document_id = d.id
@@ -2505,9 +2547,14 @@ async function startServer() {
         } catch {}
       }
 
-      // 5. Create inter-entity relationships (normalized names)
+      // 5. Create inter-entity relationships (use original casing, match against entity names)
+      const entityNameLookup = new Map<string, string>();
+      for (const name of entityNames) {
+        entityNameLookup.set(name.toLowerCase(), name);
+      }
+
       const rawRels = await db.all(`
-        SELECT LOWER(TRIM(r.source_text)) as source_text, LOWER(TRIM(r.target_text)) as target_text,
+        SELECT MAX(TRIM(r.source_text)) as source_text, MAX(TRIM(r.target_text)) as target_text,
                r.relation, MAX(r.confidence) as confidence,
                0.6 * MAX(r.confidence) + 0.4 * MIN(MAX(r.confidence), MIN(1.0, COUNT(DISTINCT r.document_id) * 0.25)) as agg_confidence
         FROM relations r JOIN documents d ON r.document_id = d.id
@@ -2516,9 +2563,13 @@ async function startServer() {
         ORDER BY agg_confidence DESC LIMIT 200
       `, [topicId]);
 
-      const entityTextSet = new Set(entityNames);
       for (const rel of rawRels) {
-        if (!entityTextSet.has(rel.source_text) || !entityTextSet.has(rel.target_text)) continue;
+        // Resolve to the canonical entity name (original casing)
+        const srcCanonical = entityNameLookup.get(rel.source_text.toLowerCase());
+        const tgtCanonical = entityNameLookup.get(rel.target_text.toLowerCase());
+        if (!srcCanonical || !tgtCanonical) continue;
+        rel.source_text = srcCanonical;
+        rel.target_text = tgtCanonical;
         const relType = normalizeGraphRelationType(rel.relation);
         try {
           await kuzuQuery(
