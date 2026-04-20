@@ -76,21 +76,21 @@ export class SkillExecutor {
     const config = this.registry.get(skillName)!;
     const executionId = randomUUID();
 
-    const promise = this.runWithId(executionId, { name: skillName, prompt, timeout: config.timeout, allowedTools: config.allowedTools }, params);
+    const promise = this.runWithId(executionId, { name: skillName, prompt, timeout: config.timeout, allowedTools: config.allowedTools, model: config.model }, params);
 
     return { executionId, promise };
   }
 
   private runWithId(
     executionId: string,
-    config: { name: string; prompt: string; timeout: number; allowedTools?: string[] },
+    config: { name: string; prompt: string; timeout: number; allowedTools?: string[]; model?: string },
     params: Record<string, any>,
   ): Promise<SkillExecution> {
     return this.run(config, params, executionId);
   }
 
   private run(
-    config: { name: string; prompt: string; timeout: number; allowedTools?: string[] },
+    config: { name: string; prompt: string; timeout: number; allowedTools?: string[]; model?: string },
     params: Record<string, any>,
     preassignedId?: string,
   ): Promise<SkillExecution> {
@@ -142,11 +142,13 @@ export class SkillExecutor {
       const toolArgs = config.allowedTools
         ? config.allowedTools.flatMap(t => ['--allowedTools', t])
         : [];
+      const modelArgs = config.model ? ['--model', config.model] : [];
       const proc = spawn('claude', [
         '-p', config.prompt,
         '--output-format', 'stream-json',
         '--verbose',
         '--dangerously-skip-permissions',
+        ...modelArgs,
         ...toolArgs,
       ], {
         cwd: process.cwd(),

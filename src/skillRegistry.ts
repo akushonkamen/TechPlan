@@ -22,6 +22,7 @@ export interface SkillConfig {
   promptTemplate: string;
   timeout: number;
   allowedTools?: string[];
+  model?: string;
 }
 
 // Backward compatible simple config for existing code
@@ -234,6 +235,7 @@ export class SkillRegistry {
           promptTemplate: body,
           timeout: frontmatter.timeout ?? SKILL_TIMEOUTS[name] ?? DEFAULT_TIMEOUT,
           allowedTools: (frontmatter as any).allowedTools,
+          model: (frontmatter as any).model,
         });
       } else {
         // Old format - backward compatibility

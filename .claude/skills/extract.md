@@ -6,6 +6,7 @@ description: |
   存入 SQLite 和 Neo4j 图数据库。
 category: extraction
 timeout: 900
+model: glm-4.7
 params:
   - name: topicId
     type: string
