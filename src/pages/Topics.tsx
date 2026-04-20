@@ -1,6 +1,6 @@
 import type { FormEvent, ChangeEvent } from 'react';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Edit2, Trash2, Tags, Upload, FileText, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Tags, Upload, FileText, X, ExternalLink, ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import type { Topic } from '../types';
 import TopicForm from '../components/TopicForm';
 import PageHeader from '../components/PageHeader';
@@ -28,6 +28,7 @@ export default function Topics() {
   const [uploadedFile, setUploadedFile] = useState<{ name: string; title: string; size: number } | null>(null);
   const [uploadError, setUploadError] = useState('');
   const [uploadTopicId, setUploadTopicId] = useState<string>('');
+  const [extractingTopicId, setExtractingTopicId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -173,6 +174,26 @@ export default function Topics() {
       fetchTopics();
     } catch {
       alert('删除文档失败');
+    }
+  };
+
+  const handleExtract = async (topicId: string) => {
+    setExtractingTopicId(topicId);
+    try {
+      const res = await fetch('/api/skill/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topicId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: '启动失败' }));
+        throw new Error(err.error || '启动失败');
+      }
+      alert('知识抽取已启动，可在任务中心查看进度');
+    } catch (error: unknown) {
+      alert(`知识抽取失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setExtractingTopicId(null);
     }
   };
 
@@ -326,14 +347,25 @@ export default function Topics() {
 
                   {/* Actions */}
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[#1d1d1f]/20">
-                    <button
-                      onClick={() => toggleExpand(topic.id)}
-                      className="flex items-center gap-1 px-3 py-2 text-xs text-[#888] hover:text-[#1d1d1f] transition-colors"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      {docCount} 篇
-                      {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleExpand(topic.id)}
+                        className="flex items-center gap-1 px-3 py-2 text-xs text-[#888] hover:text-[#1d1d1f] transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        {docCount} 篇
+                        {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      </button>
+                      <button
+                        onClick={() => handleExtract(topic.id)}
+                        disabled={extractingTopicId === topic.id || docCount === 0}
+                        className="flex items-center gap-1 px-3 py-2 text-xs text-[#2A5A6B] hover:bg-[#2A5A6B]/10 rounded-full transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={docCount === 0 ? '没有文档可抽取' : '从文档中抽取实体、关系、事件'}
+                      >
+                        <Zap className="w-3.5 h-3.5" />
+                        {extractingTopicId === topic.id ? '抽取中...' : '知识抽取'}
+                      </button>
+                    </div>
                     <div className="flex items-center gap-1">
                       <button onClick={() => openEditModal(topic)} className="p-2 text-[#888] hover:text-[#1d1d1f] rounded-full hover:bg-[#1d1d1f]/5 transition-all" title="编辑">
                         <Edit2 className="w-3.5 h-3.5" />
