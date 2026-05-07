@@ -184,6 +184,78 @@ build_project() {
   npm run build
 }
 
+# ── Z-Image Turbo (cover image generation) ──
+setup_zimage() {
+  echo ""
+  echo -e "${BOLD}Setting up Z-Image-Turbo (cover image generation)...${RESET}"
+
+  # Check for Apple Silicon or CUDA
+  local arch
+  arch="$(uname -m)"
+  if [ "$arch" != "arm64" ] && [ "$arch" != "aarch64" ]; then
+    warn "Z-Image-Turbo requires Apple Silicon (M1/M2/M3/M4) or ARM GPU."
+    echo "  Skipping. Reports will work without cover images."
+    return 0
+  fi
+  info "Apple Silicon detected ($arch)"
+
+  # Check for uv (Python package manager)
+  if ! command -v uv &>/dev/null; then
+    warn "uv not found — installing..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+    if ! command -v uv &>/dev/null; then
+      warn "uv installation failed. Install manually: curl -LsSf https://astral.sh/uv/install.sh | sh"
+      echo "  Then run: cd ~/projects/z-image-inference && uv sync"
+      return 0
+    fi
+  fi
+  info "uv $(uv --version 2>/dev/null | head -1) found"
+
+  # Check for Python 3.12+
+  local py_ver
+  py_ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "0.0")
+  local py_major=${py_ver%%.*}
+  local py_minor=${py_ver#*.}
+  if [ "$py_major" -lt 3 ] || { [ "$py_major" -eq 3 ] && [ "$py_minor" -lt 12 ]; }; then
+    warn "Python 3.12+ required (found $py_ver). uv will manage Python automatically."
+  else
+    info "Python $py_ver found"
+  fi
+
+  # Clone z-image-inference
+  local zimage_dir="$HOME/projects/z-image-inference"
+  if [ -d "$zimage_dir" ]; then
+    info "z-image-inference already cloned at $zimage_dir"
+  else
+    echo -e "${BOLD}Cloning z-image-inference...${RESET}"
+    git clone git@github.com:OrdinarySF/z-image-inference.git "$zimage_dir" 2>/dev/null \
+      || git clone https://github.com/OrdinarySF/z-image-inference.git "$zimage_dir"
+    if [ -d "$zimage_dir" ]; then
+      info "Cloned to $zimage_dir"
+    else
+      warn "Clone failed. You can clone manually later:"
+      echo "  git clone git@github.com:OrdinarySF/z-image-inference.git $zimage_dir"
+      return 0
+    fi
+  fi
+
+  # Install dependencies
+  echo -e "${BOLD}Installing Z-Image dependencies (uv sync)...${RESET}"
+  (cd "$zimage_dir" && uv sync)
+  if [ $? -eq 0 ]; then
+    info "Z-Image dependencies installed"
+  else
+    warn "uv sync failed. Run manually: cd $zimage_dir && uv sync"
+    return 0
+  fi
+
+  echo ""
+  info "Z-Image-Turbo is ready!"
+  echo "  Start model server:  ${BOLD}cd $zimage_dir && uv run python model_server.py${RESET}"
+  echo "  Or start everything: ${BOLD}npm run dev:full${RESET}"
+}
+
 # ── Main ──
 main() {
   echo ""
@@ -202,6 +274,7 @@ main() {
 
   build_project
   auth_claude
+  setup_zimage
 
   echo ""
   echo -e "${GREEN}${BOLD}═══════════════════════════════════════${RESET}"
@@ -210,6 +283,7 @@ main() {
   echo ""
   echo "  Start dev server:   ${BOLD}npm run dev${RESET}"
   echo "  Start production:   ${BOLD}npm start${RESET}"
+  echo "  Start with images:  ${BOLD}npm run dev:full${RESET}  (TechPlan + Z-Image)"
   echo ""
   echo "  Skills are in:      .claude/skills/"
   echo "  (research → extract → sync-graph → report)"

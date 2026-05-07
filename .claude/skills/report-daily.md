@@ -6,6 +6,7 @@ description: |
   24小时数据范围，聚焦 breakthrough/milestone/alert 类信号，输出精简 JSON。
 category: reporting
 timeout: 300
+model: glm-5.1
 allowedTools:
   - Bash
 params:

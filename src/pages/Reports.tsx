@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, type FC } from 'react';
-import { FileText, Calendar, Trash2, ChevronDown, ChevronUp, Network, TrendingUp, AlertTriangle, Zap, Flag, Clock, RefreshCw, CheckCircle, AlertCircle, X } from 'lucide-react';
+import { FileText, Calendar, Trash2, ChevronDown, ChevronUp, Network, TrendingUp, AlertTriangle, Zap, Flag, Clock, RefreshCw, CheckCircle, AlertCircle, X, MessageSquare, Download, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import PageHeader from '../components/PageHeader';
 import SkillButton from '../components/SkillButton';
 import EmptyState from '../components/EmptyState';
+import ExpandDiscussionPanel from '../components/ExpandDiscussionPanel';
 import { fetchTopics } from '../services/topicService';
 import { CARD, INPUT, SPINNER } from '../lib/design';
 
@@ -63,6 +64,18 @@ interface Report {
   period_start?: string;
   period_end?: string;
   metadata?: Record<string, any>;
+  cover_image_url?: string;
+  status?: string;
+}
+
+interface ReportDiscussion {
+  id: string;
+  report_id: string;
+  section_id?: string;
+  selected_text: string;
+  user_input?: string;
+  result: string;
+  pinned_at: string;
 }
 
 // ── Signal Badge ──
@@ -127,13 +140,13 @@ function calculateFreshness(generatedAt: string | undefined, reportType: string)
 
   // Define freshness thresholds based on report type
   const thresholds: Record<string, { fresh: number; ok: number }> = {
-    daily: { fresh: 4, ok: 24 },      // Daily: fresh < 4h, ok < 24h
-    weekly: { fresh: 12, ok: 72 },    // Weekly: fresh < 12h, ok < 3 days
-    alert: { fresh: 2, ok: 12 },      // Alert: fresh < 2h, ok < 12h
-    monthly: { fresh: 24, ok: 168 },  // Monthly: fresh < 1 day, ok < 1 week
-    quarterly: { fresh: 48, ok: 336 }, // Quarterly: fresh < 2 days, ok < 2 weeks
-    tech_topic: { fresh: 24, ok: 168 }, // Tech topic: fresh < 1 day, ok < 1 week
-    competitor: { fresh: 24, ok: 168 }, // Competitor: fresh < 1 day, ok < 1 week
+    daily: { fresh: 4, ok: 28 },          // Daily: fresh < 4h, ok < ~1 day
+    weekly: { fresh: 12, ok: 168 },       // Weekly: fresh < 12h, ok < 7 days
+    alert: { fresh: 2, ok: 24 },          // Alert: fresh < 2h, ok < 1 day
+    monthly: { fresh: 24, ok: 744 },      // Monthly: fresh < 1 day, ok < 31 days
+    quarterly: { fresh: 48, ok: 2184 },   // Quarterly: fresh < 2 days, ok < 91 days
+    tech_topic: { fresh: 24, ok: 336 },   // Tech topic: fresh < 1 day, ok < 2 weeks
+    competitor: { fresh: 24, ok: 336 },   // Competitor: fresh < 1 day, ok < 2 weeks
   };
 
   const threshold = thresholds[reportType] || thresholds.weekly;
@@ -251,8 +264,51 @@ function jsonToMarkdown(obj: any, depth = 0): string {
   return String(obj);
 }
 
-const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ section, topicId }) => {
+const SectionBlock: FC<{
+  section: ReportSection;
+  topicId?: string;
+  reportId?: string;
+  reportType?: string;
+  sectionImageUrl?: string;
+  onExpandDiscussion?: (info: { selectedText: string; sectionTitle: string; sectionThesis: string }) => void;
+  discussions?: ReportDiscussion[];
+}> = ({ section, topicId, reportId, reportType, sectionImageUrl, onExpandDiscussion, discussions = [] }) => {
   const [open, setOpen] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [selectionState, setSelectionState] = useState<{ selectedText: string; position: { x: number; y: number }; visible: boolean }>({ selectedText: '', position: { x: 0, y: 0 }, visible: false });
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      setTimeout(() => {
+        const selection = window.getSelection();
+        const text = selection ? selection.toString().trim() : '';
+
+        if (!selection || selection.isCollapsed || !contentRef.current) return;
+        if (text.length < 5) return;
+        const range = selection.getRangeAt(0);
+        if (!contentRef.current.contains(range.startContainer) || !contentRef.current.contains(range.endContainer)) return;
+        const rect = range.getBoundingClientRect();
+        setSelectionState({
+          selectedText: text,
+          position: { x: rect.left + rect.width / 2, y: rect.top },
+          visible: true,
+        });
+      }, 10);
+    };
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-selection-action]')) return;
+      if (selectionState.visible) {
+        setSelectionState(prev => ({ ...prev, visible: false }));
+      }
+    };
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => {
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('mousedown', handleMouseDown);
+    };
+  }, [selectionState.visible]);
 
   // Detect raw_report sections with nested JSON content
   const rawContent = section.content;
@@ -311,6 +367,32 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
 
   return (
     <div className="border border-[#1d1d1f]/20 rounded-3xl overflow-hidden transition-all">
+      {selectionState.visible && (
+        <div data-selection-action className="bg-[#1d1d1f] text-white flex items-center justify-between px-4 py-2 gap-3">
+          <span className="text-xs truncate">选中: {selectionState.selectedText.slice(0, 40)}...</span>
+          <button
+            data-selection-action
+            className="bg-[#0071e3] text-white text-xs font-medium px-3 py-1 rounded-full shrink-0 hover:bg-[#0077ED] transition-colors"
+            onClick={() => {
+              setSelectionState(prev => ({ ...prev, visible: false }));
+              onExpandDiscussion?.({
+                selectedText: selectionState.selectedText,
+                sectionTitle: section.title,
+                sectionThesis: section.thesis,
+              });
+            }}
+          >
+            展开讨论
+          </button>
+          <button
+            data-selection-action
+            className="text-white/60 text-xs hover:text-white shrink-0"
+            onClick={() => setSelectionState(prev => ({ ...prev, visible: false }))}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <button
         onClick={() => setOpen(!open)}
         className="w-full px-5 py-4 flex items-start justify-between gap-4 text-left hover:bg-[#1d1d1f]/5 transition-colors"
@@ -329,9 +411,14 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
 
       {open && (
         <div className="px-5 pb-5 space-y-4 animate-fade-in border-t border-[#1d1d1f]/20 pt-4">
+          {/* Section image */}
+          {sectionImageUrl && (
+            <img src={sectionImageUrl} alt={section.title}
+              className="w-full rounded-2xl border border-white/10" loading="lazy" />
+          )}
           {/* Markdown content */}
           {displayContent && (
-            <div className="prose prose-sm max-w-none text-sm text-[#1d1d1f]">
+            <div ref={contentRef} className="prose prose-sm max-w-none text-sm text-[#1d1d1f]">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {displayContent}
               </ReactMarkdown>
@@ -342,7 +429,7 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
           {nestedSections && nestedSections.length > 0 && (
             <div className="space-y-3 mt-4">
               {nestedSections.map(ns => (
-                <SectionBlock key={ns.id} section={ns} topicId={topicId} />
+                <SectionBlock key={ns.id} section={ns} topicId={topicId} reportId={reportId} reportType={reportType} onExpandDiscussion={onExpandDiscussion} discussions={discussions} />
               ))}
             </div>
           )}
@@ -391,6 +478,21 @@ const SectionBlock: FC<{ section: ReportSection; topicId?: string }> = ({ sectio
               </span>
             </div>
           )}
+
+          {/* Pinned discussions */}
+          {discussions.filter(d => d.section_id === section.id || d.section_id === section.title).length > 0 && (
+            <div className="mt-3 space-y-2">
+              {discussions.filter(d => d.section_id === section.id || d.section_id === section.title).map(d => (
+                <div key={d.id} className="border border-[#1d1d1f]/10 rounded-xl p-3 bg-blue-50/30">
+                  <div className="text-xs text-[#1d1d1f]/50 mb-1">展开讨论 · {new Date(d.pinned_at).toLocaleDateString()}</div>
+                  <div className="text-xs text-[#1d1d1f]/60 mb-2 border-l-2 border-[#0071e3] pl-2 italic">{d.selected_text.slice(0, 100)}{d.selected_text.length > 100 ? '...' : ''}</div>
+                  <div className="prose prose-sm max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{d.result}</ReactMarkdown>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -408,6 +510,7 @@ export default function Reports() {
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -415,6 +518,29 @@ export default function Reports() {
   const [refreshInterval, setRefreshInterval] = useState<number>(60); // seconds
   const refreshTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; link?: string } | null>(null);
+  const [expandPanel, setExpandPanelState] = useState<{
+    isOpen: boolean;
+    selectedText: string;
+    sectionTitle: string;
+    sectionThesis: string;
+    reportId: string;
+    topicId: string;
+    reportType: string;
+  } | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('expandPanel');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const setExpandPanel = (val: typeof expandPanel | null | ((prev: typeof expandPanel) => typeof expandPanel | null)) => {
+    setExpandPanelState(prev => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      if (next) sessionStorage.setItem('expandPanel', JSON.stringify(next));
+      else sessionStorage.removeItem('expandPanel');
+      return next;
+    });
+  };
+  const [discussions, setDiscussions] = useState<Record<string, ReportDiscussion[]>>({});
 
   // Auto-refresh effect
   useEffect(() => {
@@ -461,7 +587,7 @@ export default function Reports() {
           }
           return r;
         });
-        setReports(parsed);
+        setReports(parsed.filter(r => r.status !== 'processing'));
       } else {
         setReports([]);
       }
@@ -571,6 +697,25 @@ export default function Reports() {
     }
   };
 
+  const handleExportPptx = async (id: string) => {
+    setExportingId(id);
+    try {
+      const res = await fetch(`/api/reports/${id}/export-pptx`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: '导出失败' }));
+        alert(err.error || '导出失败');
+        return;
+      }
+      const { pptxPath } = await res.json();
+      // Trigger download
+      window.open(`/api/reports/${id}/pptx`, '_blank');
+    } catch {
+      alert('导出失败，请检查 Z-Image 和 ppt-master 是否已启动');
+    } finally {
+      setExportingId(null);
+    }
+  };
+
   const getTypeLabel = (type: string) => {
     const map: Record<string, string> = {
       daily: '日报', weekly: '周报', monthly: '月报', quarterly: '季报',
@@ -590,7 +735,9 @@ export default function Reports() {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="flex gap-6 items-start">
+      {/* Main content */}
+      <div className="flex-1 min-w-0 space-y-6">
       <PageHeader
         title="分析报告"
         description="选择时间范围和主题，系统将自动采集数据并生成报告（已自动去重）"
@@ -726,12 +873,29 @@ export default function Reports() {
                 {/* Header */}
                 <div
                   className="px-4 py-5 flex flex-col gap-4 cursor-pointer hover:bg-[#1d1d1f]/5 transition-colors sm:px-6 sm:flex-row sm:items-center sm:justify-between"
-                  onClick={() => setExpandedId(isExpanded ? null : report.id)}
+                  onClick={() => {
+                    if (isExpanded) {
+                      setExpandedId(null);
+                    } else {
+                      setExpandedId(report.id);
+                      fetch(`/api/reports/${report.id}/discussions`)
+                        .then(res => res.json())
+                        .then(data => {
+                          setDiscussions(prev => ({ ...prev, [report.id]: data }));
+                        })
+                        .catch(() => {});
+                    }
+                  }}
                 >
                   <div className="flex items-center gap-4 min-w-0">
-                    <div className="w-10 h-10 bg-[#2A5A6B]/10 rounded-xl flex items-center justify-center shrink-0">
-                      <FileText className="w-5 h-5 text-[#2A5A6B]" />
-                    </div>
+                    {report.cover_image_url ? (
+                      <img src={report.cover_image_url} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    ) : (
+                      <div className="w-10 h-10 bg-[#2A5A6B]/10 rounded-xl flex items-center justify-center shrink-0">
+                        <FileText className="w-5 h-5 text-[#2A5A6B]" />
+                      </div>
+                    )}
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h4 className="text-sm font-medium text-[#1d1d1f] truncate">{report.title}</h4>
@@ -754,6 +918,23 @@ export default function Reports() {
                   </div>
                   <div className="flex items-center justify-end gap-2 sm:shrink-0">
                     <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (report.metadata?.pptxPath) {
+                          window.open(`/api/reports/${report.id}/pptx`, '_blank');
+                        } else {
+                          handleExportPptx(report.id);
+                        }
+                      }}
+                      disabled={exportingId === report.id}
+                      className="p-2 text-[#aaa] hover:text-[#2A5A6B] rounded-full hover:bg-[#2A5A6B]/5 transition-all disabled:opacity-50"
+                      aria-label={report.metadata?.pptxPath ? '下载 PPT' : '导出 PPT'}
+                    >
+                      {exportingId === report.id
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <Download className="w-4 h-4" />}
+                    </button>
+                    <button
                       onClick={e => { e.stopPropagation(); handleDelete(report.id); }}
                       className="p-2 text-[#aaa] hover:text-[#A0453A] rounded-full hover:bg-[#A0453A]/5 transition-all"
                       aria-label="删除报告"
@@ -767,6 +948,14 @@ export default function Reports() {
                 {/* Expanded Content */}
                 {isExpanded && (
                   <div className="px-4 pb-5 pt-2 border-t border-[#1d1d1f]/20 animate-fade-in space-y-6 sm:px-6 sm:pb-6">
+
+                    {/* Cover Image */}
+                    {report.cover_image_url && (
+                      <div className="rounded-2xl overflow-hidden">
+                        <img src={report.cover_image_url} alt="" className="w-full h-48 object-cover"
+                          loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      </div>
+                    )}
 
                     {/* Executive Summary */}
                     {content?.executiveSummary ? (
@@ -881,9 +1070,31 @@ export default function Reports() {
                       <div>
                         <h5 className="text-xs font-medium text-[#888] mb-3">分析章节</h5>
                         <div className="space-y-3">
-                          {content.sections.map(section => (
-                            <SectionBlock key={section.id} section={section} topicId={report.topic_id} />
-                          ))}
+                          {content.sections.map((section, idx) => {
+                            const sectionImages = (report.metadata as Record<string, any>)?.sectionImages as Record<string, string> | undefined;
+                            return (
+                            <SectionBlock
+                              key={section.id}
+                              section={section}
+                              topicId={report.topic_id}
+                              reportId={report.id}
+                              reportType={report.type}
+                              sectionImageUrl={sectionImages?.[String(idx)]}
+                              onExpandDiscussion={(info) => {
+                                setExpandPanel({
+                                  isOpen: true,
+                                  selectedText: info.selectedText,
+                                  sectionTitle: info.sectionTitle,
+                                  sectionThesis: info.sectionThesis,
+                                  reportId: report.id,
+                                  topicId: report.topic_id || '',
+                                  reportType: report.type,
+                                });
+                              }}
+                              discussions={discussions[report.id] || []}
+                            />
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -920,6 +1131,74 @@ export default function Reports() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      </div>
+
+      {/* Expand Discussion Sidebar */}
+      {expandPanel && (
+        <div className="w-[400px] shrink-0" style={{ position: 'sticky', top: 0 }}>
+          <div className="border border-[#1d1d1f]/20 rounded-3xl overflow-hidden" style={{ maxHeight: 'calc(100vh - 6rem)', overflowY: 'auto' }}>
+            {/* Panel header */}
+            <div className="px-5 py-4 flex items-center justify-between border-b border-[#1d1d1f]/10 bg-[#F7F7F7]/50 sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-[#2A5A6B]/10 rounded-lg flex items-center justify-center">
+                  <MessageSquare className="w-4 h-4 text-[#2A5A6B]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-[#1d1d1f]">展开讨论</h3>
+                  {expandPanel.sectionTitle && (
+                    <p className="text-xs text-[#888]">{expandPanel.sectionTitle}</p>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => setExpandPanel(null)}
+                className="p-1.5 rounded-full hover:bg-[#1d1d1f]/10 transition-colors"
+              >
+                <X className="w-4 h-4 text-[#888]" />
+              </button>
+            </div>
+
+            {/* Selected text quote */}
+            <div className="px-5 pt-4">
+              <div className="bg-[#2A5A6B]/5 rounded-xl px-4 py-3 border-l-[3px] border-[#2A5A6B]">
+                <p className="text-sm text-[#1d1d1f]/80 italic leading-relaxed max-h-28 overflow-y-auto">
+                  "{expandPanel.selectedText}"
+                </p>
+              </div>
+            </div>
+
+            <div className="px-5 pb-5">
+              <ExpandDiscussionPanel
+                isOpen={expandPanel.isOpen}
+                onClose={() => setExpandPanel(null)}
+                selectedText={expandPanel.selectedText}
+                sectionTitle={expandPanel.sectionTitle}
+                sectionThesis={expandPanel.sectionThesis}
+                topicId={expandPanel.topicId}
+                reportType={expandPanel.reportType}
+                reportId={expandPanel.reportId}
+                onPin={(newDiscussion) => {
+                  const discussion: ReportDiscussion = {
+                    id: newDiscussion.id,
+                    report_id: expandPanel.reportId,
+                    section_id: newDiscussion.section_id,
+                    selected_text: newDiscussion.selected_text,
+                    user_input: newDiscussion.user_input,
+                    result: newDiscussion.result,
+                    pinned_at: new Date().toISOString(),
+                  };
+                  setDiscussions(prev => ({
+                    ...prev,
+                    [expandPanel.reportId]: [...(prev[expandPanel.reportId] || []), discussion],
+                  }));
+                  setExpandPanel(null);
+                }}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

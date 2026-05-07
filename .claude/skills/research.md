@@ -6,6 +6,11 @@ description: |
   GitHub 项目、产业报告），自动内容提取、去重，存入数据库。
 category: research
 timeout: 1200
+model: glm-5.1
+allowedTools:
+  - Bash
+  - WebSearch
+  - WebFetch
 params:
   - name: topicName
     type: string

@@ -6,6 +6,11 @@ description: |
   开源项目、新闻公告、技术突破、合作投资等维度。
 category: research
 timeout: 900
+model: glm-5.1
+allowedTools:
+  - Bash
+  - WebSearch
+  - WebFetch
 params:
   - name: organization
     type: string

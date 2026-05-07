@@ -12,3 +12,6 @@ database.kuzu*
 state/
 uploads/
 .omc/
+.vite/
+generated_images/
+tmp/

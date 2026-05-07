@@ -6,6 +6,9 @@ description: |
   创建节点、关系和事件节点。
 category: sync
 timeout: 300
+model: glm-5.1
+allowedTools:
+  - Bash
 params:
   - name: topicId
     type: string

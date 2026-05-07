@@ -1,10 +1,8 @@
 {
-  "aiProvider": "openai",
-  "openaiApiKey": "",
-  "openaiBaseUrl": "https://api.openai.com/v1",
-  "openaiModel": "gpt-4o-mini",
-  "neo4jUri": "bolt://localhost:7687",
-  "neo4jUser": "neo4j",
   "schedulerEnabled": false,
-  "schedulerCheckIntervalMinutes": 30
+  "schedulerCheckIntervalMinutes": 30,
+  "services": {
+    "zImageUrl": "http://127.0.0.1:8000",
+    "pptMasterDir": ""
+  }
 }

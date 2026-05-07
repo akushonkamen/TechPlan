@@ -16,6 +16,7 @@ export async function migrateReportTables(db: Database): Promise<void> {
     { col: 'review_status', def: "TEXT DEFAULT 'pending'" },
     { col: 'period_start', def: 'TEXT' },
     { col: 'period_end', def: 'TEXT' },
+    { col: 'cover_image_url', def: 'TEXT' },
   ];
   for (const { col, def } of reportColumns) {
     await addColumn('reports', col, def);

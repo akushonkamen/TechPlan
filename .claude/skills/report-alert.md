@@ -6,6 +6,7 @@ description: |
   适用于风险、机会、异常、突破等紧急情报响应。
 category: reporting
 timeout: 120
+model: glm-5.1
 allowedTools:
   - Bash
 params:

@@ -6,6 +6,7 @@ description: |
   包含战略执行评估、市场环境、技术发展、投资合作、风险机遇复盘。
 category: reporting
 timeout: 600
+model: glm-5.1
 allowedTools:
   - Bash
 params:

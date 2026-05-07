@@ -17,7 +17,7 @@ export interface SkillExecution {
   completedAt?: string;
 }
 
-const MAX_CONCURRENT = 3;
+const MAX_CONCURRENT = 1;
 
 // Strip ANSI escape codes (from `script` pseudo-TTY wrapper)
 function stripAnsi(s: string): string {
@@ -28,6 +28,7 @@ interface QueuedExecution {
   config: { name: string; prompt: string; timeout: number; allowedTools?: string[] };
   params: Record<string, any>;
   executionId?: string;
+  options?: { pipelineId?: string; pipelineStep?: string };
   resolve: (execution: SkillExecution) => void;
   reject: (error: Error) => void;
 }
@@ -55,6 +56,20 @@ export class SkillExecutor {
     return this.progressLines.get(executionId) ?? [];
   }
 
+  /** Register an external execution ID for progress tracking (non-CLI steps). */
+  registerProgress(executionId: string) {
+    this.progressLines.set(executionId, []);
+  }
+
+  /** Append a progress line for an external execution and push via WebSocket. */
+  appendExternalProgress(executionId: string, line: string) {
+    const arr = this.progressLines.get(executionId);
+    if (arr) {
+      arr.push(line);
+      this.ws?.send(executionId, 'progress', line);
+    }
+  }
+
   /** Clean up stale "running" executions from a previous server session. */
   async cleanupStale() {
     try {
@@ -71,12 +86,13 @@ export class SkillExecutor {
   startExecution(
     skillName: string,
     params: Record<string, any>,
+    options?: { pipelineId?: string; pipelineStep?: string },
   ): { executionId: string; promise: Promise<SkillExecution> } {
     const prompt = this.registry.render(skillName, params);
     const config = this.registry.get(skillName)!;
     const executionId = randomUUID();
 
-    const promise = this.runWithId(executionId, { name: skillName, prompt, timeout: config.timeout, allowedTools: config.allowedTools, model: config.model }, params);
+    const promise = this.runWithId(executionId, { name: skillName, prompt, timeout: config.timeout, allowedTools: config.allowedTools, model: config.model }, params, options);
 
     return { executionId, promise };
   }
@@ -85,18 +101,20 @@ export class SkillExecutor {
     executionId: string,
     config: { name: string; prompt: string; timeout: number; allowedTools?: string[]; model?: string },
     params: Record<string, any>,
+    options?: { pipelineId?: string; pipelineStep?: string },
   ): Promise<SkillExecution> {
-    return this.run(config, params, executionId);
+    return this.run(config, params, executionId, options);
   }
 
   private run(
     config: { name: string; prompt: string; timeout: number; allowedTools?: string[]; model?: string },
     params: Record<string, any>,
     preassignedId?: string,
+    options?: { pipelineId?: string; pipelineStep?: string },
   ): Promise<SkillExecution> {
     if (this.runningCount >= MAX_CONCURRENT) {
       return new Promise<SkillExecution>((resolve, reject) => {
-        this.queue.push({ config, params, executionId: preassignedId, resolve, reject });
+        this.queue.push({ config, params, executionId: preassignedId, options, resolve, reject });
       });
     }
 
@@ -113,10 +131,15 @@ export class SkillExecutor {
     this.progressLines.set(execution.id, []);
 
     // Record in DB - if this fails, execution should reflect the failure
-    const dbInsertPromise = this.db.run(
-      `INSERT INTO skill_executions (id, skill_name, params, status, started_at) VALUES (?, ?, ?, 'running', ?)`,
-      [execution.id, execution.skillName, JSON.stringify(params), execution.startedAt],
-    );
+    const dbInsertPromise = options?.pipelineId
+      ? this.db.run(
+          `INSERT INTO skill_executions (id, skill_name, params, status, started_at, pipeline_id, pipeline_step) VALUES (?, ?, ?, 'running', ?, ?, ?)`,
+          [execution.id, execution.skillName, JSON.stringify(params), execution.startedAt, options.pipelineId ?? null, options.pipelineStep ?? null],
+        )
+      : this.db.run(
+          `INSERT INTO skill_executions (id, skill_name, params, status, started_at) VALUES (?, ?, ?, 'running', ?)`,
+          [execution.id, execution.skillName, JSON.stringify(params), execution.startedAt],
+        );
 
     return new Promise<SkillExecution>((resolve, reject) => {
       // Handle DB insert failure - reject the promise immediately
@@ -421,7 +444,7 @@ export class SkillExecutor {
     // Process queue
     if (this.queue.length > 0 && this.runningCount < MAX_CONCURRENT) {
       const next = this.queue.shift()!;
-      this.run(next.config, next.params, next.executionId)
+      this.run(next.config, next.params, next.executionId, next.options)
         .then(next.resolve)
         .catch(next.reject);
     }
@@ -477,7 +500,7 @@ export class SkillExecutor {
       // Process queue after cancel
       if (this.queue.length > 0 && this.runningCount < MAX_CONCURRENT) {
         const next = this.queue.shift()!;
-        this.run(next.config, next.params, next.executionId)
+        this.run(next.config, next.params, next.executionId, next.options)
           .then(next.resolve)
           .catch(next.reject);
       }

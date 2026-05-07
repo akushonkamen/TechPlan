@@ -6,6 +6,9 @@ description: |
   propose × evaluate × iterate 双层优化循环。
 category: optimization
 timeout: 1200
+model: glm-5.1
+allowedTools:
+  - Bash
 params:
   - name: skillName
     type: string

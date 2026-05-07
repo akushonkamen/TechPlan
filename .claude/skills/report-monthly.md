@@ -6,6 +6,7 @@ description: |
   包含月环比对比、趋势分析、竞争格局、风险评估，输出标准化月报 JSON。
 category: reporting
 timeout: 600
+model: glm-5.1
 allowedTools:
   - Bash
 params:

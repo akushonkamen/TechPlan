@@ -51,14 +51,15 @@ export class SchedulerService {
   private config: SchedulerConfig;
   private lastCheckAt: string | null = null;
   private recentTriggers: RecentTrigger[] = [];
-  private maxTriggers = 3; // match MAX_CONCURRENT in SkillExecutor
+  private maxTriggers = 1; // serial execution — one skill at a time
 
   // Dependencies injected via setters
   private db: any = null;
   private startExecution: ((skillName: string, params: Record<string, any>) => { executionId: string; promise: Promise<SkillExecution> }) | null = null;
-  private reportHandler: ((execution: SkillExecution, params: Record<string, any>) => Promise<void>) | null = null;
+  private reportHandler: ((execution: SkillExecution, params: Record<string, any>, computedPeriod?: any) => Promise<any>) | null = null;
   private collectFn: ((topicId: string, topicName: string, start: string, end: string) => Promise<{ collected: number }>) | null = null;
   private getDocumentsCountInPeriod: ((topicId: string, start: string, end: string) => Promise<number>) | null = null;
+  private startPipelineFn: ((params: Record<string, any>, computedPeriod: { start: string; end: string; preset?: string }) => Promise<{ pipelineId: string; steps: any[] }>) | null = null;
 
   constructor(config?: Partial<SchedulerConfig>) {
     this.config = {
@@ -74,13 +75,16 @@ export class SchedulerService {
   setStartExecution(fn: typeof SchedulerService.prototype.startExecution) { this.startExecution = fn; }
 
   /** Inject the report persistence handler (extracted from server.ts). */
-  setReportHandler(fn: (execution: SkillExecution, params: Record<string, any>) => Promise<void>) { this.reportHandler = fn; }
+  setReportHandler(fn: (execution: SkillExecution, params: Record<string, any>, computedPeriod?: any) => Promise<any>) { this.reportHandler = fn; }
 
   /** Inject the data collection function (triggerCollectionForPeriod). */
   setCollectFunction(fn: (topicId: string, topicName: string, start: string, end: string) => Promise<{ collected: number }>) { this.collectFn = fn; }
 
   /** Inject the document count checker function. */
   setGetDocumentsCountInPeriod(fn: (topicId: string, start: string, end: string) => Promise<number>) { this.getDocumentsCountInPeriod = fn; }
+
+  /** Inject the pipeline start function. */
+  setStartPipeline(fn: (params: Record<string, any>, computedPeriod: { start: string; end: string; preset?: string }) => Promise<{ pipelineId: string; steps: any[] }>) { this.startPipelineFn = fn; }
 
   start() {
     if (this.timer) return;
@@ -147,12 +151,14 @@ export class SchedulerService {
       // ── Phase 1: Collect data for topics with collection enabled ──
       await this.collectForAllTopics();
 
-      // ── Phase 2: Generate due reports ──
+      // ── Phase 1.5: Check alert conditions after collection ──
+      await this.checkAlertConditions();
+
+      // ── Phase 2: Generate due reports via pipeline ──
       const pending = await this.computePendingTopics();
       const toTrigger = pending.slice(0, this.maxTriggers);
 
       for (const topic of toTrigger) {
-        const skillName = SCHEDULE_TO_SKILL[topic.schedule] ?? 'report';
         console.log(`[Scheduler] Triggering ${topic.schedule} report for topic "${topic.topicName}"`);
 
         const { start: timeRangeStart, end: timeRangeEnd } = this.getReportRange(topic.schedule);
@@ -175,16 +181,26 @@ export class SchedulerService {
             }
           }
 
-          const { executionId, promise } = this.startExecution(skillName, params);
-          this.addTrigger(topic, executionId, 'running');
-
-          promise.then(async (execution) => {
-            await this.reportHandler!(execution, params);
-            this.updateTrigger(executionId, execution.status);
-          }).catch((err) => {
-            console.error(`[Scheduler] Report execution failed for "${topic.topicName}":`, err);
-            this.updateTrigger(executionId, 'failed');
-          });
+          // Use pipeline orchestration when available
+          if (this.startPipelineFn) {
+            const computedPeriod = { start: timeRangeStart, end: timeRangeEnd, preset: topic.schedule };
+            const result = await this.startPipelineFn(params, computedPeriod);
+            this.addTrigger(topic, result.pipelineId, 'running');
+            console.log(`[Scheduler] Pipeline ${result.pipelineId} started for "${topic.topicName}"`);
+          } else {
+            // Fallback: legacy single execution
+            const skillName = SCHEDULE_TO_SKILL[topic.schedule] ?? 'report';
+            const { executionId, promise } = this.startExecution!(skillName, params);
+            this.addTrigger(topic, executionId, 'running');
+            try {
+              const execution = await promise;
+              await this.reportHandler!(execution, params);
+              this.updateTrigger(executionId, execution.status);
+            } catch (err) {
+              console.error(`[Scheduler] Report execution failed for "${topic.topicName}":`, err);
+              this.updateTrigger(executionId, 'failed');
+            }
+          }
         } catch (err) {
           console.error(`[Scheduler] Failed to start execution for "${topic.topicName}":`, err);
         }
@@ -218,6 +234,91 @@ export class SchedulerService {
         await this.collectFn(topic.id, topic.name, start, end);
       } catch (err) {
         console.warn(`[Scheduler] Collection failed for "${topic.name}":`, err);
+      }
+    }
+  }
+
+  /** Check for alert conditions across all topics and trigger report-alert skill. */
+  private async checkAlertConditions() {
+    if (!this.db || !this.startExecution || !this.reportHandler) return;
+
+    const intervalMin = this.config.checkIntervalMinutes;
+    const topics = await this.db.all(
+      `SELECT id, name FROM topics WHERE schedule IS NOT NULL AND schedule != 'disabled'`
+    );
+
+    for (const topic of topics) {
+      try {
+        // 1. Check for breaking urgency docs in last interval
+        const breakingDocs = await this.db.all(
+          `SELECT id, title FROM documents WHERE topic_id = ? AND urgency = 'breaking'
+           AND created_at >= datetime('now', ? || ' minutes')`,
+          [topic.id, -intervalMin]
+        );
+
+        // 2. Check for volume spike: docs in last 6h vs daily average
+        const recentCount = await this.db.get(
+          `SELECT COUNT(*) as count FROM documents WHERE topic_id = ? AND created_at >= datetime('now', '-360 minutes')`,
+          [topic.id]
+        );
+        const dailyAvg = await this.db.get(
+          `SELECT CAST(COUNT(*) AS REAL) / MAX(1, CAST((julianday('now') - julianday(MIN(created_at))) AS REAL)) as avg_per_day
+           FROM documents WHERE topic_id = ? AND created_at >= datetime('now', '-30 days')`,
+          [topic.id]
+        );
+        const spikeThreshold = (dailyAvg?.avg_per_day || 1) * 0.5; // 6h expected = daily_avg / 4; 3x = 0.75 daily
+        const volumeSpike = (recentCount?.count || 0) > spikeThreshold;
+
+        // 3. Check for high-confidence new entities
+        const newHighConfEntities = await this.db.get(
+          `SELECT COUNT(*) as count FROM entities e JOIN documents d ON e.document_id = d.id
+           WHERE d.topic_id = ? AND e.confidence >= 0.9
+           AND d.created_at >= datetime('now', ? || ' minutes')`,
+          [topic.id, -intervalMin]
+        );
+
+        // 4. Check for new competitor relations
+        const newCompeteRelations = await this.db.get(
+          `SELECT COUNT(*) as count FROM relations r JOIN documents d ON r.document_id = d.id
+           WHERE d.topic_id = ? AND LOWER(r.relation) IN ('competes_with', 'develops')
+           AND d.created_at >= datetime('now', ? || ' minutes')`,
+          [topic.id, -intervalMin]
+        );
+
+        // Determine alert type
+        let alertType: string | null = null;
+        if (breakingDocs.length > 0) alertType = 'breakthrough';
+        else if (volumeSpike) alertType = 'anomaly';
+        else if ((newCompeteRelations?.count || 0) > 0) alertType = 'risk';
+        else if ((newHighConfEntities?.count || 0) >= 2) alertType = 'opportunity';
+
+        if (!alertType) continue;
+
+        console.log(`[Scheduler] Alert condition "${alertType}" detected for topic "${topic.name}"`);
+
+        const params: Record<string, any> = {
+          topicId: topic.id,
+          topicName: topic.name,
+          alertType,
+          reportType: 'alert',
+        };
+
+        const { executionId, promise } = this.startExecution('report-alert', params);
+        this.addTrigger(
+          { topicId: topic.id, topicName: topic.name, schedule: 'daily' as const, lastReportAt: null, dueInMinutes: 0 },
+          executionId,
+          'running'
+        );
+
+        promise.then(async (execution) => {
+          await this.reportHandler!(execution, params);
+          this.updateTrigger(executionId, execution.status);
+        }).catch((err) => {
+          console.error(`[Scheduler] Alert execution failed for "${topic.name}":`, err);
+          this.updateTrigger(executionId, 'failed');
+        });
+      } catch (err) {
+        console.warn(`[Scheduler] Alert check failed for "${topic.name}":`, err);
       }
     }
   }

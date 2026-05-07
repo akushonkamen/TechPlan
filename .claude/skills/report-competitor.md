@@ -6,6 +6,7 @@ description: |
   六阶段流程：数据收集→信号识别→分析框架→内容生成→质量检查→图谱关联。
 category: reporting
 timeout: 600
+model: glm-5.1
 allowedTools:
   - Bash
 params:

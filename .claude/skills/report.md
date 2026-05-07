@@ -6,6 +6,7 @@ description: |
   输出严格 JSON，符合 ReportContent v2 schema。
 category: reporting
 timeout: 1200
+model: glm-5.1
 allowedTools:
   - Bash
 params:
