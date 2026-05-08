@@ -16,7 +16,7 @@ export const PROMPT_LIMITS = {
 
 // ── Style parameters for consistent output ──
 export const IMAGE_STYLE_PARAMS = {
-  cover: { width: 1024, height: 512, steps: 8 },
+  cover: { width: 1024, height: 512, steps: 4 },
   section: { width: 1024, height: 768, steps: 4 },
 } as const;
 
