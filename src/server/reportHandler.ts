@@ -1130,11 +1130,13 @@ export async function handleReportResult(
     // ── Detect model thinking-text leakage ──
     // Some models (e.g. GLM) output their chain-of-thought as the report content,
     // with the actual report JSON embedded as a string inside a "raw_report" section.
-    const THINKING_PATTERNS = /^(?:Now I have|Let me|I'll|I will|I have all|The documents span|I need to|First,? let me|Based on the)/i;
+    const THINKING_PATTERNS = /^(?:Now I have|Let me|I'll|I will|I have all|The documents span|I need to|First,? let me|Based on the|The most recent|I found|Looking at|After analyzing)/i;
     const overview = normalizedContent.executiveSummary?.overview ?? '';
     const overviewLooksLikeThinking = THINKING_PATTERNS.test(overview);
 
     if (overviewLooksLikeThinking) {
+      console.log('[Report] Detected thinking-text in executiveSummary.overview, attempting recovery');
+      let recovered = false;
       // Scan sections for embedded JSON report
       for (const sec of normalizedContent.sections ?? []) {
         if (typeof sec.content !== 'string') continue;
@@ -1144,7 +1146,7 @@ export async function handleReportResult(
         const jsonStr = sec.content.slice(jsonStart);
         const embedded = tryParseReportJson(jsonStr);
         if (embedded && hasReportStructure(embedded)) {
-          console.log('[Report] Detected model thinking-text leakage, extracting embedded report');
+          console.log('[Report] Recovered embedded report from thinking-text leakage');
           const embContent = embedded.content ?? embedded;
           const embSummary = embContent.executiveSummary ?? {};
           normalizedContent.executiveSummary.overview = embSummary.overview ?? embedded.summary ?? '';
@@ -1156,7 +1158,21 @@ export async function handleReportResult(
           });
           normalizedContent.timeline = embContent.timeline ?? [];
           normalizedContent.metrics = embContent.metrics ?? {};
+          recovered = true;
           break;
+        }
+      }
+      // Fallback: no embedded JSON found — reconstruct overview from available data
+      if (!recovered) {
+        console.log('[Report] No embedded JSON found, reconstructing overview from sections');
+        const sectionTheses = (normalizedContent.sections ?? [])
+          .map(s => s.thesis).filter(Boolean).join('；');
+        normalizedContent.executiveSummary.overview = sectionTheses || report.summary || '报告已生成，详见各章节分析。';
+        // Also clean thinking text from section content if present
+        for (const sec of normalizedContent.sections ?? []) {
+          if (typeof sec.content === 'string' && THINKING_PATTERNS.test(sec.content)) {
+            sec.content = sec.thesis || '';
+          }
         }
       }
     }
