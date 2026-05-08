@@ -413,8 +413,11 @@ const SectionBlock: FC<{
         <div className="px-5 pb-5 space-y-4 animate-fade-in border-t border-[#1d1d1f]/20 pt-4">
           {/* Section image */}
           {sectionImageUrl && (
-            <img src={sectionImageUrl} alt={section.title}
-              className="w-full rounded-2xl border border-white/10" loading="lazy" />
+            <div className="rounded-2xl overflow-hidden border border-[#1d1d1f]/10">
+              <img src={sectionImageUrl} alt={section.title}
+                className="w-full" loading="lazy"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            </div>
           )}
           {/* Markdown content */}
           {displayContent && (
@@ -952,7 +955,7 @@ export default function Reports() {
                     {/* Cover Image */}
                     {report.cover_image_url && (
                       <div className="rounded-2xl overflow-hidden">
-                        <img src={report.cover_image_url} alt="" className="w-full h-48 object-cover"
+                        <img src={report.cover_image_url} alt="" className="w-full rounded-xl"
                           loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                       </div>
                     )}
