@@ -450,12 +450,19 @@ export function createSkillsRouter(ctx: AppContext): Router {
       };
       for (const p of pipelines) {
         try {
-          const reportStep = await db.get(
+          // Try report step first, fall back to any step with params
+          let stepRow = await db.get(
             `SELECT params FROM skill_executions WHERE pipeline_id = ? AND pipeline_step = 'report' LIMIT 1`,
             [p.pipelineId]
           );
-          if (reportStep?.params) {
-            const rp = typeof reportStep.params === 'string' ? JSON.parse(reportStep.params) : reportStep.params;
+          if (!stepRow?.params) {
+            stepRow = await db.get(
+              `SELECT params FROM skill_executions WHERE pipeline_id = ? AND params IS NOT NULL AND params != '' LIMIT 1`,
+              [p.pipelineId]
+            );
+          }
+          if (stepRow?.params) {
+            const rp = typeof stepRow.params === 'string' ? JSON.parse(stepRow.params) : stepRow.params;
             p.title = `${rp.topicName || ''} ${TYPE_LABELS[rp.reportType] || '报告'}`.trim();
           }
         } catch { /* ignore parse errors */ }
