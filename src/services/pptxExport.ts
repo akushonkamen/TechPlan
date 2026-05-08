@@ -16,7 +16,12 @@ const PPTMASTER_DIR = process.env.PPTMASTER_DIR || loadServiceConfig().services?
 const SCRIPTS_DIR = path.join(PPTMASTER_DIR, 'skills', 'ppt-master', 'scripts');
 const PYTHON = process.env.PPTMASTER_PYTHON || path.join(PPTMASTER_DIR, '.venv', 'bin', 'python3');
 const IMAGE_DIR = path.join(process.cwd(), 'generated_images');
-const TEMPLATE_DIR = path.join(PPTMASTER_DIR, 'skills', 'ppt-master', 'templates', 'layouts', 'mckinsey');
+function resolveTemplateDir(): string {
+  const config = loadServiceConfig();
+  const templateName = config.ppt?.template || 'eng_whiteboard';
+  return path.join(PPTMASTER_DIR, 'skills', 'ppt-master', 'templates', 'layouts', templateName);
+}
+const TEMPLATE_DIR = resolveTemplateDir();
 
 interface ReportSection {
   id: string;
@@ -87,6 +92,47 @@ function createTempProject(reportId: string): string {
 }
 
 // Wrap text into lines of approximately maxChars per line
+
+// Template color schemes
+const COLOR_SCHEMES = {
+  mckinsey: {
+    bulletDot: '#005587',
+    bulletText: '#5D6D7E',
+    cardTitle: '#2C3E50',
+    cardDesc: '#7F8C8D',
+    emptyFill: '#BDC3C7',
+    fallbackText: '#5D6D7E',
+    signalColors: {
+      trend: { bg: '#F0F7FF', border: '#005587', dot: '#0076A8' },
+      breakthrough: { bg: '#FFF8E1', border: '#F5A623', dot: '#F5A623' },
+      opportunity: { bg: '#F0FFF4', border: '#27AE60', dot: '#27AE60' },
+      threat: { bg: '#FFF5F5', border: '#E74C3C', dot: '#E74C3C' },
+      milestone: { bg: '#F5F0FF', border: '#7C3AED', dot: '#7C3AED' },
+    },
+  },
+  eng_whiteboard: {
+    bulletDot: '#C41E3A',
+    bulletText: '#C9D1D9',
+    cardTitle: '#C9D1D9',
+    cardDesc: '#8B949E',
+    emptyFill: '#8B949E',
+    fallbackText: '#C9D1D9',
+    signalColors: {
+      trend: { bg: '#161B22', border: '#58A6FF', dot: '#58A6FF' },
+      breakthrough: { bg: '#161B22', border: '#F0883E', dot: '#F0883E' },
+      opportunity: { bg: '#161B22', border: '#3FB950', dot: '#3FB950' },
+      threat: { bg: '#161B22', border: '#F85149', dot: '#F85149' },
+      milestone: { bg: '#161B22', border: '#BC8CFF', dot: '#BC8CFF' },
+    },
+  },
+} as const;
+
+function getActiveScheme() {
+  const config = loadServiceConfig();
+  const templateName = config.ppt?.template || 'eng_whiteboard';
+  return COLOR_SCHEMES[templateName as keyof typeof COLOR_SCHEMES] || COLOR_SCHEMES.eng_whiteboard;
+}
+
 function wrapText(text: string, maxChars: number): string[] {
   const lines: string[] = [];
   for (const paragraph of text.split('\n')) {
@@ -108,6 +154,7 @@ function wrapText(text: string, maxChars: number): string[] {
 
 // Generate bullet point SVG elements within content area
 function buildBulletContent(items: string[], startY: number, maxWidth: number): string {
+  const scheme = getActiveScheme();
   const elements: string[] = [];
   let y = startY;
   const lineHeight = 28;
@@ -116,10 +163,10 @@ function buildBulletContent(items: string[], startY: number, maxWidth: number): 
   for (let i = 0; i < items.length && y < startY + 400; i++) {
     const lines = wrapText(truncate(items[i], 200), maxCharsPerLine);
     // Bullet dot
-    elements.push(`<circle cx="82" cy="${y - 4}" r="3" fill="#005587"/>`);
+    elements.push(`<circle cx="82" cy="${y - 4}" r="3" fill="${scheme.bulletDot}"/>`);
     for (const line of lines) {
       elements.push(
-        `<text x="96" y="${y}" font-family="Arial, sans-serif" font-size="15" fill="#5D6D7E">${escXml(line)}</text>`
+        `<text x="96" y="${y}" font-family="Arial, sans-serif" font-size="15" fill="${scheme.bulletText}">${escXml(line)}</text>`
       );
       y += lineHeight;
     }
@@ -130,31 +177,26 @@ function buildBulletContent(items: string[], startY: number, maxWidth: number): 
 
 // Generate signal cards (2-column layout)
 function buildSignalCards(signals: { type: string; title: string; description: string; confidence: number }[], startY: number): string {
+  const scheme = getActiveScheme();
   const elements: string[] = [];
   let y = startY;
   const cardHeight = 70;
   const cardWidth = 555;
   const gap = 30;
 
-  const colorMap: Record<string, { bg: string; border: string; dot: string }> = {
-    trend: { bg: '#F0F7FF', border: '#005587', dot: '#0076A8' },
-    breakthrough: { bg: '#FFF8E1', border: '#F5A623', dot: '#F5A623' },
-    opportunity: { bg: '#F0FFF4', border: '#27AE60', dot: '#27AE60' },
-    threat: { bg: '#FFF5F5', border: '#E74C3C', dot: '#E74C3C' },
-    milestone: { bg: '#F5F0FF', border: '#7C3AED', dot: '#7C3AED' },
-  };
+  const colorMap = scheme.signalColors;
 
   for (let i = 0; i < signals.length && y + cardHeight <= startY + 420; i += 2) {
     for (let col = 0; col < 2 && i + col < signals.length; col++) {
       const sig = signals[i + col];
       const x = col === 0 ? 60 : 60 + cardWidth + gap;
-      const colors = colorMap[sig.type] || colorMap.trend;
+      const colors = colorMap[sig.type as keyof typeof colorMap] || colorMap.trend;
 
       elements.push(`<rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" fill="${colors.bg}" stroke="${colors.border}" stroke-width="1" rx="6"/>`);
       elements.push(`<rect x="${x}" y="${y}" width="4" height="${cardHeight}" fill="${colors.dot}" rx="2"/>`);
       elements.push(`<circle cx="${x + 20}" cy="${y + 22}" r="4" fill="${colors.dot}"/>`);
-      elements.push(`<text x="${x + 32}" y="${y + 26}" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#2C3E50">${escXml(truncate(sig.title, 40))}</text>`);
-      elements.push(`<text x="${x + 20}" y="${y + 50}" font-family="Arial, sans-serif" font-size="12" fill="#7F8C8D">${escXml(truncate(sig.description, 70))}</text>`);
+      elements.push(`<text x="${x + 32}" y="${y + 26}" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="${scheme.cardTitle}">${escXml(truncate(sig.title, 40))}</text>`);
+      elements.push(`<text x="${x + 20}" y="${y + 50}" font-family="Arial, sans-serif" font-size="12" fill="${scheme.cardDesc}">${escXml(truncate(sig.description, 70))}</text>`);
       elements.push(`<text x="${x + cardWidth - 15}" y="${y + 26}" text-anchor="end" font-family="Arial, sans-serif" font-size="11" fill="${colors.dot}">${(sig.confidence * 100).toFixed(0)}%</text>`);
     }
     y += cardHeight + 12;
@@ -179,7 +221,8 @@ export async function exportReportToPptx(report: Report, existingImages?: Existi
   const period = content.meta?.period || {};
   const dateStr = period.end ? period.end : new Date().toISOString().slice(0, 10);
 
-  console.log(`[PPTX] Exporting report ${report.id} (${sections.length} sections) using mckinsey template`);
+  const templateName = path.basename(TEMPLATE_DIR);
+  console.log(`[PPTX] Exporting report ${report.id} (${sections.length} sections) using ${templateName} template`);
 
   const projectDir = createTempProject(report.id);
   const svgOutputDir = path.join(projectDir, 'svg_output');
@@ -209,7 +252,7 @@ export async function exportReportToPptx(report: Report, existingImages?: Existi
       );
       fs.writeFileSync(path.join(svgOutputDir, `slide_${String(pageNum).padStart(3, '0')}.svg`), imgInsert);
     } else {
-      console.log('[PPTX] Creating mckinsey cover slide');
+      console.log('[PPTX] Creating cover slide');
       const coverTpl = readTemplate('01_cover.svg');
       const coverSvg = replacePlaceholders(coverTpl, {
         TITLE: report.title.split('·')[0].trim() || report.title,
@@ -281,10 +324,11 @@ export async function exportReportToPptx(report: Report, existingImages?: Existi
 
       // If neither, put text content
       if (!hasSignals && !hasHighlights && section.content) {
+        const scheme = getActiveScheme();
         const textContent = truncate(section.content, 600);
         const lines = wrapText(textContent, 80).slice(0, 14);
         contentAreaSvg = lines.map((line, j) =>
-          `<text x="80" y="${190 + j * 28}" font-family="Arial, sans-serif" font-size="15" fill="#5D6D7E">${escXml(line)}</text>`
+          `<text x="80" y="${190 + j * 28}" font-family="Arial, sans-serif" font-size="15" fill="${scheme.fallbackText}">${escXml(line)}</text>`
         ).join('\n    ');
       }
 
@@ -307,7 +351,7 @@ export async function exportReportToPptx(report: Report, existingImages?: Existi
 
       // Insert actual content
       contentSvg = contentSvg.replace(CONTENT_MARKER,
-        contentAreaSvg || '<text x="640" y="400" text-anchor="middle" fill="#BDC3C7" font-family="Arial, sans-serif" font-size="16">—</text>'
+        contentAreaSvg || `<text x="640" y="400" text-anchor="middle" fill="${getActiveScheme().emptyFill}" font-family="Arial, sans-serif" font-size="16">—</text>`
       );
 
       fs.writeFileSync(path.join(svgOutputDir, `slide_${String(pageNum).padStart(3, '0')}.svg`), contentSvg);

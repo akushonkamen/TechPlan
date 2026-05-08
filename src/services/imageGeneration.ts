@@ -1,5 +1,11 @@
 import path from 'path';
 import fs from 'fs';
+import {
+  COVER_PROMPT_TEMPLATE,
+  IMAGE_STYLE_PARAMS,
+  PROMPT_LIMITS,
+  validateAndBuildPrompt,
+} from './imagePromptSchema.js';
 
 function loadServiceConfig() {
   try {
@@ -14,16 +20,6 @@ function loadServiceConfig() {
 const ZIMAGE_SERVER = process.env.ZIMAGE_SERVER_URL || loadServiceConfig().services?.zImageUrl || 'http://127.0.0.1:8000';
 const IMAGE_DIR = path.join(process.cwd(), 'generated_images');
 const TIMEOUT_MS = 300_000;
-
-const REPORT_TYPE_LABELS: Record<string, string> = {
-  daily: 'Daily',
-  weekly: 'Weekly',
-  monthly: 'Monthly',
-  quarterly: 'Quarterly',
-  tech_topic: 'Technology Topic',
-  competitor: 'Competitor Analysis',
-  alert: 'Alert',
-};
 
 export async function isServerOnline(): Promise<boolean> {
   try {
@@ -54,19 +50,27 @@ export async function generateCoverImage(
       return null;
     }
 
-    const typeLabel = REPORT_TYPE_LABELS[reportType] || 'Weekly';
-    const topicSnippet = (topicName || 'Technology').slice(0, 60);
-    const summarySnippet = (summary || '').slice(0, 120).replace(/[\n\r"]/g, ' ');
+    const topicSnippet = (topicName || 'Technology').slice(0, PROMPT_LIMITS.COVER_TOPIC_MAX);
+    const summarySnippet = (summary || '').slice(0, PROMPT_LIMITS.COVER_SUMMARY_MAX);
 
-    const prompt = `Professional infographic cover for a ${typeLabel} technology intelligence report about ${topicSnippet}. ${summarySnippet}. Abstract data visualization elements, network nodes and connections, blue and teal color scheme, dark gradient background, clean modern design, no text overlays, wide banner format.`;
+    const { valid, prompt, warnings } = validateAndBuildPrompt(
+      COVER_PROMPT_TEMPLATE,
+      { topic: topicSnippet, summary: summarySnippet },
+    );
+    if (warnings.length > 0) console.warn('[ImageGen] Cover prompt warnings:', warnings);
+    if (!valid) {
+      console.warn('[ImageGen] Cover prompt validation failed, skipping');
+      return null;
+    }
 
+    const style = IMAGE_STYLE_PARAMS.cover;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     const res = await fetch(`${ZIMAGE_SERVER}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, width: 1024, height: 512, steps: 8, seed: -1 }),
+      body: JSON.stringify({ prompt, width: style.width, height: style.height, steps: style.steps, seed: -1 }),
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -118,13 +122,14 @@ export async function generateSectionImage(
       return null;
     }
 
+    const style = IMAGE_STYLE_PARAMS.section;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     const res = await fetch(`${ZIMAGE_SERVER}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, width: 1024, height: 768, steps: 4, seed: -1 }),
+      body: JSON.stringify({ prompt, width: style.width, height: style.height, steps: style.steps, seed: -1 }),
       signal: controller.signal,
     });
     clearTimeout(timer);

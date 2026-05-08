@@ -578,9 +578,14 @@ async function runImageGenStep(
     const sections = normalizedContent.sections ?? [];
     const sectionCount = Math.min(sections.length, 6);
     onProgress?.(`[ImageGen] 开始生成章节图 (共 ${sectionCount} 张)...`);
+    const { SECTION_PROMPT_TEMPLATE, PROMPT_LIMITS, validateAndBuildPrompt } = await import('../services/imagePromptSchema.js');
     const tasks = sections.slice(0, 6).map((sec: any, i: number) => {
       const highlights = (sec.highlights ?? []).slice(0, 3).join('. ');
-      const prompt = `Professional infographic for "${sec.title}" section. ${(sec.thesis ?? '').slice(0, 100)} ${highlights}. Modern data visualization, blue-teal palette, dark background.`;
+      const { prompt } = validateAndBuildPrompt(SECTION_PROMPT_TEMPLATE, {
+        sectionTitle: (sec.title ?? '').slice(0, PROMPT_LIMITS.SECTION_TITLE_MAX),
+        thesis: (sec.thesis ?? '').slice(0, PROMPT_LIMITS.SECTION_THESIS_MAX),
+        highlights: highlights.slice(0, PROMPT_LIMITS.SECTION_HIGHLIGHTS_MAX),
+      });
       return generateSectionImage(prompt, reportId, `section_${i}`)
         .then(imgPath => {
           onProgress?.(`[ImageGen] 章节图 (${i + 1}/${sectionCount}) ${imgPath ? '完成' : '失败'}`);

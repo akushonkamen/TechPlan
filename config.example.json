@@ -4,5 +4,8 @@
   "services": {
     "zImageUrl": "http://127.0.0.1:8000",
     "pptMasterDir": ""
+  },
+  "ppt": {
+    "template": "eng_whiteboard"
   }
 }
