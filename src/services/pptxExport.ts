@@ -18,7 +18,7 @@ const PYTHON = process.env.PPTMASTER_PYTHON || path.join(PPTMASTER_DIR, '.venv',
 const IMAGE_DIR = path.join(process.cwd(), 'generated_images');
 function resolveTemplateDir(): string {
   const config = loadServiceConfig();
-  const templateName = config.ppt?.template || 'eng_whiteboard';
+  const templateName = config.ppt?.template || 'minimal_white';
   return path.join(PPTMASTER_DIR, 'skills', 'ppt-master', 'templates', 'layouts', templateName);
 }
 const TEMPLATE_DIR = resolveTemplateDir();
@@ -125,12 +125,27 @@ const COLOR_SCHEMES = {
       milestone: { bg: '#161B22', border: '#BC8CFF', dot: '#BC8CFF' },
     },
   },
+  minimal_white: {
+    bulletDot: '#1a1a2e',
+    bulletText: '#374151',
+    cardTitle: '#1a1a2e',
+    cardDesc: '#6b7280',
+    emptyFill: '#e5e7eb',
+    fallbackText: '#374151',
+    signalColors: {
+      trend: { bg: '#f9fafb', border: '#e5e7eb', dot: '#1a1a2e' },
+      breakthrough: { bg: '#f9fafb', border: '#e5e7eb', dot: '#1a1a2e' },
+      opportunity: { bg: '#f9fafb', border: '#e5e7eb', dot: '#1a1a2e' },
+      threat: { bg: '#f9fafb', border: '#e5e7eb', dot: '#1a1a2e' },
+      milestone: { bg: '#f9fafb', border: '#e5e7eb', dot: '#1a1a2e' },
+    },
+  },
 } as const;
 
 function getActiveScheme() {
   const config = loadServiceConfig();
-  const templateName = config.ppt?.template || 'eng_whiteboard';
-  return COLOR_SCHEMES[templateName as keyof typeof COLOR_SCHEMES] || COLOR_SCHEMES.eng_whiteboard;
+  const templateName = config.ppt?.template || 'minimal_white';
+  return COLOR_SCHEMES[templateName as keyof typeof COLOR_SCHEMES] || COLOR_SCHEMES.minimal_white;
 }
 
 function wrapText(text: string, maxChars: number): string[] {
@@ -270,88 +285,111 @@ export async function exportReportToPptx(report: Report, existingImages?: Existi
     if (sections.length > 0) {
       console.log('[PPTX] Creating TOC slide');
       const tocTpl = readTemplate('02_toc.svg');
-      const tocMap: Record<string, string> = { PAGE_NUM: String(pageNum) };
-      for (let i = 0; i < Math.min(6, sections.length); i++) {
-        tocMap[`TOC_ITEM_${i + 1}_TITLE`] = sections[i].title;
-        tocMap[`TOC_ITEM_${i + 1}_DESC`] = truncate(sections[i].thesis || '', 40);
+      const tocMap: Record<string, string> = {
+        PAGE_NUM: String(pageNum),
+        PROJECT_CODE: report.id.slice(0, 12).toUpperCase(),
+      };
+      for (let i = 0; i < Math.min(5, sections.length); i++) {
+        tocMap[`TOC_${i + 1}_TITLE`] = sections[i].title;
+        tocMap[`TOC_${i + 1}_DESC`] = truncate(sections[i].thesis || '', 50);
       }
       // Fill unused slots
-      for (let i = sections.length; i < 6; i++) {
-        tocMap[`TOC_ITEM_${i + 1}_TITLE`] = '';
-        tocMap[`TOC_ITEM_${i + 1}_DESC`] = '';
+      for (let i = sections.length; i < 5; i++) {
+        tocMap[`TOC_${i + 1}_TITLE`] = '';
+        tocMap[`TOC_${i + 1}_DESC`] = '';
       }
-      tocMap['KEY_FOCUS'] = truncate(content.executiveSummary?.overview || report.summary || '', 100);
       const tocSvg = replacePlaceholders(tocTpl, tocMap);
       fs.writeFileSync(path.join(svgOutputDir, `slide_${String(pageNum).padStart(3, '0')}.svg`), tocSvg);
       pageNum++;
     }
 
-    // ── Section slides ──
-    for (let i = 0; i < sections.length; i++) {
-      const section = sections[i];
+    // ── Content slides (merged sections) ──
+    // Merge multiple sections into fewer slides for higher content density
+    const maxContentSlides = 3;
+    const contentSlideCount = Math.min(sections.length, maxContentSlides);
+    const sectionsPerSlide = Math.ceil(sections.length / contentSlideCount);
 
-      // Chapter divider
-      console.log(`[PPTX] Chapter divider: ${section.title}`);
-      const chapterTpl = readTemplate('02_chapter.svg');
-      const chapterSvg = replacePlaceholders(chapterTpl, {
-        CHAPTER_NUM: String(i + 1).padStart(2, '0'),
-        CHAPTER_TITLE: section.title,
-        CHAPTER_DESC: truncate(section.thesis || '', 60),
-        PAGE_NUM: String(pageNum),
-        PROJECT_CODE: report.id.slice(0, 12).toUpperCase(),
-      });
-      fs.writeFileSync(path.join(svgOutputDir, `slide_${String(pageNum).padStart(3, '0')}.svg`), chapterSvg);
-      pageNum++;
+    for (let slideIdx = 0; slideIdx < contentSlideCount; slideIdx++) {
+      const startSec = slideIdx * sectionsPerSlide;
+      const endSec = Math.min(startSec + sectionsPerSlide, sections.length);
+      const slideSections = sections.slice(startSec, endSec);
 
-      // Content page
-      console.log(`[PPTX] Content page: ${section.title}`);
+      // Use first section's title as page title, or combined
+      const pageTitle = slideSections.length === 1
+        ? slideSections[0].title
+        : slideSections.map(s => s.title).join(' · ');
+
+      console.log(`[PPTX] Content slide ${slideIdx + 1}: ${slideSections.map(s => s.title).join(' + ')}`);
       const contentTpl = readTemplate('03_content.svg');
 
-      // Build content area
+      // Build merged content for all sections in this slide
+      const scheme = getActiveScheme();
       let contentAreaSvg = '';
-      const hasSignals = section.signals && section.signals.length > 0;
-      const hasHighlights = section.highlights && section.highlights.length > 0;
+      let y = 180;
 
-      if (hasSignals) {
-        // Signal cards layout
-        contentAreaSvg = buildSignalCards(section.signals!, 180);
+      for (let si = 0; si < slideSections.length; si++) {
+        const section = slideSections[si];
+
+        // Section header (skip for first section if only one)
+        if (slideSections.length > 1) {
+          contentAreaSvg += `<text x="70" y="${y}" font-family="Arial, sans-serif" font-size="17" font-weight="bold" fill="#1a1a2e">${escXml(section.title)}</text>\n`;
+          y += 6;
+          contentAreaSvg += `<rect x="70" y="${y}" width="1140" height="1" fill="#e5e7eb"/>\n`;
+          y += 18;
+        }
+
+        // Thesis
+        if (section.thesis) {
+          const thesisLines = wrapText(truncate(section.thesis, 120), 80).slice(0, 2);
+          for (const line of thesisLines) {
+            contentAreaSvg += `<text x="70" y="${y}" font-family="Arial, sans-serif" font-size="13" fill="#6b7280">${escXml(line)}</text>\n`;
+            y += 22;
+          }
+          y += 4;
+        }
+
+        // Highlights as bullets
+        if (section.highlights && section.highlights.length > 0) {
+          for (let hi = 0; hi < section.highlights.length && y < 600; hi++) {
+            const lines = wrapText(truncate(section.highlights[hi], 150), 75);
+            contentAreaSvg += `<circle cx="82" cy="${y - 4}" r="2.5" fill="${scheme.bulletDot}"/>\n`;
+            for (const line of lines) {
+              contentAreaSvg += `<text x="94" y="${y}" font-family="Arial, sans-serif" font-size="13" fill="${scheme.bulletText}">${escXml(line)}</text>\n`;
+              y += 20;
+            }
+            y += 6;
+          }
+        } else if (section.content) {
+          // Fallback: plain text
+          const textLines = wrapText(truncate(section.content, 400), 80).slice(0, 8);
+          for (const line of textLines) {
+            contentAreaSvg += `<text x="70" y="${y}" font-family="Arial, sans-serif" font-size="13" fill="${scheme.fallbackText}">${escXml(line)}</text>\n`;
+            y += 20;
+          }
+        }
+
+        // Separator between sections (except last)
+        if (si < slideSections.length - 1) {
+          y += 10;
+          contentAreaSvg += `<rect x="70" y="${y}" width="1140" height="1" fill="#e5e7eb"/>\n`;
+          y += 16;
+        }
       }
 
-      if (hasHighlights) {
-        const bulletStartY = hasSignals ? 440 : 180;
-        contentAreaSvg += (contentAreaSvg ? '\n    ' : '') + buildBulletContent(section.highlights!, bulletStartY, 1100);
-      }
-
-      // If neither, put text content
-      if (!hasSignals && !hasHighlights && section.content) {
-        const scheme = getActiveScheme();
-        const textContent = truncate(section.content, 600);
-        const lines = wrapText(textContent, 80).slice(0, 14);
-        contentAreaSvg = lines.map((line, j) =>
-          `<text x="80" y="${190 + j * 28}" font-family="Arial, sans-serif" font-size="15" fill="${scheme.fallbackText}">${escXml(line)}</text>`
-        ).join('\n    ');
-      }
-
-      // Replace content area placeholder BEFORE other replacements
-      // Use unique marker to avoid regex encoding issues with × etc.
+      // Replace content area placeholder
       const CONTENT_MARKER = '__TECHPLAN_CONTENT_AREA__';
       let contentSvg = contentTpl
         .replace(/<rect x="60" y="170"[\s\S]*?1160.{1,3}450 px\s*<\/text>/, CONTENT_MARKER);
 
-      // Replace remaining placeholders
       contentSvg = replacePlaceholders(contentSvg, {
-        SECTION_NUM: String(i + 1).padStart(2, '0'),
-        PAGE_TITLE: section.title,
-        SECTION_NAME: topicName,
-        KEY_MESSAGE: truncate(section.thesis || '', 70),
-        SOURCE: 'TechPlan Intelligence Platform',
-        NOTE: '',
+        PAGE_TITLE: pageTitle,
         PAGE_NUM: String(pageNum),
+        PROJECT_CODE: report.id.slice(0, 12).toUpperCase(),
+        SECTION_NAME: topicName,
       });
 
-      // Insert actual content
       contentSvg = contentSvg.replace(CONTENT_MARKER,
-        contentAreaSvg || `<text x="640" y="400" text-anchor="middle" fill="${getActiveScheme().emptyFill}" font-family="Arial, sans-serif" font-size="16">—</text>`
+        contentAreaSvg || `<text x="640" y="400" text-anchor="middle" fill="${scheme.emptyFill}" font-family="Arial, sans-serif" font-size="16">—</text>`
       );
 
       fs.writeFileSync(path.join(svgOutputDir, `slide_${String(pageNum).padStart(3, '0')}.svg`), contentSvg);

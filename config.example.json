@@ -6,6 +6,6 @@
     "pptMasterDir": ""
   },
   "ppt": {
-    "template": "eng_whiteboard"
+    "template": "minimal_white"
   }
 }
