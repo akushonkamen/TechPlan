@@ -3,7 +3,7 @@ version: "1.0.0"
 display_name: "技术情报日报"
 description: |
   快速感知每日变化，浅层扫描新增文档、事件和实体。
-  24小时数据范围，聚焦 breakthrough/milestone/alert 类信号，输出精简 JSON。
+  按参数时间范围，聚焦 breakthrough/milestone/alert 类信号，输出精简 JSON。
 category: reporting
 timeout: 300
 model: glm-5.1
@@ -32,7 +32,7 @@ params:
     required: false
     description: "时间范围结束日期（默认当前时间）"
 steps:
-  - "数据收集：查询 24h 内文档/实体/事件"
+  - "数据收集：查询时间范围内文档/实体/事件"
   - "信号识别：识别突破/里程碑/预警类信号"
   - "快速分析：简要判断影响程度"
   - "内容生成：输出精简日报 JSON"
@@ -52,11 +52,18 @@ steps:
 - 主题名称：{{topicName}}
 - 时间范围：{{timeRangeStart}} ~ {{timeRangeEnd}}
 
+## ⚠️ 时间范围硬性约束
+
+- 你的分析必须严格限制在 {{timeRangeStart}} ~ {{timeRangeEnd}} 时间范围内
+- 不要描述、分析或提及该时间范围之外的事件、趋势或变化
+- 数据查询已经按时间范围过滤，你只需要分析返回的数据
+- 标题、摘要和正文中不要假设具体的天数（如"24小时"），使用实际日期范围即可
+
 ---
 
 ## 第一阶段：数据收集
 
-使用 Bash 工具执行以下 Node.js 脚本查询 24 小时内数据：
+使用 Bash 工具执行以下 Node.js 脚本查询指定时间范围内数据：
 
 ```bash
 node -e "
@@ -67,7 +74,7 @@ const topicId = '{{topicId}}';
 const startDate = '{{timeRangeStart}}' || new Date().toISOString().split('T')[0] + 'T00:00:00';
 const endDate = '{{timeRangeEnd}}' || new Date().toISOString();
 
-// 1. 获取 24h 内文档
+// 1. 获取时间范围内文档
 const docs = db.prepare(\`
   SELECT id, title, source, published_date, substr(content, 1, 300) as excerpt
   FROM documents
@@ -78,7 +85,7 @@ const docs = db.prepare(\`
   LIMIT 50
 \`).all(topicId, startDate, endDate);
 
-// 2. 获取 24h 内实体（按提及次数排序）
+// 2. 获取时间范围内实体（按提及次数排序）
 const entities = db.prepare(\`
   SELECT e.text, e.type, e.confidence, COUNT(*) as mentions
   FROM entities e
@@ -91,7 +98,7 @@ const entities = db.prepare(\`
   LIMIT 20
 \`).all(topicId, startDate, endDate);
 
-// 3. 获取 24h 内事件
+// 3. 获取时间范围内事件
 const events = db.prepare(\`
   SELECT ev.type, ev.title, ev.description, ev.event_time, ev.participants
   FROM events ev
@@ -103,7 +110,7 @@ const events = db.prepare(\`
   LIMIT 30
 \`).all(topicId, startDate, endDate);
 
-// 4. 获取 24h 内高置信关系
+// 4. 获取时间范围内高置信关系
 const relations = db.prepare(\`
   SELECT r.source_text, r.relation, r.target_text, r.confidence
   FROM relations r
@@ -116,7 +123,7 @@ const relations = db.prepare(\`
   LIMIT 20
 \`).all(topicId, startDate, endDate);
 
-// 5. 获取 24h 内主张（负面/预警）
+// 5. 获取时间范围内主张（负面/预警）
 const claims = db.prepare(\`
   SELECT c.text, c.polarity, c.confidence, c.type
   FROM claims c
@@ -168,7 +175,7 @@ console.log(JSON.stringify({
 
 ## 第二阶段：信号识别
 
-基于收集到的 24h 数据，识别以下信号：
+基于收集到的数据，识别以下信号：
 
 ### 2a. 信号分类标准（日报精简版）
 
@@ -177,7 +184,7 @@ console.log(JSON.stringify({
 | breakthrough | 单次重大突破 | 高影响事件 + 权威来源 + 独特性 |
 | milestone | 技术进展节点 | 量产/发布/合作等关键事件 |
 | alert | 预警信号 | 负面主张 + 风险事件 + 竞争威胁 |
-| trend | 24h 内热点 | 3+ 次提及的同一实体/主题 |
+| trend | 时间范围内热点 | 3+ 次提及的同一实体/主题 |
 
 ### 2b. 快速影响判断
 
@@ -204,9 +211,9 @@ console.log(JSON.stringify({
 
 ### 3b. 热点识别
 
-- **新增热点**：24h 内首次出现的高频实体
+- **新增热点**：时间范围内首次出现的高频实体
 - **持续热点**：之前已存在但持续活跃的实体
-- **冷点**：之前活跃但 24h 内无动静的实体
+- **冷点**：之前活跃但时间范围内无动静的实体
 
 ### 3c. 置信度判断
 
@@ -223,7 +230,7 @@ console.log(JSON.stringify({
 ```json
 {
   "title": "{{topicName}} 技术情报日报 · {{timeRangeStart}} ~ {{timeRangeEnd}}",
-  "summary": "核心摘要（100字内）：24h内最关键的1-2个变化",
+  "summary": "核心摘要（100字内）：本期最关键的1-2个变化",
   "content": {
     "version": "2.0",
     "meta": {
@@ -244,7 +251,7 @@ console.log(JSON.stringify({
       "confidence": "high|medium|low"
     },
     "executiveSummary": {
-      "overview": "1-2 段核心判断，24h 内最关键的变化（100字内）",
+      "overview": "1-2 段核心判断，时间范围内最关键的变化（100字内）",
       "keyPoints": [
         {
           "point": "关键更新摘要",
@@ -258,7 +265,7 @@ console.log(JSON.stringify({
       {
         "id": "key_updates",
         "title": "关键动态",
-        "thesis": "一句话总结今日核心变化",
+        "thesis": "一句话总结本期核心变化",
         "content": "Markdown 格式的关键更新详细分析（200-400 字），按 significance 从高到低排列",
         "highlights": ["要点1（breakthrough/milestone/alert/trend 类型）", "要点2"],
         "signals": [
@@ -274,7 +281,7 @@ console.log(JSON.stringify({
       {
         "id": "data_highlights",
         "title": "数据亮点",
-        "thesis": "今日数据变化概述",
+        "thesis": "本期数据变化概述",
         "content": "Markdown 格式的新增文档、活跃实体、事件时间线分析",
         "highlights": ["新增文档要点", "活跃实体要点", "事件密度要点"],
         "signals": [],
@@ -366,7 +373,7 @@ console.log(JSON.stringify({
 
 ### 80/20 信号优先排序（日报聚焦）
 
-日报时间窗口仅 24 小时，必须用 80/20 法则聚焦高价值信号：
+日报时间窗口有限，必须用 80/20 法则聚焦高价值信号：
 - **20% 关键信号**：breakthrough（技术突破）、milestone（里程碑）、alert（预警）—— 优先处理
 - **80% 噪声信号**：常规报道、低影响 trend、已知信息的重复 —— 简要提及或忽略
 - **实操规则**：`keyUpdates` 中最多 5 条，按 significance（高→低）排序；如果当日超过 5 个重要信号，只保留影响最大的 5 个
@@ -374,7 +381,7 @@ console.log(JSON.stringify({
 
 ### 假设驱动快速分诊（信号分类）
 
-对 24h 内出现的新信号，快速形成假设并验证：
+对时间范围内出现的新信号，快速形成假设并验证：
 1. **形成假设**：看到异常数据点 → 30 秒内形成可证伪假设
    - 示例：某实体提及频率突增 → 假设"该组织可能有重大动作"
 2. **快速验证**：查 events/claims 是否有佐证
@@ -386,7 +393,7 @@ console.log(JSON.stringify({
 
 确保 `keyUpdates` 中的信号互斥完备：
 - **互斥**：不同 keyUpdate 不指向同一事件的不同侧面（如"X 发布新产品"和"X 产品线扩展"应合并）
-- **完备**：24h 内的 breakthrough、milestone、高风险 alert 不应遗漏
+- **完备**：时间范围内的 breakthrough、milestone、高风险 alert 不应遗漏
 - **分类矩阵**：
   | 维度 | 包含 | 排除（归 dataHighlights） |
   |------|------|--------------------------|
@@ -398,17 +405,17 @@ console.log(JSON.stringify({
 
 ## 数据不足时的处理
 
-如果 24h 内数据极少：
+如果时间范围内数据极少：
 
 ```json
 {
-  "summary": "今日数据采集量较少，暂未检测到重大变化。建议关注以下领域...",
+  "summary": "本期数据采集量较少，暂未检测到重大变化。建议关注以下领域...",
   "content": {
     "keyUpdates": [
       {
         "type": "trend",
         "title": "数据监测中",
-        "summary": "今日暂无重大更新，系统持续监测中",
+        "summary": "本期暂无重大更新，系统持续监测中",
         "significance": "低",
         "source": "系统",
         "timestamp": "..."
@@ -416,7 +423,7 @@ console.log(JSON.stringify({
     ]
   },
   "metadata": {
-    "dataGaps": ["24h 内文档数量 < 5 篇", "建议检查数据源配置"]
+    "dataGaps": ["时间范围内文档数量不足", "建议检查数据源配置"]
   }
 }
 ```

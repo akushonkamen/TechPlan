@@ -68,7 +68,7 @@ steps:
 
 解析 keywords 和 organizations，生成**成对查询**（关键词独立 + 关键词×组织组合）。
 
-**时间范围约束**：如果 timeRangeStart/timeRangeEnd 已提供，所有搜索查询必须包含时间限定（如 `after:{{timeRangeStart}} before:{{timeRangeEnd}}`）。未提供时使用当前年份。
+**硬性时间约束**：timeRangeStart/timeRangeEnd 已提供时，所有搜索查询必须包含时间限定（如 `after:{{timeRangeStart}} before:{{timeRangeEnd}}`）。超出时间范围的搜索结果在存储前必须丢弃。未提供时使用当前年份。
 
 对每个关键词和关注组织，搜索以下维度：
 
@@ -100,6 +100,8 @@ steps:
 ### 4. 质量控制
 
 对每篇文档在存入前执行：
+
+**时间范围过滤**（最优先）：如果 timeRangeStart/timeRangeEnd 已提供，过滤掉 published_date 不在该范围内的文档，即使内容质量很高也不要存储。如果时间范围为空则跳过此过滤。
 
 **时效性分层**（写入 metadata.recency_tier）：
 - `breaking`: 30 天内
