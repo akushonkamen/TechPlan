@@ -1,12 +1,13 @@
-[English](readme-zh.md)
+[中文](README-zh.md)
 
 <div align="center">
 
 # TechPlan
 
-**技术情报与推理平台**
+**Technology Intelligence & Reasoning Platform**
 
-智能技术情报采集、知识图谱构建与分析报告生成
+End-to-end intelligence platform: from data collection, knowledge extraction, graph construction to analytical reports.
+Three-phase pipeline. Markdown skill engine. Real-time WebSocket push.
 
 [![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-green.svg)](https://nodejs.org)
@@ -16,96 +17,127 @@
 
 ---
 
-## 功能特性
+## Why TechPlan
 
-### 仪表盘
+Tech teams face an overwhelming volume of daily technical updates. Manual tracking is slow and misses critical signals.
 
-实时展示系统运行状态，包含活跃主题数、周采集文档数、待审核项和预警数等统计卡片，趋势折线图展示采集量变化，柱状图展示主题证据分布，底部活动流实时更新。
-
-### 主题管理
-
-创建和管理技术追踪主题，每个主题可配置关键词、优先级、采集范围和采集频率（每日/每周/每月）。支持文档列表查看和文件上传分析。
-
-### 知识图谱
-
-基于 SVG 的自定义图谱可视化，支持聚焦、时间线、网格三种布局模式，节点/边搜索高亮，LLM 驱动的图谱智能聚类分析，可导出 JSON 格式数据。
-
-### 决策支持
-
-多维度评分卡对技术方案进行量化评估，支持竞品组织追踪、场景建模和影响分析，提供基于证据的决策建议。
-
-### 分析报告
-
-自动生成多种类型报告：
-- **日报** — 每日技术动态摘要
-- **周报** — 一周技术趋势总结
-- **月报** — 月度技术发展回顾
-- **季报** — 季度技术战略分析
-- **专题报告** — 深度技术主题分析
-- **竞品报告** — 竞争对手动态追踪
-- **预警报告** — 异常信号和风险提醒
-
-### 技能系统
-
-基于 Markdown 的可扩展技能引擎，技能定义为 `.md` 文件 + YAML frontmatter，支持参数模板渲染。核心三阶段流水线：
-
-```
-research（情报采集）→ extract（知识抽取）→ sync-graph（图谱同步）
-```
-
-内置 12 个技能：情报采集、知识抽取、图谱同步、模型优化、竞品追踪，以及 7 种报告生成技能。
-
-### 定时调度
-
-按主题配置的采集频率自动触发采集和报告生成，支持 5-1440 分钟自定义检查间隔，可视化展示待触发主题和最近触发记录。
-
-### 审核台
-
-对低置信度的抽取结果（实体、关系、声明、事件）进行人工复核，支持批量通过/拒绝，保障数据质量。
+| Pain Point | Traditional Approach | TechPlan Solution |
+| ---- | -------- | ------------- |
+| Tech updates scattered across dozens of sources | Manual browsing, screenshots, Excel sheets | AI-driven auto-collection, aggregated by topic |
+| Fragmented information, no visible connections | Individual memory, knowledge lost with staff | Knowledge graph auto-builds entity relationships & evidence chains |
+| Periodic reports compiled manually | Rushing weekly reports on Friday afternoon | Scheduled auto-generation of daily/weekly/monthly/quarterly reports |
+| New tech decisions lack quantitative assessment | Decisions based on gut feeling | Multi-dimensional scorecards + evidence-based recommendations |
 
 ---
 
-## 一键安装
+## Core Architecture
 
-提供跨平台一键安装脚本，自动检测并安装 Node.js 18+、Claude Code CLI，完成依赖安装和项目构建。
+### Three-Phase Intelligence Pipeline
 
-### macOS / Linux
+```
+  ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+  │  ① research      │     │  ② extract      │     │  ③ sync-graph   │
+  │  Collection      │────▶│  Extraction      │────▶│  Graph Sync     │
+  │                  │     │                  │     │                  │
+  │  Multi-source    │     │  Entity / Rel    │     │  SQLite → Kuzu   │
+  │  scanning        │     │  Claim / Event   │     │  Node + Edge     │
+  └─────────────────┘     └─────────────────┘     └─────────────────┘
+```
+
+### Report Generation Pipeline
+
+```
+  Scheduler / Manual Trigger
+       │
+       ▼
+  ┌──────────┐     ┌──────────┐     ┌──────────┐
+  │  Collect  │────▶│  AI      │────▶│  Generate │
+  │  Data     │     │  Analyze │     │  Report   │
+  │  Window   │     │  Trends  │     │  Markdown │
+  └──────────┘     └──────────┘     └──────────┘
+```
+
+### Real-time Communication
+
+```
+  Browser ──── WebSocket ────┐
+                              ▼
+  ┌─ Express Server ──────────────────────────┐
+  │  Skill Executor (Claude CLI, stream-json) │
+  │       │                                   │
+  │       ▼ progress / tool_use / tool_result │
+  │  WebSocket Broadcast ──▶ All subscribers  │
+  └───────────────────────────────────────────┘
+```
+
+---
+
+## Features
+
+### Dashboard
+
+Real-time stat cards (active topics, weekly documents, pending reviews, alerts), trend charts for collection volume, bar charts for topic evidence distribution, and a live activity feed.
+
+### Topic Management
+
+Create and track technology topics with configurable keywords, priority, scope, and collection frequency (daily/weekly/monthly). Document listing and file upload analysis supported.
+
+### Knowledge Graph
+
+Custom SVG graph with focus, timeline, and grid layouts. Node/edge search with highlighting, LLM-driven clustering analysis, JSON export.
+
+### Analytical Reports
+
+Auto-generate 7 report types: daily, weekly, monthly, quarterly, special topics, competitor tracking, and alert reports. Each topic can have its own report schedule.
+
+### Decision Support
+
+Multi-dimensional scorecards for quantitative tech evaluation. Competitor tracking, scenario modeling, impact analysis, and evidence-based recommendations.
+
+### Skill System
+
+Markdown-based extensible skill engine. Skills defined as `.md` files with YAML frontmatter and parameter templates. 12 built-in skills covering collection, extraction, graph sync, and report generation.
+
+### Review Console
+
+Manual review for low-confidence extractions (entities, relations, claims, events). Batch approve/reject to ensure data quality.
+
+---
+
+## Quick Start
+
+<details>
+<summary><strong>One-Click Install (Recommended)</strong></summary>
+
+Cross-platform scripts auto-detect and install Node.js 18+, Claude Code CLI, dependencies, and build the project.
+
+**macOS / Linux:**
 
 ```bash
 bash setup.sh
 ```
 
-脚本会自动：
-1. 检测操作系统
-2. 检查/安装 Node.js 18+（Homebrew 或 nvm）
-3. 检查/安装 Claude Code CLI
-4. 安装依赖并构建项目
-5. 引导 Claude Code 认证
-
-### Windows
-
-以管理员身份打开 PowerShell：
+**Windows (Admin PowerShell):**
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\setup.ps1
 ```
 
-脚本会自动通过 winget 或 MSI 安装 Node.js，其余流程与 Linux 版一致。
+</details>
 
----
+<details>
+<summary><strong>Manual Install</strong></summary>
 
-## 手动安装
+**Requirements:**
 
-### 环境要求
-
-| 依赖 | 版本 | 检查命令 |
-|-----|------|---------|
+| Dependency | Version | Check |
+| ---- | ---- | ---- |
 | Node.js | >= 18.0.0 | `node --version` |
 | npm | >= 9.0.0 | `npm --version` |
 | Git | >= 2.0.0 | `git --version` |
 
-### 安装步骤
+**Install:**
 
 ```bash
 git clone https://github.com/akushonkamen/TechPlan.git
@@ -113,123 +145,117 @@ cd TechPlan
 npm install
 ```
 
-### 配置
+</details>
 
-创建 `config.json`：
+<details>
+<summary><strong>Configuration</strong></summary>
+
+Create `config.json`:
 
 ```json
 {
-  "aiProvider": "openai",
-  "openaiApiKey": "your-api-key",
-  "openaiBaseUrl": "https://api.openai.com/v1",
-  "openaiModel": "gpt-4o-mini"
+  "schedulerEnabled": false,
+  "services": {
+    "zImageUrl": "http://127.0.0.1:8000"
+  }
 }
 ```
 
-或使用环境变量：
+Or use environment variables:
+
+| Variable | Default | Description |
+| ---- | ------ | ----------- |
+| `PORT` | `3000` | Server port |
+| `ADMIN_TOKEN` | — | Admin auth token |
+| `MAX_UPLOAD_SIZE_MB` | `10` | File upload size limit |
+
+</details>
+
+**Start:**
 
 ```bash
-OPENAI_API_KEY=your-api-key
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o-mini
-```
-
-### 启动
-
-```bash
-# 开发模式（热重载）
+# Development (hot reload)
 npm run dev
 
-# 生产模式
+# Production
 npm run build && npm start
 ```
 
-启动成功后访问 **http://localhost:3000**
+Visit **http://localhost:3000** after startup.
 
 ---
 
-## AI 服务配置
+## Tech Stack
 
-| 提供商 | 配置项 | 说明 |
-|-------|-------|------|
-| **OpenAI** | `openaiApiKey`, `openaiBaseUrl`, `openaiModel` | OpenAI API 或兼容服务 |
-| **自定义** | `customApiKey`, `customBaseUrl`, `customModel` | 任意兼容 OpenAI API 的服务 |
-
----
-
-## 技术栈
-
-| 层级 | 技术 |
-|-----|------|
-| 前端 | React 19, TypeScript, Vite, Tailwind CSS v4 |
-| 后端 | Express, Node.js |
-| 数据库 | SQLite（主存储）, Kuzu（本地图缓存） |
-| AI | Claude CLI + stream-json 输出 |
-| 实时通信 | WebSocket (ws) |
-| 图表 | Recharts |
-| 图谱 | 自定义 SVG 画布 |
+| Layer | Technology |
+| ---- | ---------- |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4 |
+| Backend | Express, Node.js |
+| Database | SQLite (primary), Kuzu (local graph cache) |
+| AI | Claude CLI + stream-json output |
+| Real-time | WebSocket (ws) |
+| Charts | Recharts |
+| Graph | Custom SVG canvas |
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
 TechPlan/
-├── server.ts              # Express 后端服务
-├── setup.sh               # macOS/Linux 一键安装脚本
-├── setup.ps1              # Windows 一键安装脚本
-├── config.json            # 配置文件（需创建）
-├── database.sqlite        # SQLite 数据库（自动生成）
+├── server.ts              # Express backend
+├── setup.sh / setup.ps1   # One-click install scripts
+├── config.json            # Configuration
+├── database.sqlite        # SQLite DB (auto-generated)
 ├── src/
-│   ├── App.tsx            # React 入口
-│   ├── main.tsx           # 渲染根节点
-│   ├── components/        # UI 组件
-│   ├── pages/             # 页面组件
-│   ├── services/          # API 服务
-│   ├── hooks/             # 自定义 Hooks
-│   ├── db/                # 数据库客户端
-│   ├── skillExecutor.ts   # Claude CLI 执行引擎
-│   ├── skillRegistry.ts   # 技能加载器
-│   ├── scheduler.ts       # 报告调度器
-│   └── websocket.ts       # 实时更新
-├── .claude/skills/        # Markdown 技能定义（12 个内置技能）
-└── public/                # 静态资源
+│   ├── App.tsx            # React entry
+│   ├── main.tsx           # Render root
+│   ├── components/        # UI components
+│   ├── pages/             # Page components
+│   ├── services/          # API services
+│   ├── hooks/             # Custom Hooks
+│   ├── schemas/           # Validation schemas
+│   ├── db/                # Database client
+│   ├── skillExecutor.ts   # Claude CLI execution engine
+│   ├── skillRegistry.ts   # Markdown skill loader
+│   ├── scheduler.ts       # Report scheduler
+│   └── websocket.ts       # WebSocket real-time updates
+├── .claude/skills/        # Markdown skill definitions (12 built-in)
+└── public/                # Static assets
 ```
 
----
+### Routes
 
-## 页面路由
-
-| 路由 | 页面 | 说明 |
-|-----|------|------|
-| `/` | 仪表盘 | 统计概览与趋势 |
-| `/topics` | 主题管理 | 创建/编辑/采集 |
-| `/graph` | 知识图谱 | 图谱可视化与分析 |
-| `/reports` | 分析报告 | 查看/生成报告 |
-| `/review` | 审核台 | 人工复核抽取结果 |
-| `/decision` | 决策支持 | 评分卡与建议 |
-| `/settings` | 系统设置 | AI/图数据库/技能/调度配置 |
-| `/tasks` | 任务中心 | 执行监控与历史 |
+| Route | Page | Description |
+| ---- | ---- | ----------- |
+| `/` | Dashboard | Stats overview & trends |
+| `/topics` | Topics | Create / edit / collect |
+| `/graph` | Knowledge Graph | Visualization & analysis |
+| `/reports` | Reports | View / generate reports |
+| `/review` | Review Console | Manual review of extractions |
+| `/decision` | Decision Support | Scorecards & recommendations |
+| `/settings` | Settings | AI / graph / skills / scheduler config |
+| `/tasks` | Tasks | Execution monitoring & history |
 
 ---
 
-## 常见问题
+## FAQ
 
-**Q: 启动时提示"未配置 API Key"**
+**Q: "API Key not configured" on startup**
 
-创建 `config.json` 并填入有效的 API Key。
+Create `config.json` with a valid API Key.
 
-**Q: 端口 3000 被占用**
+**Q: Port 3000 in use**
 
 ```bash
 lsof -ti:3000 | xargs kill -9
-# 或使用其他端口
+# Or use a different port
 PORT=3001 npm run dev
 ```
 
-**Q: 图谱没有数据**
+**Q: Graph has no data**
 
-先对主题执行采集（research → extract → sync-graph），或手动触发同步：
+Run the collection pipeline first (research → extract → sync-graph), or manually sync:
 
 ```bash
 curl -X POST http://localhost:3000/api/graph/sync/<topicId>
@@ -237,15 +263,15 @@ curl -X POST http://localhost:3000/api/graph/sync/<topicId>
 
 ---
 
-## 开源协议
+## License
 
-本项目采用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 协议。
+This project is licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
 
-**你可以自由地：**
-- 共享 — 在任何媒介以任何形式复制、发行本作品
-- 改编 — 修改、转换或以本作品为基础进行创作
+**You are free to:**
+- Share — copy and redistribute the material in any medium or format
+- Adapt — remix, transform, and build upon the material
 
-**须遵守下列条件：**
-- **署名** — 必须给出适当的版权声明
-- **非商业性使用** — 不得将本作品用于商业目的
-- **相同方式共享** — 再创作须采用相同的协议
+**Under the following terms:**
+- **Attribution** — Give appropriate credit
+- **NonCommercial** — Not for commercial purposes
+- **ShareAlike** — Distribute adaptations under the same license
