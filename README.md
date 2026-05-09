@@ -7,7 +7,7 @@
 **Technology Intelligence & Reasoning Platform**
 
 End-to-end intelligence platform: from data collection, knowledge extraction, graph construction to analytical reports.
-Three-phase pipeline. Markdown skill engine. Real-time WebSocket push.
+Six-step smart pipeline. Markdown skill engine. Real-time WebSocket push.
 
 [![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-green.svg)](https://nodejs.org)
@@ -25,37 +25,27 @@ Tech teams face an overwhelming volume of daily technical updates. Manual tracki
 | ---- | -------- | ------------- |
 | Tech updates scattered across dozens of sources | Manual browsing, screenshots, Excel sheets | AI-driven auto-collection, aggregated by topic |
 | Fragmented information, no visible connections | Individual memory, knowledge lost with staff | Knowledge graph auto-builds entity relationships & evidence chains |
-| Periodic reports compiled manually | Rushing weekly reports on Friday afternoon | Scheduled auto-generation of daily/weekly/monthly/quarterly reports |
-| New tech decisions lack quantitative assessment | Decisions based on gut feeling | Multi-dimensional scorecards + evidence-based recommendations |
+| Periodic reports compiled manually | Rushing weekly reports on Friday afternoon | Scheduled auto-generation of 7 report types |
+| New tech decisions lack quantitative assessment | Decisions based on gut feeling | 10-dimension scorecards + evidence-based recommendations |
 
 ---
 
 ## Core Architecture
 
-### Three-Phase Intelligence Pipeline
+### Report Generation Pipeline (Six Steps)
 
 ```
-  ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-  │  ① research      │     │  ② extract      │     │  ③ sync-graph   │
-  │  Collection      │────▶│  Extraction      │────▶│  Graph Sync     │
-  │                  │     │                  │     │                  │
-  │  Multi-source    │     │  Entity / Rel    │     │  SQLite → Kuzu   │
-  │  scanning        │     │  Claim / Event   │     │  Node + Edge     │
-  └─────────────────┘     └─────────────────┘     └─────────────────┘
+  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
+  │ ①research │──▶│ ②extract │──▶│③sync-graph│──▶│ ④report  │──▶│⑤image-gen│──▶│ ⑥pptx   │
+  │ Collection│   │ Extraction│   │ Graph Sync│   │ AI Report │   │ Cover+Fig│   │ PPT Export│
+  └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘
+        │              │              │              │              │              │
+        └── skip when data exists ──┘              │              └── Z-Image ──┘
+                                                   │
+                              Skip ①②③ when data exists ──┘
 ```
 
-### Report Generation Pipeline
-
-```
-  Scheduler / Manual Trigger
-       │
-       ▼
-  ┌──────────┐     ┌──────────┐     ┌──────────┐
-  │  Collect  │────▶│  AI      │────▶│  Generate │
-  │  Data     │     │  Analyze │     │  Report   │
-  │  Window   │     │  Trends  │     │  Markdown │
-  └──────────┘     └──────────┘     └──────────┘
-```
+Each step supports conditional skipping: skip collection when data is sufficient, skip extraction when entities exist, skip graph sync when extraction was skipped.
 
 ### Real-time Communication
 
@@ -65,8 +55,13 @@ Tech teams face an overwhelming volume of daily technical updates. Manual tracki
   ┌─ Express Server ──────────────────────────┐
   │  Skill Executor (Claude CLI, stream-json) │
   │       │                                   │
-  │       ▼ progress / tool_use / tool_result │
-  │  WebSocket Broadcast ──▶ All subscribers  │
+  │       ▼ internal stream-json events       │
+  │       │  tool_use → human-readable text   │
+  │       │  tool_result → result summary     │
+  │       ▼                                   │
+  │  WebSocket Broadcast (progress/result/error)│
+  │       └──▶ all clients subscribed to       │
+  │            the same executionId            │
   └───────────────────────────────────────────┘
 ```
 
@@ -76,31 +71,31 @@ Tech teams face an overwhelming volume of daily technical updates. Manual tracki
 
 ### Dashboard
 
-Real-time stat cards (active topics, weekly documents, pending reviews, alerts), trend charts for collection volume, bar charts for topic evidence distribution, and a live activity feed.
+Real-time stat cards (active topics, weekly documents, pending reviews, alerts), area chart for collection trends, bar chart for topic evidence distribution. Intelligence highlights panel showing predicted associations, anomalous entities, and core entities. Trend signals panel displaying document change rates per topic. Smart alert area for real-time alert reports.
 
 ### Topic Management
 
-Create and track technology topics with configurable keywords, priority, scope, and collection frequency (daily/weekly/monthly). Document listing and file upload analysis supported.
+Create and track technology topics with configurable keywords, priority, scope, and collection frequency (daily/weekly/monthly). Document listing and file upload analysis. Each topic can have independent report scheduling (daily/weekly/monthly/quarterly toggles).
 
 ### Knowledge Graph
 
-Custom SVG graph with focus, timeline, and grid layouts. Node/edge search with highlighting, LLM-driven clustering analysis, JSON export.
+Custom SVG graph with 7 layout modes: terrain (default, LLM semantic clustering), focus, timeline, grid, radar, matrix, and bundle. Node/edge search with highlighting. 6 analysis dimensions (statistics, paths, centrality, community, prediction, anomaly). JSON and SVG export supported.
 
 ### Analytical Reports
 
-Auto-generate 7 report types: daily, weekly, monthly, quarterly, special topics, competitor tracking, and alert reports. Each topic can have its own report schedule.
+Auto-generate 7 report types: daily, weekly, monthly, quarterly, tech topic, competitor, and alert. Reports support cover image generation (Z-Image service) and PPT export. Built-in freshness mechanism auto-marks stale reports. Select text fragments for AI-powered deep discussion, with results pinnable back to report sections.
 
 ### Decision Support
 
-Multi-dimensional scorecards for quantitative tech evaluation. Competitor tracking, scenario modeling, impact analysis, and evidence-based recommendations.
+10-dimension scorecards for quantitative tech evaluation (tech maturity, academic traction, industrialization speed, competitive density, etc.). Competitor tracking support. Evidence-based recommendations (continue tracking / small pilot / major investment, etc.).
 
 ### Skill System
 
-Markdown-based extensible skill engine. Skills defined as `.md` files with YAML frontmatter and parameter templates. 12 built-in skills covering collection, extraction, graph sync, and report generation.
+Markdown-based extensible skill engine. Skills defined as `.md` files with YAML frontmatter and parameter templates. 13 built-in skills covering collection, extraction, graph sync, report generation, optimization, competitor tracking, and discussion expansion.
 
 ### Review Console
 
-Manual review for low-confidence extractions (entities, relations, claims, events). Batch approve/reject to ensure data quality.
+Manual review for low-confidence extractions across three review task types: claim review, entity disambiguation, and conflict detection. Batch approve supported to ensure data quality.
 
 ---
 
@@ -114,14 +109,14 @@ Cross-platform scripts auto-detect and install Node.js 18+, Claude Code CLI, dep
 **macOS / Linux:**
 
 ```bash
-bash setup.sh
+bash scripts/setup.sh
 ```
 
 **Windows (Admin PowerShell):**
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force
-.\setup.ps1
+.\scripts\setup.ps1
 ```
 
 </details>
@@ -155,8 +150,14 @@ Create `config.json`:
 ```json
 {
   "schedulerEnabled": false,
+  "schedulerCheckIntervalMinutes": 30,
+  "aiProvider": "openai",
+  "openaiApiKey": "your-api-key",
+  "openaiBaseUrl": "https://api.openai.com/v1",
+  "openaiModel": "gpt-4o-mini",
   "services": {
-    "zImageUrl": "http://127.0.0.1:8000"
+    "zImageUrl": "http://127.0.0.1:8000",
+    "pptMasterDir": ""
   }
 }
 ```
@@ -168,6 +169,10 @@ Or use environment variables:
 | `PORT` | `3000` | Server port |
 | `ADMIN_TOKEN` | — | Admin auth token |
 | `MAX_UPLOAD_SIZE_MB` | `10` | File upload size limit |
+| `OPENAI_API_KEY` | — | AI service API key |
+| `OPENAI_BASE_URL` | — | AI service API base URL |
+| `OPENAI_MODEL` | — | AI model name |
+| `SCHEDULER_ENABLED` | `true` | Enable/disable scheduled tasks |
 
 </details>
 
@@ -191,11 +196,13 @@ Visit **http://localhost:3000** after startup.
 | ---- | ---------- |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS v4 |
 | Backend | Express, Node.js |
-| Database | SQLite (primary), Kuzu (local graph cache) |
+| Database | SQLite (primary), Kuzu (local graph cache, SQLite auto-fallback) |
 | AI | Claude CLI + stream-json output |
 | Real-time | WebSocket (ws) |
-| Charts | Recharts |
+| Charts | Recharts 3 |
 | Graph | Custom SVG canvas |
+| Image Generation | Z-Image (local deployment) |
+| Document Export | PPTX (ppt-master) |
 
 ---
 
@@ -203,37 +210,49 @@ Visit **http://localhost:3000** after startup.
 
 ```
 TechPlan/
-├── server.ts              # Express backend
-├── setup.sh / setup.ps1   # One-click install scripts
-├── config.json            # Configuration
-├── database.sqlite        # SQLite DB (auto-generated)
 ├── src/
-│   ├── App.tsx            # React entry
-│   ├── main.tsx           # Render root
-│   ├── components/        # UI components
-│   ├── pages/             # Page components
-│   ├── services/          # API services
-│   ├── hooks/             # Custom Hooks
-│   ├── schemas/           # Validation schemas
-│   ├── db/                # Database client
-│   ├── skillExecutor.ts   # Claude CLI execution engine
-│   ├── skillRegistry.ts   # Markdown skill loader
-│   ├── scheduler.ts       # Report scheduler
-│   └── websocket.ts       # WebSocket real-time updates
-├── .claude/skills/        # Markdown skill definitions (12 built-in)
-└── public/                # Static assets
+│   ├── App.tsx                # React entry + route definitions
+│   ├── main.tsx               # Render root
+│   ├── components/            # Shared UI components
+│   ├── pages/                 # Page components (8)
+│   ├── services/              # Service layer
+│   │   ├── imageGeneration.ts # Z-Image cover/figure generation
+│   │   ├── imagePromptSchema.ts # Image prompt validation
+│   │   ├── pptxExport.ts      # PPTX export
+│   │   ├── reportService.ts   # Report migration helpers
+│   │   └── topicService.ts    # Topic API
+│   ├── hooks/                 # Custom Hooks
+│   ├── schemas/               # Validation schemas
+│   ├── lib/                   # Utilities (layout, graph analysis, design system)
+│   ├── types/                 # Type definition modules
+│   ├── db/                    # Database client (Kuzu)
+│   ├── server/                # Backend services
+│   │   ├── index.ts           # Express entry
+│   │   ├── reportHandler.ts   # Report pipeline orchestration (6 steps)
+│   │   ├── db.ts              # SQLite connection
+│   │   ├── middleware.ts      # Auth & config middleware
+│   │   └── routes/            # API routes (skills, reports, topics, graph, dashboard, reviews, config)
+│   ├── skillExecutor.ts       # Claude CLI execution engine (stream-json)
+│   ├── skillRegistry.ts       # Markdown skill loader
+│   ├── scheduler.ts           # Report scheduling + alert detection
+│   └── websocket.ts           # WebSocket real-time push
+├── scripts/                   # Install & startup scripts
+│   ├── setup.sh               # macOS/Linux one-click install
+│   └── setup.ps1              # Windows one-click install
+├── .claude/skills/            # Markdown skill definitions (13 built-in skills)
+└── public/                    # Static assets
 ```
 
 ### Routes
 
 | Route | Page | Description |
 | ---- | ---- | ----------- |
-| `/` | Dashboard | Stats overview & trends |
-| `/topics` | Topics | Create / edit / collect |
-| `/graph` | Knowledge Graph | Visualization & analysis |
-| `/reports` | Reports | View / generate reports |
-| `/review` | Review Console | Manual review of extractions |
-| `/decision` | Decision Support | Scorecards & recommendations |
+| `/` | Dashboard | Stats overview, intelligence highlights, trend signals, alerts |
+| `/topics` | Topics | Create / edit / collect / schedule config |
+| `/graph` | Knowledge Graph | 7 layout visualizations + 6-dimension analysis |
+| `/reports` | Reports | View / generate / PPT export / expand discussion |
+| `/review` | Review Console | Claim review / entity disambiguation / conflict detection |
+| `/decision` | Decision Support | 10-dimension scorecard + competitor tracking |
 | `/settings` | Settings | AI / graph / skills / scheduler config |
 | `/tasks` | Tasks | Execution monitoring & history |
 
@@ -243,7 +262,7 @@ TechPlan/
 
 **Q: "API Key not configured" on startup**
 
-Create `config.json` with a valid API Key.
+Set `openaiApiKey` in `config.json`, or set the `OPENAI_API_KEY` environment variable.
 
 **Q: Port 3000 in use**
 
@@ -260,6 +279,10 @@ Run the collection pipeline first (research → extract → sync-graph), or manu
 ```bash
 curl -X POST http://localhost:3000/api/graph/sync/<topicId>
 ```
+
+**Q: Cover image generation fails**
+
+Ensure the Z-Image service is running and accessible (default `http://127.0.0.1:8000`). The image generation step is automatically skipped when the service is unavailable.
 
 ---
 
